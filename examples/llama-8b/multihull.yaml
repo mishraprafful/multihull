@@ -1,0 +1,46 @@
+apiVersion: multihull/v1
+name: llama-8b
+
+container:
+  image: ghcr.io/acme/vllm-llama:1.4.0        # or build: {context: ., target: docker|cog}
+  command: ["vllm", "serve", "meta-llama/Llama-3.1-8B-Instruct"]
+  port: 8000
+  health: {path: /health, initialDelaySeconds: 120}
+  env: {VLLM_LOGGING_LEVEL: INFO}
+  secrets: [hf-token]                          # names only, resolved per provider
+
+resources:
+  gpu: [L4, A10G, A100-40]                     # any-of, in order of preference
+  gpuCount: 1
+  memory: 32Gi
+
+scaling:
+  concurrency: 32
+  replicas: {min: 1, max: 8}
+
+reliability:                                   # principle 1, defaults shown
+  minWarmProviders: 2
+  overprovision: 1.4
+  fallbackScaleToZero: false
+  spot: false
+
+targets:
+  - provider: gke-prod        # primary
+    type: kubernetes
+    priority: 1
+    replicas: {min: 2}
+    kubernetes: {context: gke_acme_europe-west4_prod, namespace: inference}
+  - provider: modal-main      # secondary, warm
+    type: modal
+    priority: 2
+    modal: {environment: main, region: eu}
+  - provider: runpod-eu       # tertiary, warm (fallbackScaleToZero: false)
+    type: runpod
+    priority: 3
+    runpod: {dataCenters: [EU-RO-1, EU-SE-1]}
+
+route:
+  hostname: llama.api.acme.com
+  protocol: openai            # enables model-name routing, SSE handling
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}
+  auth: {apiKeys: {from: env:LLAMA_API_KEYS}}
