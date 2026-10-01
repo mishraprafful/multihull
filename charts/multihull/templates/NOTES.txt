@@ -1,0 +1,14 @@
+Multihull router deployed as {{ include "multihull.fullname" . }}-router ({{ .Values.router.replicas }} replicas).
+
+Port-forward the router:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "multihull.fullname" . }}-router 8080:{{ .Values.router.service.port }} 9090:{{ .Values.router.admin }}
+
+Inspect live endpoints via the admin listener:
+  curl http://localhost:9090/debug/endpoints
+
+Snapshot source: {{ .Values.router.snapshot.type }}
+{{- if .Values.controller.enabled }}
+Controller: enabled, streaming snapshots from {{ include "multihull.fullname" . }}-controller:{{ .Values.controller.grpcPort }}
+{{- else }}
+Controller: disabled (set controller.enabled=true and controller.stateBackend.existingSecret to run hull controller)
+{{- end }}

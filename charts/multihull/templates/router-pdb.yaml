@@ -1,0 +1,15 @@
+{{- if .Values.router.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "multihull.fullname" . }}-router
+  labels:
+    {{- include "multihull.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+spec:
+  minAvailable: {{ .Values.router.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "multihull.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: router
+{{- end }}

@@ -1,0 +1,62 @@
+router:
+  image:
+    repository: ghcr.io/mishraprafful/multihull-router
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 2
+  listen: 8080
+  admin: 9090
+  region: ""
+  snapshot:
+    type: file
+    value: /var/lib/multihull/snapshot.json
+  tls:
+    secretName: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  service:
+    type: ClusterIP
+    port: 80
+    annotations: {}
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraConfig: ""
+
+controller:
+  enabled: false
+  image:
+    repository: ghcr.io/mishraprafful/multihull
+    tag: ""
+    pullPolicy: IfNotPresent
+  stateBackend:
+    existingSecret: ""
+    key: url
+  specConfigMap: ""
+  grpcPort: 9443
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+nameOverride: ""
+fullnameOverride: ""

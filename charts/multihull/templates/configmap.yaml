@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "multihull.fullname" . }}-router
+  labels:
+    {{- include "multihull.labels" . | nindent 4 }}
+data:
+  router.toml: |
+    {{- with .Values.router.region }}
+    region = {{ . | quote }}
+    {{ end }}
+    [listener]
+    addr = "0.0.0.0:{{ .Values.router.listen }}"
+
+    [admin]
+    addr = "0.0.0.0:{{ .Values.router.admin }}"
+
+    [snapshot]
+    source = {{ .Values.router.snapshot.type | quote }}
+    {{- if eq .Values.router.snapshot.type "file" }}
+    path = {{ .Values.router.snapshot.value | quote }}
+    {{- else if eq .Values.router.snapshot.type "http" }}
+    url = {{ .Values.router.snapshot.value | quote }}
+    {{- else if eq .Values.router.snapshot.type "grpc" }}
+    {{- if and .Values.controller.enabled (not .Values.router.snapshot.value) }}
+    addr = {{ printf "%s-controller:%v" (include "multihull.fullname" .) .Values.controller.grpcPort | quote }}
+    {{- else }}
+    addr = {{ .Values.router.snapshot.value | quote }}
+    {{- end }}
+    {{- end }}
+    {{- if .Values.router.tls.secretName }}
+
+    [tls]
+    cert = "/etc/multihull/tls/tls.crt"
+    key = "/etc/multihull/tls/tls.key"
+    {{- end }}
+    {{- with .Values.router.extraConfig }}
+
+    {{ . | indent 4 | trim }}
+    {{- end }}
