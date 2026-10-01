@@ -55,4 +55,4 @@ Rules for entries
 
 ### 2026-09-29
 - Landscape research: no adopted project does multi-provider hot deployment plus request-level failover. Closest is SkyServe. Sources cited in the plan's Context.
-- Name availability checked for 23 candidates. Results in the plan's last section.
+- Name availability checked for 23 candidates; Multihull was the only one free on PyPI, crates.io and GitHub.

@@ -320,9 +320,3 @@ multihull/
 - `cd website && npm install && npm run build` succeeds; `npm run dev` renders landing page and design docs.
 - `cargo check` in `router/` once rustup is installed.
 - `git log --oneline` shows one commit per area with Conventional Commits messages.
-
-## Name candidates checked
-
-All 17 bare names (Gridline, Spindle, Manifold, Kiln, Meridian, Lattice, Aero, Quorum, Tessera, Skyhook, Rotor, Gimbal, Outrigger, Ballast, Halyard, Spillway, Slipstream) are taken on PyPI and as GitHub users. Only Outrigger is free on crates.io. GitHub repo-name collisions: Outrigger 70, Spillway 89, Halyard 209, Gridline 255, Skyhook 352, Ballast 638, Slipstream 837, Spindle 1096, Gimbal 1976, others above 1800.
-
-Second round (checked 2026-10-01): Multihull free on PyPI, crates.io and GitHub; Trimaran, Hot Spare, Even Keel, Sheet Anchor, Crossbrace, Gunwale free on PyPI and crates.io only. Multihull chosen.
