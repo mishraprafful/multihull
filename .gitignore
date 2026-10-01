@@ -1,0 +1,10 @@
+.outrigger/
+.venv/
+__pycache__/
+*.pyc
+target/
+node_modules/
+dist/
+.DS_Store
+.env
+.env.*
