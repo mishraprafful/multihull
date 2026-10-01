@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+package multihull.discovery.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service Discovery {
+  rpc Stream(stream RouterMessage) returns (stream ControlMessage);
+}
+
+message RouterMessage {
+  oneof message {
+    Hello hello = 1;
+    Ack ack = 2;
+    Nack nack = 3;
+    Degraded degraded = 4;
+  }
+}
+
+message ControlMessage {
+  oneof message {
+    Snapshot snapshot = 1;
+  }
+}
+
+message Hello {
+  string node_id = 1;
+  uint64 last_version = 2;
+}
+
+message Ack {
+  uint64 version = 1;
+}
+
+message Nack {
+  uint64 version = 1;
+  string reason = 2;
+}
+
+message Degraded {
+  string service = 1;
+  string provider = 2;
+  DegradedReason reason = 3;
+  uint32 observed_concurrency = 4;
+}
+
+enum DegradedReason {
+  DEGRADED_REASON_UNSPECIFIED = 0;
+  DEGRADED_REASON_QUEUE_DEPTH = 1;
+  DEGRADED_REASON_TTFT_P95 = 2;
+  DEGRADED_REASON_CAPACITY_ERRORS = 3;
+}
+
+message Snapshot {
+  uint64 version = 1;
+  google.protobuf.Timestamp at = 2;
+  repeated Route routes = 3;
+}
+
+message Route {
+  string id = 1;
+  string hostname = 2;
+  string path_prefix = 3;
+  Protocol protocol = 4;
+  Failover failover = 5;
+  Auth auth = 6;
+  Sticky sticky = 7;
+  repeated Endpoint endpoints = 8;
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_HTTP = 1;
+  PROTOCOL_SSE = 2;
+  PROTOCOL_WEBSOCKET = 3;
+  PROTOCOL_GRPC = 4;
+}
+
+message Failover {
+  FailoverPolicy policy = 1;
+  repeated string retry_on = 2;
+  uint32 max_retries = 3;
+}
+
+enum FailoverPolicy {
+  FAILOVER_POLICY_UNSPECIFIED = 0;
+  FAILOVER_POLICY_PRIORITY = 1;
+  FAILOVER_POLICY_WEIGHTED = 2;
+  FAILOVER_POLICY_LATENCY = 3;
+}
+
+message Auth {
+  repeated string api_key_hashes = 1;
+}
+
+message Sticky {
+  string key = 1;
+  uint64 ttl_seconds = 2;
+  StickyMode mode = 3;
+  StickyOnUnhealthy on_unhealthy = 4;
+  string fallback_key = 5;
+}
+
+enum StickyMode {
+  STICKY_MODE_UNSPECIFIED = 0;
+  STICKY_MODE_ENDPOINT = 1;
+  STICKY_MODE_PROVIDER = 2;
+}
+
+enum StickyOnUnhealthy {
+  STICKY_ON_UNHEALTHY_UNSPECIFIED = 0;
+  STICKY_ON_UNHEALTHY_REHOME = 1;
+  STICKY_ON_UNHEALTHY_FAIL = 2;
+}
+
+message Endpoint {
+  string id = 1;
+  string provider = 2;
+  EndpointType type = 3;
+  string url = 4;
+  string region = 5;
+  uint32 priority = 6;
+  uint32 weight = 7;
+  Health health = 8;
+  uint32 ready_replicas = 9;
+  uint32 max_concurrency = 10;
+  map<string, string> inject_headers = 11;
+}
+
+enum EndpointType {
+  ENDPOINT_TYPE_UNSPECIFIED = 0;
+  ENDPOINT_TYPE_KUBERNETES = 1;
+  ENDPOINT_TYPE_MODAL = 2;
+  ENDPOINT_TYPE_RUNPOD = 3;
+  ENDPOINT_TYPE_BASETEN = 4;
+  ENDPOINT_TYPE_REPLICATE = 5;
+}
+
+enum Health {
+  HEALTH_UNSPECIFIED = 0;
+  HEALTH_READY = 1;
+  HEALTH_DEGRADED = 2;
+  HEALTH_DRAINING = 3;
+  HEALTH_DOWN = 4;
+}
