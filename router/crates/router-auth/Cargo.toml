@@ -1,0 +1,12 @@
+[package]
+name = "router-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "API key parsing, hashing and rate limiting for the Multihull router."
+publish = false
+
+[dependencies]
+blake3 = { workspace = true }
+thiserror = { workspace = true }

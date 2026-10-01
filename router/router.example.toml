@@ -1,0 +1,22 @@
+listen = "0.0.0.0:8080"
+admin_listen = "127.0.0.1:9090"
+region = "eu"
+node_id = "router-eu-1"
+max_buffered_body_bytes = 1048576
+
+[snapshot]
+source = "file://./snapshot.json"
+
+[tls]
+cert = "/etc/multihull/tls/tls.crt"
+key = "/etc/multihull/tls/tls.key"
+
+[timeouts]
+connect = 2
+first_byte = 30
+idle = 60
+total = 600
+
+[log]
+format = "json"
+filter = "info,router_proxy=debug"

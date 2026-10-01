@@ -1,0 +1,13 @@
+[package]
+name = "router-obs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Metric names and tracing setup for the Multihull router."
+publish = false
+
+[dependencies]
+metrics = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
