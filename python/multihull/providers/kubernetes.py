@@ -362,9 +362,13 @@ def gpu_offers_from_nodes(nodes: list[dict[str, Any]]) -> list[GPUOffer]:
 class KubernetesProvider:
     type: ClassVar = "kubernetes"
 
-    def __init__(self, client: KubeClient | None = None, context: str | None = None) -> None:
+    def __init__(
+        self, client: KubeClient | None = None, context: str | None = None, connect: bool = False
+    ) -> None:
         self.client = client
         self.context = context
+        if connect and self.client is None:
+            self.client = DynamicKubeClient.from_context(context)
 
     @classmethod
     def connect(cls, context: str | None) -> KubernetesProvider:

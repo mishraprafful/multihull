@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -10,9 +11,10 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
+from multihull import deploy as deploymod
 from multihull import discovery, engine
 from multihull import spec as specmod
-from multihull.providers import create
+from multihull.durations import parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
 from multihull.state import LocalState
 
@@ -28,6 +30,11 @@ SpecArg = Annotated[Path, typer.Argument(help="Path to multihull.yaml")]
 DEFAULT_SPEC = Path("multihull.yaml")
 DEFAULT_STATE = Path(".multihull/state.db")
 DEFAULT_IMAGE = "ghcr.io/ORG/IMAGE:TAG"
+StateOpt = Annotated[Path, typer.Option("--state", help="State database")]
+SnapshotOutOpt = Annotated[Path, typer.Option("--snapshot-out", help="Snapshot file to write")]
+TargetOpt = Annotated[
+    list[str] | None, typer.Option("--target", help="Limit to this target (repeatable)")
+]
 
 
 def load_or_exit(path: Path) -> specmod.ServiceSpec:
@@ -41,11 +48,32 @@ def load_or_exit(path: Path) -> specmod.ServiceSpec:
         raise typer.Exit(1) from None
 
 
-def provider_for(target: specmod.TargetSpec) -> Provider:
-    if target.type == "kubernetes":
-        context = target.kubernetes.context if target.kubernetes else None
-        return create("kubernetes", context=context)
-    return create(target.type)
+def provider_for(target: specmod.TargetSpec, live: bool = False) -> Provider:
+    return engine.provider_for(target, live)
+
+
+def providers_for(service: specmod.ServiceSpec, live: bool) -> dict[str, Provider]:
+    providers: dict[str, Provider] = {}
+    for target in service.targets:
+        try:
+            providers[target.provider] = provider_for(target, live)
+        except Exception as exc:
+            errors.print(f"[red]{target.provider}: cannot connect to {target.type}: {exc}[/red]")
+            raise typer.Exit(1) from None
+    return providers
+
+
+def duration_or_exit(text: str, option: str) -> timedelta:
+    try:
+        return parse_duration(text)
+    except ValueError as exc:
+        errors.print(f"[red]{option}: {exc}[/red]")
+        raise typer.Exit(2) from None
+
+
+def unknown_targets(service: specmod.ServiceSpec, targets: list[str] | None) -> list[str]:
+    known = {t.provider for t in service.targets}
+    return [t for t in targets or [] if t not in known]
 
 
 def default_spec(name: str, has_dockerfile: bool) -> dict:
@@ -141,7 +169,7 @@ def plan(
     out: Annotated[
         Path, typer.Option(help="Directory for rendered payloads")
     ] = engine.DEFAULT_PLAN_DIR,
-    state_path: Annotated[Path, typer.Option("--state", help="State database")] = DEFAULT_STATE,
+    state_path: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
     state = LocalState(state_path)
@@ -165,14 +193,20 @@ def plan(
 
 
 def colour_change(change: str) -> str:
-    colours = {"new": "green", "changed": "yellow", "unchanged": "dim", "orphaned": "red"}
+    colours = {
+        "new": "green",
+        "changed": "yellow",
+        "unchanged": "dim",
+        "orphaned": "red",
+        "skipped": "dim",
+    }
     return f"[{colours[change]}]{change}[/{colours[change]}]"
 
 
 @app.command()
 def status(
     path: SpecArg = DEFAULT_SPEC,
-    state_path: Annotated[Path, typer.Option("--state", help="State database")] = DEFAULT_STATE,
+    state_path: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
     state = LocalState(state_path)
@@ -199,14 +233,120 @@ def status(
 
 
 @app.command()
-def snapshot(
+def deploy(
     path: SpecArg = DEFAULT_SPEC,
-    out: Annotated[Path, typer.Option(help="Snapshot file")] = Path("snapshot.json"),
-    state_path: Annotated[Path, typer.Option("--state", help="State database")] = DEFAULT_STATE,
+    apply: Annotated[
+        bool, typer.Option("--apply/--dry-run", help="Perform real provider calls")
+    ] = False,
+    target: TargetOpt = None,
+    wait: Annotated[bool, typer.Option(help="Wait for every target to report Ready")] = True,
+    timeout: Annotated[
+        str | None, typer.Option(help="Readiness timeout per target, e.g. 15m")
+    ] = None,
+    snapshot_out: SnapshotOutOpt = deploymod.DEFAULT_SNAPSHOT_PATH,
+    state_path: StateOpt = DEFAULT_STATE,
+    image_digest: Annotated[str | None, typer.Option(help="Pin the image to this digest")] = None,
+) -> None:
+    service = load_or_exit(path)
+    unknown = unknown_targets(service, target)
+    if unknown:
+        errors.print(f"[red]unknown targets: {', '.join(unknown)}[/red]")
+        raise typer.Exit(2)
+    ready_timeout = duration_or_exit(timeout, "--timeout") if timeout else None
+    state = LocalState(state_path)
+    report = deploymod.deploy(
+        service,
+        state,
+        providers_for(service, live=apply),
+        dry_run=not apply,
+        only=set(target) if target else None,
+        wait=wait,
+        timeout=ready_timeout,
+        snapshot_out=snapshot_out,
+        image_digest=image_digest,
+    )
+    mode = "dry run" if report.dry_run else "apply"
+    table = Table(title=f"deploy {service.name} ({mode})")
+    table.add_column("provider")
+    table.add_column("type")
+    table.add_column("change")
+    table.add_column("result")
+    table.add_column("replicas")
+    table.add_column("url")
+    table.add_column("message")
+    for outcome in report.outcomes:
+        table.add_row(
+            outcome.provider,
+            outcome.type,
+            colour_change(outcome.change),
+            colour_result(outcome.ok, "planned" if report.dry_run else outcome.phase),
+            "" if report.dry_run else f"{outcome.ready_replicas}/{outcome.desired_replicas}",
+            outcome.url or "",
+            outcome.message,
+        )
+    console.print(table)
+    if report.snapshot_path is not None:
+        console.print(f"wrote {report.snapshot_path}")
+    if report.dry_run:
+        console.print("dry run; pass --apply to deploy")
+    if not report.ok:
+        failed = ", ".join(o.provider for o in report.failed)
+        errors.print(f"[red]{len(report.failed)} target(s) failed: {failed}[/red]")
+        raise typer.Exit(1)
+
+
+def colour_result(ok: bool, phase: str) -> str:
+    colour = "green" if ok else "red"
+    return f"[{colour}]{phase}[/{colour}]"
+
+
+@app.command()
+def destroy(
+    path: SpecArg = DEFAULT_SPEC,
+    target: TargetOpt = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    snapshot_out: SnapshotOutOpt = deploymod.DEFAULT_SNAPSHOT_PATH,
+    state_path: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
     state = LocalState(state_path)
-    providers = {t.provider: provider_for(t) for t in service.targets}
+    records = [r for r in state.list(service.name) if not target or r.provider in target]
+    if not records:
+        console.print(f"nothing to destroy for {service.name}")
+        return
+    names = ", ".join(r.provider for r in records)
+    if not yes and not typer.confirm(f"destroy {service.name} on {names}?"):
+        raise typer.Exit(1)
+    providers = providers_for(service, live=True)
+    results = engine.destroy(service.name, state, providers, only=set(target) if target else None)
+    table = Table(title=f"destroy {service.name}")
+    table.add_column("provider")
+    table.add_column("type")
+    table.add_column("result")
+    table.add_column("message")
+    for result in results:
+        table.add_row(
+            result.provider,
+            result.type,
+            colour_result(result.ok, "destroyed" if result.ok else "failed"),
+            result.message,
+        )
+    console.print(table)
+    document = discovery.build_snapshot(service, state, providers)
+    console.print(f"wrote {discovery.write_snapshot(document, snapshot_out)}")
+    if not all(r.ok for r in results):
+        raise typer.Exit(1)
+
+
+@app.command()
+def snapshot(
+    path: SpecArg = DEFAULT_SPEC,
+    out: Annotated[Path, typer.Option(help="Snapshot file")] = Path("snapshot.json"),
+    state_path: StateOpt = DEFAULT_STATE,
+) -> None:
+    service = load_or_exit(path)
+    state = LocalState(state_path)
+    providers = providers_for(service, live=False)
     document = discovery.build_snapshot(service, state, providers)
     discovery.write_snapshot(document, out)
     endpoints = sum(len(route["endpoints"]) for route in document["routes"])

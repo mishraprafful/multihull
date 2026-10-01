@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,13 +11,15 @@ from typing import Any, Literal
 import yaml
 
 from multihull.providers import create
-from multihull.providers.base import Plan, Provider, Ref, Target
+from multihull.providers.base import Observed, Plan, Provider, Ref, Target
 from multihull.spec import ServiceSpec, TargetSpec
 from multihull.state.base import StateBackend, StateRecord
 
-Change = Literal["new", "changed", "unchanged", "orphaned"]
+Change = Literal["new", "changed", "unchanged", "orphaned", "skipped"]
 ProviderFactory = Callable[[TargetSpec], Provider]
+RefProviderFactory = Callable[[Ref], Provider]
 DEFAULT_PLAN_DIR = Path(".multihull/plan")
+APPLIED_CHANGES = {"new", "changed", "unchanged"}
 
 
 @dataclass
@@ -40,8 +42,50 @@ class ApplyResult:
     message: str = ""
 
 
+@dataclass
+class DestroyResult:
+    provider: str
+    type: str
+    ok: bool
+    message: str = ""
+
+
+@dataclass
+class RefreshResult:
+    provider: str
+    type: str
+    ref: Ref
+    observed: Observed
+    changed: bool
+
+
+def provider_kwargs(target: TargetSpec, live: bool) -> dict[str, Any]:
+    if target.type == "kubernetes":
+        context = target.kubernetes.context if target.kubernetes else None
+        return {"context": context, "connect": live}
+    if target.type == "modal":
+        return {"dry_run": not live}
+    return {}
+
+
+def provider_for(target: TargetSpec, live: bool = False) -> Provider:
+    return create(target.type, **provider_kwargs(target, live))
+
+
+def live_provider_for(target: TargetSpec) -> Provider:
+    return provider_for(target, live=True)
+
+
 def default_factory(target: TargetSpec) -> Provider:
-    return create(target.type)
+    return provider_for(target, live=False)
+
+
+def provider_for_ref(ref: Ref) -> Provider:
+    if ref.type == "kubernetes":
+        return create("kubernetes", context=ref.ids.get("context"), connect=True)
+    if ref.type == "modal":
+        return create("modal", dry_run=False)
+    return create(ref.type)
 
 
 def resolve_providers(
@@ -97,6 +141,7 @@ def apply(
     factory: ProviderFactory = default_factory,
     image_digest: str | None = None,
     max_workers: int = 8,
+    only: Collection[str] | None = None,
 ) -> list[ApplyResult]:
     resolved = resolve_providers(spec, providers, factory)
     plans = plan(spec, state, resolved, factory, image_digest)
@@ -111,6 +156,15 @@ def apply(
                 True,
                 target_plan.ref,
                 "not in spec; run destroy to remove",
+            )
+        if only is not None and target_plan.provider not in only:
+            return ApplyResult(
+                target_plan.provider,
+                target_plan.type,
+                "skipped",
+                True,
+                target_plan.ref,
+                "not selected",
             )
         if dry_run:
             return ApplyResult(
@@ -137,7 +191,7 @@ def apply(
     if not dry_run:
         with state.lock():
             for result, target_plan in zip(results, plans, strict=True):
-                if result.ok and result.ref is not None and result.change != "orphaned":
+                if result.ok and result.ref is not None and result.change in APPLIED_CHANGES:
                     state.put(
                         StateRecord(
                             service=spec.name,
@@ -171,3 +225,71 @@ def write_plan_dir(plans: list[TargetPlan], out_dir: str | Path = DEFAULT_PLAN_D
             path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n")
         written.append(path)
     return written
+
+
+def destroy(
+    service: str,
+    state: StateBackend,
+    providers: Mapping[str, Provider] | None = None,
+    factory: RefProviderFactory = provider_for_ref,
+    only: Collection[str] | None = None,
+    max_workers: int = 8,
+) -> list[DestroyResult]:
+    records = [r for r in state.list(service) if only is None or r.provider in only]
+
+    def run(record: StateRecord) -> DestroyResult:
+        ref = Ref.from_json(record.ref)
+        try:
+            provider = (
+                providers[record.provider]
+                if providers is not None and record.provider in providers
+                else factory(ref)
+            )
+            provider.destroy(ref)
+        except Exception as exc:
+            return DestroyResult(record.provider, ref.type, False, str(exc))
+        return DestroyResult(record.provider, ref.type, True, "destroyed")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(run, records))
+
+    with state.lock():
+        for result in results:
+            if result.ok:
+                state.delete(service, result.provider)
+    return results
+
+
+def refresh(
+    service: str,
+    state: StateBackend,
+    providers: Mapping[str, Provider] | None = None,
+    factory: RefProviderFactory = provider_for_ref,
+    max_workers: int = 8,
+) -> list[RefreshResult]:
+    records = state.list(service)
+
+    def run(record: StateRecord) -> RefreshResult:
+        ref = Ref.from_json(record.ref)
+        try:
+            provider = (
+                providers[record.provider]
+                if providers is not None and record.provider in providers
+                else factory(ref)
+            )
+            observed = provider.status(ref)
+        except Exception as exc:
+            observed = Observed(phase="Unknown", message=str(exc))
+        return RefreshResult(
+            record.provider, ref.type, ref, observed, observed.phase != record.last_status
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(run, records))
+
+    with state.lock():
+        for record, result in zip(records, results, strict=True):
+            if result.changed:
+                record.last_status = result.observed.phase
+                state.put(record)
+    return results
