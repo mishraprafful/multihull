@@ -1,5 +1,5 @@
 use dashmap::DashMap;
-use router_core::circuit::{Circuit, State};
+use router_core::circuit::{Circuit, CircuitConfig, ProviderCircuit, State};
 use router_core::limit::{Gradient2, Gradient2Config};
 use router_core::outcome::Outcome;
 use router_core::retry::RetryBudget;
@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 pub struct EndpointRuntime {
     pub id: EndpointId,
+    pub provider: String,
     circuit: Mutex<Circuit>,
     limiter: Mutex<Gradient2>,
     outstanding: AtomicU32,
@@ -21,10 +22,11 @@ pub struct EndpointRuntime {
 }
 
 impl EndpointRuntime {
-    fn new(endpoint: &Endpoint) -> Self {
+    fn new(endpoint: &Endpoint, circuit: CircuitConfig) -> Self {
         Self {
             id: endpoint.id.clone(),
-            circuit: Mutex::new(Circuit::default()),
+            provider: endpoint.provider.clone(),
+            circuit: Mutex::new(Circuit::new(circuit)),
             limiter: Mutex::new(Gradient2::new(Gradient2Config::for_max_concurrency(
                 endpoint.max_concurrency,
             ))),
@@ -105,25 +107,38 @@ pub struct SessionEntry {
     pub pin: PinEntry,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EndpointStatus {
+    pub circuit: &'static str,
+    pub provider_circuit_open: bool,
+    pub outstanding: u32,
+    pub concurrency_limit: u32,
+    pub ewma_ttft_secs: Option<f64>,
+}
+
 pub struct Runtime {
     endpoints: DashMap<EndpointId, Arc<EndpointRuntime>>,
+    providers: DashMap<String, Mutex<ProviderCircuit>>,
     budgets: DashMap<String, Mutex<RetryBudget>>,
     pins: DashMap<String, Mutex<PinTable>>,
+    circuit_config: CircuitConfig,
     started: Instant,
 }
 
 impl Default for Runtime {
     fn default() -> Self {
-        Self::new()
+        Self::new(CircuitConfig::default())
     }
 }
 
 impl Runtime {
-    pub fn new() -> Self {
+    pub fn new(circuit_config: CircuitConfig) -> Self {
         Self {
             endpoints: DashMap::new(),
+            providers: DashMap::new(),
             budgets: DashMap::new(),
             pins: DashMap::new(),
+            circuit_config,
             started: Instant::now(),
         }
     }
@@ -135,7 +150,9 @@ impl Runtime {
     pub fn endpoint(&self, endpoint: &Endpoint) -> Arc<EndpointRuntime> {
         self.endpoints
             .entry(endpoint.id.clone())
-            .or_insert_with(|| Arc::new(EndpointRuntime::new(endpoint)))
+            .or_insert_with(|| {
+                Arc::new(EndpointRuntime::new(endpoint, self.circuit_config.clone()))
+            })
             .clone()
     }
 
@@ -143,17 +160,112 @@ impl Runtime {
         self.endpoints.get(id).map(|e| e.clone())
     }
 
+    pub fn record_attempt(
+        &self,
+        endpoint: &Endpoint,
+        outcome: Outcome,
+        status: Option<u16>,
+        now: Duration,
+        rng: &mut impl Rng,
+    ) {
+        let runtime = self.endpoint(endpoint);
+        runtime.record_outcome(outcome, now, rng);
+        if endpoint.provider.is_empty() {
+            return;
+        }
+        let provider = self.provider_entry(&endpoint.provider);
+        let mut circuit = lock(&provider);
+        match (outcome, status) {
+            (_, Some(401 | 403)) => circuit.record_auth_failure(),
+            (Outcome::Success, _) => circuit.clear_auth_failure(),
+            _ => {}
+        }
+        drop(circuit);
+        self.publish_circuit_gauges(endpoint, now);
+    }
+
+    pub fn provider_open(&self, provider: &str, now: Duration) -> bool {
+        if provider.is_empty() {
+            return false;
+        }
+        let states: Vec<State> = self
+            .endpoints
+            .iter()
+            .filter(|entry| entry.value().provider == provider)
+            .map(|entry| entry.value().circuit_state(now))
+            .collect();
+        match self.providers.get(provider) {
+            Some(circuit) => lock(circuit.value()).is_open(states.iter()),
+            None => ProviderCircuit::default().is_open(states.iter()),
+        }
+    }
+
+    pub fn endpoint_circuit_open(&self, endpoint: &Endpoint, now: Duration) -> bool {
+        self.get(&endpoint.id)
+            .map(|rt| rt.circuit_state(now).is_open())
+            .unwrap_or(false)
+    }
+
+    pub fn endpoint_open(&self, endpoint: &Endpoint, now: Duration) -> bool {
+        self.endpoint_circuit_open(endpoint, now) || self.provider_open(&endpoint.provider, now)
+    }
+
     pub fn endpoint_healthy(&self, endpoint: &Endpoint, now: Duration) -> bool {
         endpoint.accepts_traffic()
+            && !self.endpoint_open(endpoint, now)
             && self
                 .get(&endpoint.id)
-                .map(|rt| !rt.circuit_state(now).is_open() && rt.has_headroom())
+                .map(|rt| rt.has_headroom())
                 .unwrap_or(true)
+    }
+
+    pub fn status(&self, endpoint: &Endpoint) -> Option<EndpointStatus> {
+        let runtime = self.get(&endpoint.id)?;
+        let now = self.now();
+        Some(EndpointStatus {
+            circuit: runtime.circuit_state(now).label(),
+            provider_circuit_open: self.provider_open(&endpoint.provider, now),
+            outstanding: runtime.outstanding(),
+            concurrency_limit: runtime.limit(),
+            ewma_ttft_secs: runtime.ewma_ttft_secs(),
+        })
+    }
+
+    fn publish_circuit_gauges(&self, endpoint: &Endpoint, now: Duration) {
+        if let Some(runtime) = self.get(&endpoint.id) {
+            metrics::gauge!(
+                router_obs::metrics::CIRCUIT_STATE,
+                router_obs::metrics::labels::ENDPOINT => endpoint.id.clone(),
+                router_obs::metrics::labels::PROVIDER => endpoint.provider.clone()
+            )
+            .set(runtime.circuit_state(now).gauge_value());
+            metrics::gauge!(
+                router_obs::metrics::CONCURRENCY_LIMIT,
+                router_obs::metrics::labels::ENDPOINT => endpoint.id.clone()
+            )
+            .set(f64::from(runtime.limit()));
+        }
+    }
+
+    fn provider_entry(
+        &self,
+        provider: &str,
+    ) -> dashmap::mapref::one::Ref<'_, String, Mutex<ProviderCircuit>> {
+        self.providers
+            .entry(provider.to_string())
+            .or_insert_with(|| Mutex::new(ProviderCircuit::default()))
+            .downgrade()
     }
 
     pub fn retain_snapshot(&self, snapshot: &Snapshot) {
         let live: HashSet<&str> = snapshot.endpoints().map(|(_, e)| e.id.as_str()).collect();
         self.endpoints.retain(|id, _| live.contains(id.as_str()));
+        let providers: HashSet<&str> = snapshot
+            .endpoints()
+            .map(|(_, e)| e.provider.as_str())
+            .collect();
+        self.providers
+            .retain(|id, _| providers.contains(id.as_str()));
         let routes: HashSet<&str> = snapshot.routes.iter().map(|r| r.id.as_str()).collect();
         self.budgets.retain(|id, _| routes.contains(id.as_str()));
         self.pins.retain(|id, _| routes.contains(id.as_str()));
@@ -283,7 +395,9 @@ impl EndpointStateView for RuntimeView<'_> {
         }
         match self.runtime.get(id) {
             Some(endpoint) => {
-                !endpoint.circuit_state(self.now).is_open() && endpoint.has_headroom()
+                !endpoint.circuit_state(self.now).is_open()
+                    && !self.runtime.provider_open(&endpoint.provider, self.now)
+                    && endpoint.has_headroom()
             }
             None => true,
         }
@@ -332,7 +446,7 @@ mod tests {
 
     #[test]
     fn outstanding_guard_counts_in_flight() {
-        let runtime = Runtime::new();
+        let runtime = Runtime::default();
         let rt = runtime.endpoint(&endpoint("a"));
         assert_eq!(rt.outstanding(), 0);
         let guard = OutstandingGuard::acquire(rt.clone());
@@ -343,7 +457,7 @@ mod tests {
 
     #[test]
     fn retain_drops_endpoints_missing_from_snapshot() {
-        let runtime = Runtime::new();
+        let runtime = Runtime::default();
         runtime.endpoint(&endpoint("a"));
         runtime.endpoint(&endpoint("b"));
         runtime.record_request("r1");
@@ -365,7 +479,7 @@ mod tests {
 
     #[test]
     fn view_excludes_open_circuits_and_excluded_ids() {
-        let runtime = Runtime::new();
+        let runtime = Runtime::default();
         let a = runtime.endpoint(&endpoint("a"));
         runtime.endpoint(&endpoint("b"));
         let mut rng = ThreadRng;
@@ -380,8 +494,53 @@ mod tests {
     }
 
     #[test]
+    fn provider_circuit_opens_at_half_of_its_endpoints_or_on_auth_failure() {
+        let runtime = Runtime::default();
+        let a1 = Endpoint {
+            provider: "pa".into(),
+            ..endpoint("a1")
+        };
+        let a2 = Endpoint {
+            provider: "pa".into(),
+            ..endpoint("a2")
+        };
+        let b1 = Endpoint {
+            provider: "pb".into(),
+            ..endpoint("b1")
+        };
+        let mut rng = ThreadRng;
+        for e in [&a1, &a2, &b1] {
+            runtime.endpoint(e);
+        }
+        let now = runtime.now();
+        assert!(!runtime.provider_open("pa", now));
+        for _ in 0..5 {
+            runtime.record_attempt(&a1, Outcome::Transient, Some(502), now, &mut rng);
+        }
+        assert!(runtime.provider_open("pa", now));
+        assert!(!runtime.provider_open("pb", now));
+        assert!(runtime.endpoint_open(&a2, now));
+        assert!(!runtime.endpoint_healthy(&a2, now));
+        assert!(runtime.endpoint_healthy(&b1, now));
+        let excluded = HashSet::new();
+        let view = runtime.view(&excluded, None);
+        assert!(!view.available("a2"));
+        assert!(view.available("b1"));
+
+        runtime.record_attempt(&b1, Outcome::Fatal, Some(401), now, &mut rng);
+        assert!(runtime.provider_open("pb", now));
+        runtime.record_attempt(&b1, Outcome::Success, Some(200), now, &mut rng);
+        assert!(!runtime.provider_open("pb", now));
+
+        let status = runtime.status(&a1).unwrap();
+        assert_eq!(status.circuit, "open");
+        assert!(status.provider_circuit_open);
+        assert!(runtime.status(&endpoint("unknown")).is_none());
+    }
+
+    #[test]
     fn pins_are_per_route_and_listed_with_age() {
-        let runtime = Runtime::new();
+        let runtime = Runtime::default();
         let sticky = Sticky {
             key: "client-ip".into(),
             ttl_seconds: 60,
@@ -413,7 +572,7 @@ mod tests {
 
     #[test]
     fn capacity_outcome_lowers_limit() {
-        let runtime = Runtime::new();
+        let runtime = Runtime::default();
         let a = runtime.endpoint(&endpoint("a"));
         let before = a.limit();
         a.record_ttft(Duration::from_millis(10));

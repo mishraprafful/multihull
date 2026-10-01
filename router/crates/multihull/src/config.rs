@@ -93,6 +93,7 @@ impl Config {
             timeouts: self.timeouts.clone(),
             max_buffered_body_bytes: self.max_buffered_body_bytes,
             region: self.region.clone(),
+            circuit: router_core::circuit::CircuitConfig::default(),
         }
     }
 }

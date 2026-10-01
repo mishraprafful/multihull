@@ -72,6 +72,11 @@ pub struct EndpointView {
     pub health: Health,
     pub ready_replicas: u32,
     pub max_concurrency: u32,
+    pub circuit: Option<&'static str>,
+    pub provider_circuit_open: Option<bool>,
+    pub outstanding: Option<u32>,
+    pub concurrency_limit: Option<u32>,
+    pub ewma_ttft_seconds: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -80,22 +85,30 @@ pub struct EndpointsView {
     pub endpoints: Vec<EndpointView>,
 }
 
-pub fn endpoints_view(snapshot: &Snapshot) -> EndpointsView {
+pub fn endpoints_view(snapshot: &Snapshot, proxy: Option<&ProxyState>) -> EndpointsView {
     EndpointsView {
         snapshot_version: snapshot.version,
         endpoints: snapshot
             .endpoints()
-            .map(|(route, endpoint)| EndpointView {
-                route: route.id.clone(),
-                id: endpoint.id.clone(),
-                provider: endpoint.provider.clone(),
-                url: endpoint.url.clone(),
-                region: endpoint.region.clone(),
-                priority: endpoint.priority,
-                weight: endpoint.weight,
-                health: endpoint.health,
-                ready_replicas: endpoint.ready_replicas,
-                max_concurrency: endpoint.max_concurrency,
+            .map(|(route, endpoint)| {
+                let status = proxy.and_then(|proxy| proxy.runtime.status(endpoint));
+                EndpointView {
+                    route: route.id.clone(),
+                    id: endpoint.id.clone(),
+                    provider: endpoint.provider.clone(),
+                    url: endpoint.url.clone(),
+                    region: endpoint.region.clone(),
+                    priority: endpoint.priority,
+                    weight: endpoint.weight,
+                    health: endpoint.health,
+                    ready_replicas: endpoint.ready_replicas,
+                    max_concurrency: endpoint.max_concurrency,
+                    circuit: status.as_ref().map(|s| s.circuit),
+                    provider_circuit_open: status.as_ref().map(|s| s.provider_circuit_open),
+                    outstanding: status.as_ref().map(|s| s.outstanding),
+                    concurrency_limit: status.as_ref().map(|s| s.concurrency_limit),
+                    ewma_ttft_seconds: status.as_ref().and_then(|s| s.ewma_ttft_secs),
+                }
             })
             .collect(),
     }
@@ -103,7 +116,7 @@ pub fn endpoints_view(snapshot: &Snapshot) -> EndpointsView {
 
 async fn debug_endpoints(State(state): State<AdminState>) -> Json<EndpointsView> {
     let snapshot = state.snapshot.load();
-    Json(endpoints_view(&snapshot))
+    Json(endpoints_view(&snapshot, state.proxy.as_deref()))
 }
 
 #[derive(Serialize)]
@@ -221,6 +234,53 @@ mod tests {
         assert_eq!(parsed["endpoints"].as_array().unwrap().len(), 2);
         assert_eq!(parsed["endpoints"][1]["health"], "degraded");
         assert_eq!(parsed["endpoints"][0]["provider"], "gke-prod");
+    }
+
+    #[tokio::test]
+    async fn debug_endpoints_exposes_circuit_state_from_the_proxy_runtime() {
+        let (_, body) = get_body("/debug/endpoints").await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(parsed["endpoints"][0]["circuit"].is_null());
+
+        let base = state();
+        let snapshot = base.snapshot.clone();
+        let proxy = ProxyState::new(router_proxy::ProxyConfig::default(), snapshot.clone());
+        let loaded = snapshot.load();
+        let gke = loaded.find_endpoint("gke").unwrap();
+        let modal = loaded.find_endpoint("modal").unwrap();
+        let mut rng = router_core::rng::ZeroRng;
+        proxy.runtime.endpoint(modal);
+        for _ in 0..5 {
+            proxy.runtime.record_attempt(
+                gke,
+                router_core::Outcome::Transient,
+                Some(502),
+                proxy.runtime.now(),
+                &mut rng,
+            );
+        }
+        let response = router(base.with_proxy(proxy))
+            .oneshot(
+                Request::builder()
+                    .uri("/debug/endpoints")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["endpoints"][0]["circuit"], "open");
+        assert_eq!(parsed["endpoints"][0]["provider_circuit_open"], true);
+        assert_eq!(parsed["endpoints"][0]["outstanding"], 0);
+        assert_eq!(parsed["endpoints"][1]["circuit"], "closed");
+        assert_eq!(parsed["endpoints"][1]["provider_circuit_open"], false);
+        assert!(
+            parsed["endpoints"][1]["concurrency_limit"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
     }
 
     #[tokio::test]

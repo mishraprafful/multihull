@@ -1,3 +1,4 @@
+use router_core::circuit::CircuitConfig;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -26,13 +27,14 @@ impl Default for PhaseTimeouts {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProxyConfig {
     pub listen: SocketAddr,
     pub timeouts: PhaseTimeouts,
     pub max_buffered_body_bytes: usize,
     pub region: Option<String>,
+    pub circuit: CircuitConfig,
 }
 
 impl Default for ProxyConfig {
@@ -44,6 +46,7 @@ impl Default for ProxyConfig {
             timeouts: PhaseTimeouts::default(),
             max_buffered_body_bytes: 1024 * 1024,
             region: None,
+            circuit: CircuitConfig::default(),
         }
     }
 }

@@ -131,7 +131,9 @@ async fn proxy(
         if attempt.response.is_some() {
             runtime.record_ttft(attempt.ttft);
         }
-        runtime.record_outcome(outcome, now, &mut rng);
+        state
+            .runtime
+            .record_attempt(&endpoint, outcome, attempt.status(), now, &mut rng);
         metrics::counter!(
             router_obs::metrics::REQUESTS_TOTAL,
             router_obs::metrics::labels::ROUTE => route.id.clone(),
@@ -456,25 +458,22 @@ fn pick_endpoint(
         return None;
     }
     let now = state.runtime.now();
-    let routable = apply_panic_threshold(
-        &eligible,
-        |e| {
-            state
-                .runtime
-                .get(&e.id)
-                .map(|rt| rt.circuit_state(now).is_open())
-                .unwrap_or(false)
-        },
-        PANIC_THRESHOLD,
-    );
-    let panic_mode = routable.len() == eligible.len()
-        && eligible.iter().any(|e| {
-            state
-                .runtime
-                .get(&e.id)
-                .map(|rt| rt.circuit_state(now).is_open())
-                .unwrap_or(false)
-        });
+    let circuit_open = |e: &&Endpoint| state.runtime.endpoint_circuit_open(e, now);
+    let routable: Vec<&Endpoint> = apply_panic_threshold(&eligible, circuit_open, PANIC_THRESHOLD)
+        .into_iter()
+        .copied()
+        .collect();
+    let panic_mode = routable.len() == eligible.len() && eligible.iter().any(circuit_open);
+    let provider_closed: Vec<&Endpoint> = routable
+        .iter()
+        .copied()
+        .filter(|e| !state.runtime.provider_open(&e.provider, now))
+        .collect();
+    let routable = if provider_closed.is_empty() {
+        routable
+    } else {
+        provider_closed
+    };
     let candidates: Vec<Candidate> = routable
         .iter()
         .map(|e| {

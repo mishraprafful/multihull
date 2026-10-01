@@ -19,11 +19,12 @@ impl ProxyState {
     pub fn new(config: ProxyConfig, snapshot: Arc<ArcSwap<Snapshot>>) -> Arc<Self> {
         let table = RouteTable::build(&snapshot.load());
         let client = build_client(config.timeouts.connect);
+        let runtime = Runtime::new(config.circuit.clone());
         Arc::new(Self {
             config,
             snapshot,
             table: ArcSwap::from_pointee(table),
-            runtime: Runtime::new(),
+            runtime,
             client,
         })
     }
