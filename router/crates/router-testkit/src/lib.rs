@@ -1,10 +1,10 @@
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
 use hyper::body::{Frame, Incoming};
-use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
+use tokio_rustls::TlsAcceptor;
 use tokio_stream::wrappers::ReceiverStream;
 
 #[derive(Clone, Debug)]
@@ -66,6 +67,7 @@ impl MockUpstreamConfig {
 
 pub struct MockUpstream {
     addr: SocketAddr,
+    tls: bool,
     requests: Arc<AtomicUsize>,
     config_tx: watch::Sender<MockUpstreamConfig>,
     shutdown_tx: Option<watch::Sender<bool>>,
@@ -73,12 +75,30 @@ pub struct MockUpstream {
 
 impl MockUpstream {
     pub async fn start(config: MockUpstreamConfig) -> std::io::Result<Self> {
+        Self::start_with_tls(config, None).await
+    }
+
+    pub async fn start_tls(
+        config: MockUpstreamConfig,
+        cert_pem: &[u8],
+        key_pem: &[u8],
+    ) -> std::io::Result<Self> {
+        let server_config = router_tls::server_config_from_pem(cert_pem, key_pem)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        Self::start_with_tls(config, Some(TlsAcceptor::from(Arc::new(server_config)))).await
+    }
+
+    async fn start_with_tls(
+        config: MockUpstreamConfig,
+        acceptor: Option<TlsAcceptor>,
+    ) -> std::io::Result<Self> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let addr = listener.local_addr()?;
         let requests = Arc::new(AtomicUsize::new(0));
         let (config_tx, config_rx) = watch::channel(config);
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
         let counter = requests.clone();
+        let tls = acceptor.is_some();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -91,15 +111,26 @@ impl MockUpstream {
                         }
                         let config_rx = config_rx.clone();
                         let counter = counter.clone();
+                        let acceptor = acceptor.clone();
                         tokio::spawn(async move {
                             let service = service_fn(move |req| {
                                 let config = config_rx.borrow().clone();
                                 let counter = counter.clone();
                                 async move { respond(req, config, counter).await }
                             });
-                            let _ = http1::Builder::new()
-                                .serve_connection(TokioIo::new(stream), service)
-                                .await;
+                            match acceptor {
+                                Some(acceptor) => {
+                                    let Ok(stream) = acceptor.accept(stream).await else { return };
+                                    let _ = auto::Builder::new(TokioExecutor::new())
+                                        .serve_connection(TokioIo::new(stream), service)
+                                        .await;
+                                }
+                                None => {
+                                    let _ = auto::Builder::new(TokioExecutor::new())
+                                        .serve_connection(TokioIo::new(stream), service)
+                                        .await;
+                                }
+                            }
                         });
                     }
                     _ = shutdown_rx.changed() => break,
@@ -108,6 +139,7 @@ impl MockUpstream {
         });
         Ok(Self {
             addr,
+            tls,
             requests,
             config_tx,
             shutdown_tx: Some(shutdown_tx),
@@ -119,7 +151,8 @@ impl MockUpstream {
     }
 
     pub fn url(&self) -> String {
-        format!("http://{}", self.addr)
+        let scheme = if self.tls { "https" } else { "http" };
+        format!("{scheme}://localhost:{}", self.addr.port())
     }
 
     pub fn request_count(&self) -> usize {

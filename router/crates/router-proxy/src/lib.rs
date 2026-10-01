@@ -11,5 +11,5 @@ pub mod state;
 pub mod sticky;
 
 pub use config::{PhaseTimeouts, ProxyConfig};
-pub use server::serve;
+pub use server::{serve, serve_tls};
 pub use state::ProxyState;

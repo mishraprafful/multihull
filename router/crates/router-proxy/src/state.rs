@@ -1,5 +1,6 @@
 use arc_swap::ArcSwap;
 use router_core::Snapshot;
+use router_tls::TlsError;
 use std::sync::Arc;
 
 use crate::attempt::{build_client, UpstreamClient};
@@ -17,20 +18,27 @@ pub struct ProxyState {
 
 impl ProxyState {
     pub fn new(config: ProxyConfig, snapshot: Arc<ArcSwap<Snapshot>>) -> Arc<Self> {
+        Self::try_new(config, snapshot).expect("upstream tls configuration is valid")
+    }
+
+    pub fn try_new(
+        config: ProxyConfig,
+        snapshot: Arc<ArcSwap<Snapshot>>,
+    ) -> Result<Arc<Self>, TlsError> {
         let table = RouteTable::build(&snapshot.load());
-        let client = build_client(config.timeouts.connect);
+        let client = build_client(config.timeouts.connect, config.upstream_ca.as_deref())?;
         let runtime = Runtime::new(
             config.circuit.clone(),
             config.admission.clone(),
             config.pressure.clone(),
         );
-        Arc::new(Self {
+        Ok(Arc::new(Self {
             config,
             snapshot,
             table: ArcSwap::from_pointee(table),
             runtime,
             client,
-        })
+        }))
     }
 
     pub fn refresh(&self) {

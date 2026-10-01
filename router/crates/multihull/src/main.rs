@@ -8,6 +8,7 @@ use router_core::Snapshot;
 use router_cp::SnapshotSource;
 use router_obs::{TracingConfig, TracingFormat};
 use router_proxy::ProxyState;
+use router_tls::TlsReloader;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -36,19 +37,20 @@ async fn main() -> anyhow::Result<()> {
         default_filter: config.log.filter.clone(),
     });
     router_obs::metrics::describe_all();
-    if let Some(tls) = &config.tls {
-        tracing::warn!(
-            cert = %tls.cert.display(),
-            key = %tls.key.display(),
-            "tls paths configured but TLS termination is not wired yet; serving plain HTTP"
-        );
-    }
+    let tls = match &config.tls {
+        Some(tls) => Some(Arc::new(
+            TlsReloader::new(tls.cert.clone(), tls.key.clone())
+                .with_context(|| format!("loading tls cert {}", tls.cert.display()))?,
+        )),
+        None => None,
+    };
 
     let source = SnapshotSource::parse(&config.snapshot.source)?;
     let snapshot = Arc::new(ArcSwap::from_pointee(Snapshot::default()));
     let (snapshot_tx, mut snapshot_rx) = watch::channel(Arc::new(Snapshot::default()));
 
-    let proxy_state = ProxyState::new(config.proxy_config(), snapshot.clone());
+    let proxy_state = ProxyState::try_new(config.proxy_config(), snapshot.clone())
+        .context("building upstream tls client")?;
     let admin_state =
         router_admin::AdminState::new(snapshot.clone()).with_proxy(proxy_state.clone());
 
@@ -105,13 +107,30 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(config.listen)
         .await
         .with_context(|| format!("binding {}", config.listen))?;
-    tracing::info!(listen = %config.listen, admin = %config.admin_listen, source = config.snapshot.source, "multihull router started");
+    tracing::info!(
+        listen = %config.listen,
+        admin = %config.admin_listen,
+        source = config.snapshot.source,
+        tls = tls.is_some(),
+        "multihull router started"
+    );
 
-    let proxy_task = tokio::spawn(router_proxy::serve(
-        proxy_state,
-        listener,
-        shutdown_signal(),
-    ));
+    let proxy_task = match tls {
+        Some(tls) => {
+            spawn_tls_reload_on_sighup(tls.clone());
+            tokio::spawn(router_proxy::serve_tls(
+                proxy_state,
+                listener,
+                tls,
+                shutdown_signal(),
+            ))
+        }
+        None => tokio::spawn(router_proxy::serve(
+            proxy_state,
+            listener,
+            shutdown_signal(),
+        )),
+    };
 
     tokio::select! {
         result = proxy_task => result??,
@@ -127,6 +146,27 @@ async fn main() -> anyhow::Result<()> {
 }
 
 const HOUSEKEEPING_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn spawn_tls_reload_on_sighup(tls: Arc<TlsReloader>) {
+    #[cfg(unix)]
+    tokio::spawn(async move {
+        let mut hangup = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        {
+            Ok(signal) => signal,
+            Err(error) => {
+                tracing::warn!(%error, "cannot install SIGHUP handler, tls reload disabled");
+                return;
+            }
+        };
+        while hangup.recv().await.is_some() {
+            if let Err(error) = tls.reload() {
+                tracing::error!(%error, "tls reload failed, keeping previous certificate");
+            }
+        }
+    });
+    #[cfg(not(unix))]
+    drop(tls);
+}
 
 async fn shutdown_signal() {
     let ctrl_c = tokio::signal::ctrl_c();
