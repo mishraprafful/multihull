@@ -1,4 +1,4 @@
-# Outrigger
+# Multihull
 
 Deploy always-warm GPU inference containers to many providers from one YAML spec, serve them behind one URL, and fail over between providers automatically.
 
