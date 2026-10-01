@@ -1366,11 +1366,16 @@ name = "router-cp"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "bytes",
+ "http",
+ "http-body-util",
  "notify",
  "prost",
  "prost-types",
  "protoc-bin-vendored",
  "router-core",
+ "router-testkit",
+ "router-tls",
  "serde_json",
  "tempfile",
  "thiserror",

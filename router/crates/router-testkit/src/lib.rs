@@ -23,6 +23,7 @@ pub struct MockUpstreamConfig {
     pub sse_chunks: Vec<String>,
     pub sse_chunk_interval: Duration,
     pub drop_connection: bool,
+    pub etag: Option<String>,
 }
 
 impl Default for MockUpstreamConfig {
@@ -34,6 +35,7 @@ impl Default for MockUpstreamConfig {
             sse_chunks: Vec::new(),
             sse_chunk_interval: Duration::from_millis(5),
             drop_connection: false,
+            etag: None,
         }
     }
 }
@@ -63,12 +65,18 @@ impl MockUpstreamConfig {
         self.drop_connection = true;
         self
     }
+
+    pub fn with_etag(mut self, etag: impl Into<String>) -> Self {
+        self.etag = Some(etag.into());
+        self
+    }
 }
 
 pub struct MockUpstream {
     addr: SocketAddr,
     tls: bool,
     requests: Arc<AtomicUsize>,
+    not_modified: Arc<AtomicUsize>,
     config_tx: watch::Sender<MockUpstreamConfig>,
     shutdown_tx: Option<watch::Sender<bool>>,
 }
@@ -95,9 +103,11 @@ impl MockUpstream {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let addr = listener.local_addr()?;
         let requests = Arc::new(AtomicUsize::new(0));
+        let not_modified = Arc::new(AtomicUsize::new(0));
         let (config_tx, config_rx) = watch::channel(config);
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
         let counter = requests.clone();
+        let not_modified_counter = not_modified.clone();
         let tls = acceptor.is_some();
         tokio::spawn(async move {
             loop {
@@ -111,12 +121,13 @@ impl MockUpstream {
                         }
                         let config_rx = config_rx.clone();
                         let counter = counter.clone();
+                        let not_modified_counter = not_modified_counter.clone();
                         let acceptor = acceptor.clone();
                         tokio::spawn(async move {
                             let service = service_fn(move |req| {
                                 let config = config_rx.borrow().clone();
-                                let counter = counter.clone();
-                                async move { respond(req, config, counter).await }
+                                let counters = (counter.clone(), not_modified_counter.clone());
+                                async move { respond(req, config, counters).await }
                             });
                             match acceptor {
                                 Some(acceptor) => {
@@ -141,9 +152,14 @@ impl MockUpstream {
             addr,
             tls,
             requests,
+            not_modified,
             config_tx,
             shutdown_tx: Some(shutdown_tx),
         })
+    }
+
+    pub fn not_modified_count(&self) -> usize {
+        self.not_modified.load(Ordering::SeqCst)
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -173,21 +189,39 @@ impl Drop for MockUpstream {
 }
 
 async fn respond(
-    _req: Request<Incoming>,
+    req: Request<Incoming>,
     config: MockUpstreamConfig,
-    counter: Arc<AtomicUsize>,
+    (counter, not_modified): (Arc<AtomicUsize>, Arc<AtomicUsize>),
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, Infallible> {
     counter.fetch_add(1, Ordering::SeqCst);
     if config.ttft_delay > Duration::ZERO {
         tokio::time::sleep(config.ttft_delay).await;
     }
+    if let Some(etag) = &config.etag {
+        let matches = req
+            .headers()
+            .get("if-none-match")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value == etag);
+        if matches {
+            not_modified.fetch_add(1, Ordering::SeqCst);
+            let response = Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header("etag", etag)
+                .body(Full::new(Bytes::new()).boxed())
+                .expect("valid response");
+            return Ok(response);
+        }
+    }
     if config.sse_chunks.is_empty() {
         let body = Full::new(config.body).boxed();
-        let response = Response::builder()
+        let mut builder = Response::builder()
             .status(config.status)
-            .header("content-type", "application/json")
-            .body(body)
-            .expect("valid response");
+            .header("content-type", "application/json");
+        if let Some(etag) = &config.etag {
+            builder = builder.header("etag", etag);
+        }
+        let response = builder.body(body).expect("valid response");
         return Ok(response);
     }
     let (tx, rx) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(16);

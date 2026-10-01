@@ -5,10 +5,12 @@ use tokio::sync::watch;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
-    #[error("snapshot source not supported yet: {0}")]
-    Unsupported(&'static str),
     #[error("invalid snapshot source: {0}")]
     InvalidSource(String),
+    #[error("http snapshot fetch failed: {0}")]
+    Http(String),
+    #[error("tls client setup failed: {0}")]
+    Tls(#[from] router_tls::TlsError),
     #[error("io error reading {path}: {source}")]
     Io {
         path: PathBuf,
@@ -79,7 +81,10 @@ impl SnapshotSource {
         match self {
             Self::File(path) => crate::file::watch(path.clone(), tx).await,
             Self::Grpc(url) => crate::grpc::run(url.clone(), node_id, tx, degraded).await,
-            Self::Http(_) => Err(SnapshotError::Unsupported("http")),
+            Self::Http(url) => {
+                let client = crate::http::client()?;
+                crate::http::poll(url.clone(), crate::http::DEFAULT_POLL_INTERVAL, client, tx).await
+            }
         }
     }
 }
@@ -115,12 +120,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http_source_reports_unsupported() {
-        let (tx, _rx) = watch::channel(Arc::new(Snapshot::default()));
-        let err = SnapshotSource::Http("https://x".into())
-            .run("node".into(), tx, None)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, SnapshotError::Unsupported("http")));
+    async fn http_source_stops_when_the_receiver_is_dropped() {
+        let (tx, rx) = watch::channel(Arc::new(Snapshot::default()));
+        drop(rx);
+        let err = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            SnapshotSource::Http("http://127.0.0.1:1/snapshot.json".into()).run(
+                "node".into(),
+                tx,
+                None,
+            ),
+        )
+        .await
+        .expect("poll loop exits")
+        .unwrap_err();
+        assert!(matches!(err, SnapshotError::ReceiverDropped));
     }
 }
