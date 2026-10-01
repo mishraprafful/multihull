@@ -5,7 +5,8 @@ use router_core::outcome::Outcome;
 use router_core::retry::RetryBudget;
 use router_core::rng::Rng;
 use router_core::score::EndpointStateView;
-use router_core::snapshot::{Endpoint, EndpointId, Snapshot};
+use router_core::snapshot::{Endpoint, EndpointId, Snapshot, Sticky};
+use router_core::sticky::{KeyHash, PinEntry, PinTable};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -96,9 +97,18 @@ impl Drop for OutstandingGuard {
     }
 }
 
+pub const MAX_PINS_PER_ROUTE: usize = 100_000;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionEntry {
+    pub route: String,
+    pub pin: PinEntry,
+}
+
 pub struct Runtime {
     endpoints: DashMap<EndpointId, Arc<EndpointRuntime>>,
     budgets: DashMap<String, Mutex<RetryBudget>>,
+    pins: DashMap<String, Mutex<PinTable>>,
     started: Instant,
 }
 
@@ -113,6 +123,7 @@ impl Runtime {
         Self {
             endpoints: DashMap::new(),
             budgets: DashMap::new(),
+            pins: DashMap::new(),
             started: Instant::now(),
         }
     }
@@ -132,11 +143,90 @@ impl Runtime {
         self.endpoints.get(id).map(|e| e.clone())
     }
 
+    pub fn endpoint_healthy(&self, endpoint: &Endpoint, now: Duration) -> bool {
+        endpoint.accepts_traffic()
+            && self
+                .get(&endpoint.id)
+                .map(|rt| !rt.circuit_state(now).is_open() && rt.has_headroom())
+                .unwrap_or(true)
+    }
+
     pub fn retain_snapshot(&self, snapshot: &Snapshot) {
         let live: HashSet<&str> = snapshot.endpoints().map(|(_, e)| e.id.as_str()).collect();
         self.endpoints.retain(|id, _| live.contains(id.as_str()));
         let routes: HashSet<&str> = snapshot.routes.iter().map(|r| r.id.as_str()).collect();
         self.budgets.retain(|id, _| routes.contains(id.as_str()));
+        self.pins.retain(|id, _| routes.contains(id.as_str()));
+    }
+
+    pub fn pinned(&self, route_id: &str, sticky: &Sticky, key: &KeyHash) -> Option<EndpointId> {
+        let now = self.now();
+        lock(&self.pin_entry(route_id, sticky)).get(key, now)
+    }
+
+    pub fn pin(&self, route_id: &str, sticky: &Sticky, key: KeyHash, endpoint: EndpointId) {
+        let now = self.now();
+        lock(&self.pin_entry(route_id, sticky)).pin(key, endpoint, now);
+        self.publish_session_gauge();
+    }
+
+    pub fn sessions(&self) -> Vec<SessionEntry> {
+        let now = self.now();
+        let mut sessions: Vec<SessionEntry> = self
+            .pins
+            .iter()
+            .flat_map(|entry| {
+                let route = entry.key().clone();
+                lock(entry.value())
+                    .entries(now)
+                    .into_iter()
+                    .map(move |pin| SessionEntry {
+                        route: route.clone(),
+                        pin,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        sessions.sort_by(|a, b| {
+            a.route
+                .cmp(&b.route)
+                .then_with(|| a.pin.age.cmp(&b.pin.age))
+        });
+        sessions
+    }
+
+    pub fn expire_sessions(&self) -> usize {
+        let now = self.now();
+        let expired = self
+            .pins
+            .iter()
+            .map(|entry| lock(entry.value()).expire(now))
+            .sum();
+        self.publish_session_gauge();
+        expired
+    }
+
+    pub fn active_sessions(&self) -> usize {
+        self.pins
+            .iter()
+            .map(|entry| lock(entry.value()).len())
+            .sum()
+    }
+
+    fn publish_session_gauge(&self) {
+        metrics::gauge!(router_obs::metrics::STICKY_SESSIONS_ACTIVE)
+            .set(self.active_sessions() as f64);
+    }
+
+    fn pin_entry(
+        &self,
+        route_id: &str,
+        sticky: &Sticky,
+    ) -> dashmap::mapref::one::Ref<'_, String, Mutex<PinTable>> {
+        self.pins
+            .entry(route_id.to_string())
+            .or_insert_with(|| Mutex::new(PinTable::new(MAX_PINS_PER_ROUTE, sticky.ttl())))
+            .downgrade()
     }
 
     pub fn record_request(&self, route_id: &str) {
@@ -287,6 +377,38 @@ mod tests {
         assert!(!view.available("a"));
         assert!(!view.available("b"));
         assert!(view.available("unknown"));
+    }
+
+    #[test]
+    fn pins_are_per_route_and_listed_with_age() {
+        let runtime = Runtime::new();
+        let sticky = Sticky {
+            key: "client-ip".into(),
+            ttl_seconds: 60,
+            ..Default::default()
+        };
+        let key = router_core::sticky::hash_key(b"session");
+        assert_eq!(runtime.pinned("r1", &sticky, &key), None);
+        runtime.pin("r1", &sticky, key, "a".into());
+        runtime.pin("r2", &sticky, key, "b".into());
+        assert_eq!(runtime.pinned("r1", &sticky, &key).as_deref(), Some("a"));
+        assert_eq!(runtime.pinned("r2", &sticky, &key).as_deref(), Some("b"));
+        let sessions = runtime.sessions();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].route, "r1");
+        assert_eq!(sessions[0].pin.endpoint, "a");
+        assert_eq!(runtime.active_sessions(), 2);
+        assert_eq!(runtime.expire_sessions(), 0);
+        let snapshot = Snapshot {
+            version: 1,
+            at: None,
+            routes: vec![Route {
+                id: "r2".into(),
+                ..Default::default()
+            }],
+        };
+        runtime.retain_snapshot(&snapshot);
+        assert_eq!(runtime.active_sessions(), 1);
     }
 
     #[test]

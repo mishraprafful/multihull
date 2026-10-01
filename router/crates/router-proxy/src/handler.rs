@@ -1,3 +1,4 @@
+use http::header::HeaderName;
 use http::{header, HeaderValue, Method, Request, Response};
 use http_body_util::{BodyExt, Limited};
 use hyper::body::Incoming;
@@ -6,8 +7,10 @@ use router_core::circuit::{apply_panic_threshold, PANIC_THRESHOLD};
 use router_core::outcome::{classify, Outcome};
 use router_core::retry::{decide, RetryContext, RetryDecision};
 use router_core::score::{select, Candidate, Preset};
-use router_core::snapshot::{Endpoint, EndpointId, FailoverPolicy, Route};
+use router_core::snapshot::{Endpoint, EndpointId, FailoverPolicy, Health, Route, Sticky};
+use router_core::sticky::{hash_key, owner, owner_in_provider, rank, KeyHash};
 use std::collections::HashSet;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -16,9 +19,16 @@ use crate::body::{ProxyBody, TimedBody};
 use crate::error::ProxyError;
 use crate::runtime::{OutstandingGuard, ThreadRng};
 use crate::state::ProxyState;
+use crate::sticky::{
+    mint_session_id, rehomed_header, session_cookie, StickyPlan, REHOMED_HEADER, SESSION_HEADER,
+};
 
-pub async fn handle(state: Arc<ProxyState>, request: Request<Incoming>) -> Response<ProxyBody> {
-    match proxy(state, request).await {
+pub async fn handle(
+    state: Arc<ProxyState>,
+    request: Request<Incoming>,
+    peer: SocketAddr,
+) -> Response<ProxyBody> {
+    match proxy(state, request, peer).await {
         Ok(response) => response,
         Err((error, attempts)) => error.into_response(attempts),
     }
@@ -27,6 +37,7 @@ pub async fn handle(state: Arc<ProxyState>, request: Request<Incoming>) -> Respo
 async fn proxy(
     state: Arc<ProxyState>,
     request: Request<Incoming>,
+    peer: SocketAddr,
 ) -> Result<Response<ProxyBody>, (ProxyError, u32)> {
     let started = Instant::now();
     let deadline = started + state.config.timeouts.total;
@@ -68,21 +79,32 @@ async fn proxy(
     let preset = preset_for(&route);
     state.runtime.record_request(&route.id);
 
+    let mut rng = ThreadRng;
+    let mut session = resolve_session(&state, &route, &parts.headers, &body, peer.ip())
+        .map_err(|error| (error, 0))?;
+    let mut preferred = session.as_ref().and_then(|s| s.owner.clone());
+
     let mut excluded: HashSet<EndpointId> = HashSet::new();
     let mut excluded_providers: HashSet<String> = HashSet::new();
     let mut attempts: u32 = 0;
-    let mut rng = ThreadRng;
     let mut last_error = ProxyError::NoHealthyUpstream;
 
     loop {
-        let Some(endpoint) = pick_endpoint(
-            &state,
-            &route,
-            &excluded,
-            &excluded_providers,
-            preset,
-            &mut rng,
-        ) else {
+        let endpoint = preferred
+            .take()
+            .and_then(|id| take_preferred(&state, &route, &id, &mut rng))
+            .or_else(|| {
+                pick_endpoint(
+                    &state,
+                    &route,
+                    &excluded,
+                    &excluded_providers,
+                    preset,
+                    &mut rng,
+                )
+            });
+        let Some(endpoint) = endpoint else {
+            finish_session(&state, &route, session.take(), None);
             return Err((last_error, attempts));
         };
         attempts += 1;
@@ -122,8 +144,9 @@ async fn proxy(
             let response = attempt
                 .response
                 .expect("status present for success or fatal");
+            let extra = finish_session(&state, &route, session.take(), Some(&endpoint));
             return Ok(forward(
-                response, &state, &endpoint, attempts, deadline, guard,
+                response, &state, &endpoint, attempts, deadline, guard, extra,
             ));
         }
 
@@ -155,20 +178,235 @@ async fn proxy(
                 .increment(1);
                 drop(guard);
                 if Instant::now() >= deadline {
+                    finish_session(&state, &route, session.take(), None);
                     return Err((ProxyError::UpstreamTimeout, attempts));
                 }
                 continue;
             }
             RetryDecision::Stop(_) => {
                 return match attempt.response {
-                    Some(response) => Ok(forward(
-                        response, &state, &endpoint, attempts, deadline, guard,
-                    )),
-                    None => Err((last_error, attempts)),
+                    Some(response) => {
+                        let extra = finish_session(&state, &route, session.take(), Some(&endpoint));
+                        Ok(forward(
+                            response, &state, &endpoint, attempts, deadline, guard, extra,
+                        ))
+                    }
+                    None => {
+                        finish_session(&state, &route, session.take(), None);
+                        Err((last_error, attempts))
+                    }
                 };
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StickyOutcome {
+    Hit,
+    Miss,
+    Rehomed,
+    Failed,
+}
+
+impl StickyOutcome {
+    fn label(self) -> &'static str {
+        match self {
+            StickyOutcome::Hit => "hit",
+            StickyOutcome::Miss => "miss",
+            StickyOutcome::Rehomed => "rehomed",
+            StickyOutcome::Failed => "failed",
+        }
+    }
+}
+
+struct Session<'a> {
+    sticky: &'a Sticky,
+    plan: StickyPlan,
+    key_hash: KeyHash,
+    owner: Option<EndpointId>,
+    origin: Option<EndpointId>,
+    minted: Option<String>,
+    outcome: StickyOutcome,
+}
+
+fn resolve_session<'a>(
+    state: &ProxyState,
+    route: &'a Route,
+    headers: &http::HeaderMap,
+    body: &[u8],
+    peer: IpAddr,
+) -> Result<Option<Session<'a>>, ProxyError> {
+    let Some(sticky) = route.sticky.as_ref() else {
+        return Ok(None);
+    };
+    let Some(plan) = StickyPlan::parse(&sticky.key, &sticky.fallback_key) else {
+        tracing::warn!(route = %route.id, key = %sticky.key, "ignoring sticky config with invalid key");
+        return Ok(None);
+    };
+    let (key, minted) = match plan.extract(headers, body, peer) {
+        Some(key) => (key, None),
+        None => {
+            let id = mint_session_id();
+            (id.clone().into_bytes(), Some(id))
+        }
+    };
+    let key_hash = hash_key(&key);
+    if minted.is_some() {
+        return Ok(Some(Session {
+            sticky,
+            plan,
+            key_hash,
+            owner: None,
+            origin: None,
+            minted,
+            outcome: StickyOutcome::Miss,
+        }));
+    }
+
+    let now = state.runtime.now();
+    let find = |id: &str| route.endpoints.iter().find(|e| e.id == id);
+    let healthy = |e: &Endpoint| state.runtime.endpoint_healthy(e, now);
+    let pinned = state.runtime.pinned(&route.id, sticky, &key_hash);
+    if let Some(endpoint) = pinned.as_deref().and_then(find) {
+        if healthy(endpoint) {
+            return Ok(Some(Session {
+                sticky,
+                plan,
+                key_hash,
+                owner: Some(endpoint.id.clone()),
+                origin: None,
+                minted: None,
+                outcome: StickyOutcome::Hit,
+            }));
+        }
+    }
+
+    let is_new = pinned.is_none();
+    let candidates: Vec<router_core::sticky::Candidate<'_>> = route
+        .endpoints
+        .iter()
+        .filter(|e| e.accepts_traffic())
+        .map(|e| router_core::sticky::Candidate::new(&e.id, &e.provider, e.max_concurrency))
+        .collect();
+    let eligible =
+        |id: &str| find(id).is_some_and(|e| healthy(e) && (!is_new || e.accepts_new_sessions()));
+    let primary = rank(&key, &candidates).first().map(|id| id.to_string());
+    let placed = if sticky.is_provider_mode() {
+        owner_in_provider(&key, &candidates, eligible)
+    } else {
+        owner(&key, &candidates, eligible)
+    };
+    let Some((owner_id, moved)) = placed else {
+        return Ok(Some(Session {
+            sticky,
+            plan,
+            key_hash,
+            owner: None,
+            origin: pinned.or(primary),
+            minted: None,
+            outcome: StickyOutcome::Failed,
+        }));
+    };
+    let from = pinned.or(if moved { primary } else { None });
+    let skipped_draining = from
+        .as_deref()
+        .and_then(find)
+        .is_some_and(|e| is_new && e.health == Health::Draining);
+    let (origin, outcome) = match from {
+        None => (None, StickyOutcome::Hit),
+        Some(_) if skipped_draining => (None, StickyOutcome::Hit),
+        Some(_) if sticky.fails_on_unhealthy() => {
+            record_sticky(StickyOutcome::Failed);
+            return Err(ProxyError::SessionLost);
+        }
+        Some(from) => (Some(from), StickyOutcome::Rehomed),
+    };
+    Ok(Some(Session {
+        sticky,
+        plan,
+        key_hash,
+        owner: Some(owner_id),
+        origin,
+        minted: None,
+        outcome,
+    }))
+}
+
+fn finish_session(
+    state: &ProxyState,
+    route: &Route,
+    session: Option<Session<'_>>,
+    served_by: Option<&Endpoint>,
+) -> Vec<(HeaderName, HeaderValue)> {
+    let Some(session) = session else {
+        return Vec::new();
+    };
+    let Some(endpoint) = served_by else {
+        record_sticky(StickyOutcome::Failed);
+        return Vec::new();
+    };
+    state.runtime.pin(
+        &route.id,
+        session.sticky,
+        session.key_hash,
+        endpoint.id.clone(),
+    );
+    let mut extra = Vec::new();
+    let expected = session.origin.clone().or_else(|| session.owner.clone());
+    let moved = expected
+        .as_deref()
+        .is_some_and(|expected| expected != endpoint.id);
+    let outcome = if moved {
+        StickyOutcome::Rehomed
+    } else {
+        session.outcome
+    };
+    if let (true, Some(from)) = (moved, expected.as_deref()) {
+        if let Some(value) = rehomed_header(from, &endpoint.id) {
+            extra.push((HeaderName::from_static(REHOMED_HEADER), value));
+        }
+    }
+    if let Some(id) = session.minted.as_deref() {
+        if let Ok(value) = HeaderValue::from_str(id) {
+            extra.push((HeaderName::from_static(SESSION_HEADER), value));
+        }
+        if let Some(cookie) = session
+            .plan
+            .cookie_name()
+            .and_then(|name| session_cookie(name, id, session.sticky.ttl()))
+        {
+            extra.push(cookie);
+        }
+    }
+    record_sticky(outcome);
+    extra
+}
+
+fn record_sticky(outcome: StickyOutcome) {
+    metrics::counter!(
+        router_obs::metrics::STICKY_REQUESTS_TOTAL,
+        router_obs::metrics::labels::OUTCOME => outcome.label()
+    )
+    .increment(1);
+}
+
+fn take_preferred(
+    state: &ProxyState,
+    route: &Route,
+    id: &str,
+    rng: &mut ThreadRng,
+) -> Option<Endpoint> {
+    let endpoint = route.endpoints.iter().find(|e| e.id == id)?;
+    let now = state.runtime.now();
+    if !state.runtime.endpoint_healthy(endpoint, now) {
+        return None;
+    }
+    state
+        .runtime
+        .endpoint(endpoint)
+        .admit(now, rng)
+        .then(|| endpoint.clone())
 }
 
 fn authorize(route: &Route, headers: &http::HeaderMap) -> Result<(), (ProxyError, u32)> {
@@ -284,6 +522,7 @@ fn forward(
     attempts: u32,
     deadline: Instant,
     guard: OutstandingGuard,
+    extra: Vec<(HeaderName, HeaderValue)>,
 ) -> Response<ProxyBody> {
     let (parts, body) = response.into_parts();
     let timed = TimedBody::new(body, state.config.timeouts.idle, deadline, guard);
@@ -299,6 +538,9 @@ fn forward(
             headers.insert("x-hull-provider", value);
         }
         headers.insert("x-hull-attempts", HeaderValue::from(attempts));
+        for (name, value) in extra {
+            headers.append(name, value);
+        }
     }
     builder
         .body(timed.boxed())

@@ -28,7 +28,7 @@ pub async fn serve(
                 let state = state.clone();
                 let service = service_fn(move |request| {
                     let state = state.clone();
-                    async move { Ok::<_, std::convert::Infallible>(handle(state, request).await) }
+                    async move { Ok::<_, std::convert::Infallible>(handle(state, request, peer).await) }
                 });
                 let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), service);
                 let watched = graceful.watch(connection.into_owned());

@@ -11,6 +11,7 @@ pub enum ProxyError {
     BodyTooLarge,
     BodyRead,
     NoHealthyUpstream,
+    SessionLost,
     UpstreamUnavailable,
     UpstreamTimeout,
     Internal,
@@ -24,6 +25,7 @@ impl ProxyError {
             ProxyError::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             ProxyError::BodyRead => StatusCode::BAD_REQUEST,
             ProxyError::NoHealthyUpstream => StatusCode::SERVICE_UNAVAILABLE,
+            ProxyError::SessionLost => StatusCode::SERVICE_UNAVAILABLE,
             ProxyError::UpstreamUnavailable => StatusCode::BAD_GATEWAY,
             ProxyError::UpstreamTimeout => StatusCode::GATEWAY_TIMEOUT,
             ProxyError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -37,6 +39,7 @@ impl ProxyError {
             ProxyError::BodyTooLarge => "body_too_large",
             ProxyError::BodyRead => "body_read_failed",
             ProxyError::NoHealthyUpstream => "no_healthy_upstream",
+            ProxyError::SessionLost => "session_lost",
             ProxyError::UpstreamUnavailable => "upstream_unavailable",
             ProxyError::UpstreamTimeout => "upstream_timeout",
             ProxyError::Internal => "internal",
@@ -84,5 +87,13 @@ mod tests {
         assert_eq!(response.headers().get("x-hull-attempts").unwrap(), "2");
         let response = ProxyError::NoRoute.into_response(0);
         assert!(response.headers().get(header::RETRY_AFTER).is_none());
+    }
+
+    #[test]
+    fn session_lost_is_503_without_retry_after() {
+        let response = ProxyError::SessionLost.into_response(0);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(response.headers().get(header::RETRY_AFTER).is_none());
+        assert_eq!(ProxyError::SessionLost.kind(), "session_lost");
     }
 }

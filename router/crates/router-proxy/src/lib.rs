@@ -7,6 +7,7 @@ pub mod route_table;
 pub mod runtime;
 pub mod server;
 pub mod state;
+pub mod sticky;
 
 pub use config::{PhaseTimeouts, ProxyConfig};
 pub use server::serve;

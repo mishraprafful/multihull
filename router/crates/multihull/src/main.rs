@@ -49,7 +49,8 @@ async fn main() -> anyhow::Result<()> {
     let (snapshot_tx, mut snapshot_rx) = watch::channel(Arc::new(Snapshot::default()));
 
     let proxy_state = ProxyState::new(config.proxy_config(), snapshot.clone());
-    let admin_state = router_admin::AdminState::new(snapshot.clone());
+    let admin_state =
+        router_admin::AdminState::new(snapshot.clone()).with_proxy(proxy_state.clone());
 
     let source_task = {
         let node_id = config.node_id.clone();

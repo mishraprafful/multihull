@@ -5,7 +5,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use router_core::snapshot::Health;
+use router_core::sticky::truncate_hash;
 use router_core::Snapshot;
+use router_proxy::ProxyState;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,11 +16,20 @@ use tokio::net::TcpListener;
 #[derive(Clone)]
 pub struct AdminState {
     pub snapshot: Arc<ArcSwap<Snapshot>>,
+    pub proxy: Option<Arc<ProxyState>>,
 }
 
 impl AdminState {
     pub fn new(snapshot: Arc<ArcSwap<Snapshot>>) -> Self {
-        Self { snapshot }
+        Self {
+            snapshot,
+            proxy: None,
+        }
+    }
+
+    pub fn with_proxy(mut self, proxy: Arc<ProxyState>) -> Self {
+        self.proxy = Some(proxy);
+        self
     }
 }
 
@@ -27,6 +38,7 @@ pub fn router(state: AdminState) -> Router {
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics))
         .route("/debug/endpoints", get(debug_endpoints))
+        .route("/debug/sessions", get(debug_sessions))
         .with_state(state)
 }
 
@@ -92,6 +104,49 @@ pub fn endpoints_view(snapshot: &Snapshot) -> EndpointsView {
 async fn debug_endpoints(State(state): State<AdminState>) -> Json<EndpointsView> {
     let snapshot = state.snapshot.load();
     Json(endpoints_view(&snapshot))
+}
+
+#[derive(Serialize)]
+pub struct SessionView {
+    pub route: String,
+    pub key_hash: String,
+    pub owner: String,
+    pub age_seconds: f64,
+}
+
+#[derive(Serialize)]
+pub struct SessionsView {
+    pub active: usize,
+    pub sessions: Vec<SessionView>,
+}
+
+pub fn sessions_view(proxy: Option<&ProxyState>) -> SessionsView {
+    let Some(proxy) = proxy else {
+        return SessionsView {
+            active: 0,
+            sessions: Vec::new(),
+        };
+    };
+    proxy.runtime.expire_sessions();
+    let sessions: Vec<SessionView> = proxy
+        .runtime
+        .sessions()
+        .into_iter()
+        .map(|entry| SessionView {
+            route: entry.route,
+            key_hash: truncate_hash(&entry.pin.key_hash),
+            owner: entry.pin.endpoint,
+            age_seconds: entry.pin.age.as_secs_f64(),
+        })
+        .collect();
+    SessionsView {
+        active: sessions.len(),
+        sessions,
+    }
+}
+
+async fn debug_sessions(State(state): State<AdminState>) -> Json<SessionsView> {
+    Json(sessions_view(state.proxy.as_deref()))
 }
 
 #[cfg(test)]
@@ -166,6 +221,49 @@ mod tests {
         assert_eq!(parsed["endpoints"].as_array().unwrap().len(), 2);
         assert_eq!(parsed["endpoints"][1]["health"], "degraded");
         assert_eq!(parsed["endpoints"][0]["provider"], "gke-prod");
+    }
+
+    #[tokio::test]
+    async fn debug_sessions_lists_pins_with_truncated_hashes() {
+        let (_, body) = get_body("/debug/sessions").await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["active"], 0);
+
+        let snapshot = Arc::new(ArcSwap::from_pointee(Snapshot::default()));
+        let proxy = ProxyState::new(router_proxy::ProxyConfig::default(), snapshot.clone());
+        let sticky = router_core::snapshot::Sticky {
+            key: "header:X-Session-Id".into(),
+            ttl_seconds: 60,
+            ..Default::default()
+        };
+        let key = b"session-1";
+        proxy.runtime.pin(
+            "llama",
+            &sticky,
+            router_core::sticky::hash_key(key),
+            "gke".into(),
+        );
+        let state = AdminState::new(snapshot).with_proxy(proxy);
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/debug/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["active"], 1);
+        assert_eq!(parsed["sessions"][0]["route"], "llama");
+        assert_eq!(parsed["sessions"][0]["owner"], "gke");
+        assert_eq!(
+            parsed["sessions"][0]["key_hash"],
+            router_core::sticky::truncated_key_hash(key)
+        );
+        assert!(parsed["sessions"][0]["age_seconds"].as_f64().unwrap() < 5.0);
+        assert!(!body.contains("session-1"));
     }
 
     #[tokio::test]
