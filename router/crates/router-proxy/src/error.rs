@@ -12,6 +12,7 @@ pub enum ProxyError {
     BodyRead,
     NoHealthyUpstream,
     SessionLost,
+    QueueOverflow,
     UpstreamUnavailable,
     UpstreamTimeout,
     Internal,
@@ -26,6 +27,7 @@ impl ProxyError {
             ProxyError::BodyRead => StatusCode::BAD_REQUEST,
             ProxyError::NoHealthyUpstream => StatusCode::SERVICE_UNAVAILABLE,
             ProxyError::SessionLost => StatusCode::SERVICE_UNAVAILABLE,
+            ProxyError::QueueOverflow => StatusCode::TOO_MANY_REQUESTS,
             ProxyError::UpstreamUnavailable => StatusCode::BAD_GATEWAY,
             ProxyError::UpstreamTimeout => StatusCode::GATEWAY_TIMEOUT,
             ProxyError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -40,6 +42,7 @@ impl ProxyError {
             ProxyError::BodyRead => "body_read_failed",
             ProxyError::NoHealthyUpstream => "no_healthy_upstream",
             ProxyError::SessionLost => "session_lost",
+            ProxyError::QueueOverflow => "queue_overflow",
             ProxyError::UpstreamUnavailable => "upstream_unavailable",
             ProxyError::UpstreamTimeout => "upstream_timeout",
             ProxyError::Internal => "internal",
@@ -60,6 +63,7 @@ impl ProxyError {
         if matches!(
             self,
             ProxyError::NoHealthyUpstream
+                | ProxyError::QueueOverflow
                 | ProxyError::UpstreamUnavailable
                 | ProxyError::UpstreamTimeout
         ) {
@@ -87,6 +91,13 @@ mod tests {
         assert_eq!(response.headers().get("x-hull-attempts").unwrap(), "2");
         let response = ProxyError::NoRoute.into_response(0);
         assert!(response.headers().get(header::RETRY_AFTER).is_none());
+    }
+
+    #[test]
+    fn queue_overflow_is_429_with_retry_after() {
+        let response = ProxyError::QueueOverflow.into_response(0);
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers().get(header::RETRY_AFTER).unwrap(), "1");
     }
 
     #[test]

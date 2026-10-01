@@ -1,6 +1,7 @@
 pub mod circuit;
 pub mod limit;
 pub mod outcome;
+pub mod pressure;
 pub mod retry;
 pub mod rng;
 pub mod score;

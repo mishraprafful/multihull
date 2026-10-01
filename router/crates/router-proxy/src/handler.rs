@@ -79,6 +79,18 @@ async fn proxy(
     let preset = preset_for(&route);
     state.runtime.record_request(&route.id);
 
+    let admitted = state
+        .runtime
+        .admission
+        .wait_for_slot(&route.id, || !state.runtime.route_saturated(&route))
+        .await;
+    let waited = match admitted {
+        Ok(waited) => waited,
+        Err(_) => state.runtime.admission.config().max_wait,
+    };
+    state.runtime.record_queue_wait(&route, waited);
+    admitted.map_err(|_| (ProxyError::QueueOverflow, 0))?;
+
     let mut rng = ThreadRng;
     let mut session = resolve_session(&state, &route, &parts.headers, &body, peer.ip())
         .map_err(|error| (error, 0))?;
@@ -88,6 +100,7 @@ async fn proxy(
     let mut excluded_providers: HashSet<String> = HashSet::new();
     let mut attempts: u32 = 0;
     let mut last_error = ProxyError::NoHealthyUpstream;
+    let mut fallback: Option<(Response<Incoming>, Endpoint, OutstandingGuard)> = None;
 
     loop {
         let endpoint = preferred
@@ -104,8 +117,18 @@ async fn proxy(
                 )
             });
         let Some(endpoint) = endpoint else {
-            finish_session(&state, &route, session.take(), None);
-            return Err((last_error, attempts));
+            return match fallback.take() {
+                Some((response, endpoint, guard)) => {
+                    let extra = finish_session(&state, &route, session.take(), Some(&endpoint));
+                    Ok(forward(
+                        response, &state, &endpoint, attempts, deadline, guard, extra,
+                    ))
+                }
+                None => {
+                    finish_session(&state, &route, session.take(), None);
+                    Err((last_error, attempts))
+                }
+            };
         };
         attempts += 1;
         let runtime = state.runtime.endpoint(&endpoint);
@@ -129,7 +152,7 @@ async fn proxy(
         let outcome = classify(attempt.status(), attempt.error.as_ref(), ttft_timed_out);
         let now = state.runtime.now();
         if attempt.response.is_some() {
-            runtime.record_ttft(attempt.ttft);
+            state.runtime.record_ttft(&route, &endpoint, attempt.ttft);
         }
         state
             .runtime
@@ -178,7 +201,9 @@ async fn proxy(
                     router_obs::metrics::labels::REASON => outcome.label()
                 )
                 .increment(1);
-                drop(guard);
+                fallback = attempt
+                    .response
+                    .map(|response| (response, endpoint.clone(), guard));
                 if Instant::now() >= deadline {
                     finish_session(&state, &route, session.take(), None);
                     return Err((ProxyError::UpstreamTimeout, attempts));

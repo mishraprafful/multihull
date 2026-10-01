@@ -74,10 +74,11 @@ impl SnapshotSource {
         &self,
         node_id: String,
         tx: watch::Sender<Arc<Snapshot>>,
+        degraded: Option<crate::grpc::DegradedReceiver>,
     ) -> Result<(), SnapshotError> {
         match self {
             Self::File(path) => crate::file::watch(path.clone(), tx).await,
-            Self::Grpc(url) => crate::grpc::run(url.clone(), node_id, tx).await,
+            Self::Grpc(url) => crate::grpc::run(url.clone(), node_id, tx, degraded).await,
             Self::Http(_) => Err(SnapshotError::Unsupported("http")),
         }
     }
@@ -117,7 +118,7 @@ mod tests {
     async fn http_source_reports_unsupported() {
         let (tx, _rx) = watch::channel(Arc::new(Snapshot::default()));
         let err = SnapshotSource::Http("https://x".into())
-            .run("node".into(), tx)
+            .run("node".into(), tx, None)
             .await
             .unwrap_err();
         assert!(matches!(err, SnapshotError::Unsupported("http")));

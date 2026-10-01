@@ -1,4 +1,6 @@
 use router_core::circuit::CircuitConfig;
+use router_core::limit::AdmissionQueue;
+use router_core::pressure::PressureConfig;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -35,6 +37,8 @@ pub struct ProxyConfig {
     pub max_buffered_body_bytes: usize,
     pub region: Option<String>,
     pub circuit: CircuitConfig,
+    pub admission: AdmissionQueue,
+    pub pressure: PressureConfig,
 }
 
 impl Default for ProxyConfig {
@@ -47,6 +51,8 @@ impl Default for ProxyConfig {
             max_buffered_body_bytes: 1024 * 1024,
             region: None,
             circuit: CircuitConfig::default(),
+            admission: AdmissionQueue::default(),
+            pressure: PressureConfig::default(),
         }
     }
 }

@@ -1,16 +1,20 @@
 use dashmap::DashMap;
 use router_core::circuit::{Circuit, CircuitConfig, ProviderCircuit, State};
-use router_core::limit::{Gradient2, Gradient2Config};
+use router_core::limit::{AdmissionQueue, Gradient2, Gradient2Config};
 use router_core::outcome::Outcome;
+use router_core::pressure::{PressureConfig, PressureDetector};
 use router_core::retry::RetryBudget;
 use router_core::rng::Rng;
 use router_core::score::EndpointStateView;
-use router_core::snapshot::{Endpoint, EndpointId, Snapshot, Sticky};
+use router_core::snapshot::{Degraded, Endpoint, EndpointId, Route, Snapshot, Sticky};
 use router_core::sticky::{KeyHash, PinEntry, PinTable};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::sync::Notify;
+
+use crate::admission::Admission;
 
 pub struct EndpointRuntime {
     pub id: EndpointId,
@@ -19,10 +23,11 @@ pub struct EndpointRuntime {
     limiter: Mutex<Gradient2>,
     outstanding: AtomicU32,
     ewma_ttft: Mutex<Option<f64>>,
+    released: Arc<Notify>,
 }
 
 impl EndpointRuntime {
-    fn new(endpoint: &Endpoint, circuit: CircuitConfig) -> Self {
+    fn new(endpoint: &Endpoint, circuit: CircuitConfig, released: Arc<Notify>) -> Self {
         Self {
             id: endpoint.id.clone(),
             provider: endpoint.provider.clone(),
@@ -32,6 +37,7 @@ impl EndpointRuntime {
             ))),
             outstanding: AtomicU32::new(0),
             ewma_ttft: Mutex::new(None),
+            released,
         }
     }
 
@@ -96,6 +102,7 @@ impl OutstandingGuard {
 impl Drop for OutstandingGuard {
     fn drop(&mut self) {
         self.endpoint.outstanding.fetch_sub(1, Ordering::Relaxed);
+        self.endpoint.released.notify_waiters();
     }
 }
 
@@ -121,23 +128,38 @@ pub struct Runtime {
     providers: DashMap<String, Mutex<ProviderCircuit>>,
     budgets: DashMap<String, Mutex<RetryBudget>>,
     pins: DashMap<String, Mutex<PinTable>>,
+    pub admission: Admission,
+    pressure: Mutex<PressureDetector>,
+    released: Arc<Notify>,
     circuit_config: CircuitConfig,
     started: Instant,
 }
 
 impl Default for Runtime {
     fn default() -> Self {
-        Self::new(CircuitConfig::default())
+        Self::new(
+            CircuitConfig::default(),
+            AdmissionQueue::default(),
+            PressureConfig::default(),
+        )
     }
 }
 
 impl Runtime {
-    pub fn new(circuit_config: CircuitConfig) -> Self {
+    pub fn new(
+        circuit_config: CircuitConfig,
+        admission: AdmissionQueue,
+        pressure: PressureConfig,
+    ) -> Self {
+        let released = Arc::new(Notify::new());
         Self {
             endpoints: DashMap::new(),
             providers: DashMap::new(),
             budgets: DashMap::new(),
             pins: DashMap::new(),
+            pressure: Mutex::new(PressureDetector::new(pressure, admission.max_wait)),
+            admission: Admission::new(admission, released.clone()),
+            released,
             circuit_config,
             started: Instant::now(),
         }
@@ -151,9 +173,73 @@ impl Runtime {
         self.endpoints
             .entry(endpoint.id.clone())
             .or_insert_with(|| {
-                Arc::new(EndpointRuntime::new(endpoint, self.circuit_config.clone()))
+                Arc::new(EndpointRuntime::new(
+                    endpoint,
+                    self.circuit_config.clone(),
+                    self.released.clone(),
+                ))
             })
             .clone()
+    }
+
+    pub fn route_saturated(&self, route: &Route) -> bool {
+        let now = self.now();
+        let mut candidates = 0;
+        for endpoint in route
+            .endpoints
+            .iter()
+            .filter(|e| e.accepts_traffic() && !self.endpoint_open(e, now))
+        {
+            candidates += 1;
+            match self.get(&endpoint.id) {
+                None => return false,
+                Some(runtime) if runtime.has_headroom() => return false,
+                Some(_) => {}
+            }
+        }
+        candidates > 0
+    }
+
+    pub fn route_outstanding(&self, route: &Route) -> u32 {
+        route
+            .endpoints
+            .iter()
+            .filter_map(|e| self.get(&e.id))
+            .map(|runtime| runtime.outstanding())
+            .sum()
+    }
+
+    pub fn record_queue_wait(&self, route: &Route, wait: Duration) {
+        metrics::histogram!(
+            router_obs::metrics::QUEUE_WAIT_SECONDS,
+            router_obs::metrics::labels::ROUTE => route.id.clone()
+        )
+        .record(wait.as_secs_f64());
+        let now = self.now();
+        lock(&self.pressure).record_queue_wait(&route.id, wait, self.route_outstanding(route), now);
+    }
+
+    pub fn record_ttft(&self, route: &Route, endpoint: &Endpoint, ttft: Duration) {
+        let runtime = self.endpoint(endpoint);
+        runtime.record_ttft(ttft);
+        metrics::histogram!(
+            router_obs::metrics::UPSTREAM_TTFT_SECONDS,
+            router_obs::metrics::labels::ENDPOINT => endpoint.id.clone(),
+            router_obs::metrics::labels::PROVIDER => endpoint.provider.clone()
+        )
+        .record(ttft.as_secs_f64());
+        lock(&self.pressure).record_ttft(
+            &route.id,
+            &endpoint.provider,
+            &endpoint.id,
+            ttft,
+            runtime.outstanding(),
+        );
+    }
+
+    pub fn poll_degraded(&self) -> Vec<Degraded> {
+        let now = self.now();
+        lock(&self.pressure).tick(now)
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<EndpointRuntime>> {
@@ -269,6 +355,10 @@ impl Runtime {
         let routes: HashSet<&str> = snapshot.routes.iter().map(|r| r.id.as_str()).collect();
         self.budgets.retain(|id, _| routes.contains(id.as_str()));
         self.pins.retain(|id, _| routes.contains(id.as_str()));
+        self.admission.retain_routes(|id| routes.contains(id));
+        let routes: Vec<&str> = routes.into_iter().collect();
+        let live: Vec<&str> = live.into_iter().collect();
+        lock(&self.pressure).forget_except(&routes, &live);
     }
 
     pub fn pinned(&self, route_id: &str, sticky: &Sticky, key: &KeyHash) -> Option<EndpointId> {

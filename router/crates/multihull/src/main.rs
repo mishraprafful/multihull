@@ -52,9 +52,33 @@ async fn main() -> anyhow::Result<()> {
     let admin_state =
         router_admin::AdminState::new(snapshot.clone()).with_proxy(proxy_state.clone());
 
+    let (degraded_tx, degraded_rx) = tokio::sync::mpsc::channel(64);
     let source_task = {
         let node_id = config.node_id.clone();
-        tokio::spawn(async move { source.run(node_id, snapshot_tx).await })
+        tokio::spawn(async move { source.run(node_id, snapshot_tx, Some(degraded_rx)).await })
+    };
+
+    let housekeeping_task = {
+        let proxy_state = proxy_state.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(HOUSEKEEPING_INTERVAL);
+            loop {
+                ticker.tick().await;
+                proxy_state.runtime.expire_sessions();
+                for signal in proxy_state.runtime.poll_degraded() {
+                    tracing::warn!(
+                        service = %signal.service,
+                        provider = %signal.provider,
+                        reason = ?signal.reason,
+                        observed_concurrency = signal.observed_concurrency,
+                        "degraded signal"
+                    );
+                    if degraded_tx.try_send(signal).is_err() {
+                        tracing::debug!("degraded channel full or closed, dropping signal");
+                    }
+                }
+            }
+        })
     };
 
     let swap_task = {
@@ -97,9 +121,12 @@ async fn main() -> anyhow::Result<()> {
             anyhow::bail!("snapshot source ended");
         }
         _ = swap_task => anyhow::bail!("snapshot swap task ended"),
+        _ = housekeeping_task => anyhow::bail!("housekeeping task ended"),
     }
     Ok(())
 }
+
+const HOUSEKEEPING_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
 async fn shutdown_signal() {
     let ctrl_c = tokio::signal::ctrl_c();

@@ -94,6 +94,8 @@ impl Config {
             max_buffered_body_bytes: self.max_buffered_body_bytes,
             region: self.region.clone(),
             circuit: router_core::circuit::CircuitConfig::default(),
+            admission: router_core::limit::AdmissionQueue::default(),
+            pressure: router_core::pressure::PressureConfig::default(),
         }
     }
 }

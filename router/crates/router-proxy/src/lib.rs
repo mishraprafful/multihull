@@ -1,3 +1,4 @@
+pub mod admission;
 pub mod attempt;
 pub mod body;
 pub mod config;
