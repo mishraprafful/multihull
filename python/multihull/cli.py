@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated
@@ -15,7 +17,8 @@ from multihull import deploy as deploymod
 from multihull import discovery, engine
 from multihull import logs as logsmod
 from multihull import spec as specmod
-from multihull.durations import parse_duration
+from multihull.controller import DEFAULT_GRPC_LISTEN, DEFAULT_INTERVAL, Controller
+from multihull.durations import format_duration, parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
 from multihull.state import LocalState
 
@@ -368,6 +371,36 @@ def logs(
     except RuntimeError as exc:
         errors.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from None
+
+
+@app.command()
+def controller(
+    path: SpecArg = DEFAULT_SPEC,
+    interval: Annotated[str, typer.Option(help="Reconcile interval, e.g. 30s")] = format_duration(
+        DEFAULT_INTERVAL
+    ),
+    grpc_listen: Annotated[
+        str, typer.Option("--grpc-listen", help="host:port for the discovery stream")
+    ] = DEFAULT_GRPC_LISTEN,
+    snapshot_out: SnapshotOutOpt = deploymod.DEFAULT_SNAPSHOT_PATH,
+    state_path: StateOpt = DEFAULT_STATE,
+    log_level: Annotated[str, typer.Option(help="Python log level")] = "INFO",
+) -> None:
+    logging.basicConfig(
+        level=log_level.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
+    service = load_or_exit(path)
+    daemon = Controller(
+        service,
+        LocalState(state_path),
+        providers_for(service, live=True),
+        snapshot_out=snapshot_out,
+        interval=duration_or_exit(interval, "--interval"),
+    )
+    try:
+        asyncio.run(daemon.run(grpc_listen))
+    except KeyboardInterrupt:
+        return
 
 
 @app.command()

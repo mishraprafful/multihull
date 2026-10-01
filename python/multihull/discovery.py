@@ -8,6 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from google.protobuf.timestamp_pb2 import Timestamp
+
+from multihull._proto import discovery_pb2 as pb
+from multihull.durations import parse_duration
 from multihull.providers.base import Endpoint, Observed, Provider, Ref
 from multihull.spec import ServiceSpec, TargetSpec
 from multihull.state.base import StateBackend
@@ -20,6 +24,32 @@ HEALTH_BY_PHASE = {
     "Pending": "unknown",
     "Failed": "unhealthy",
     "Unknown": "unknown",
+}
+PROTO_PROTOCOL = {"openai": pb.PROTOCOL_HTTP, "http": pb.PROTOCOL_HTTP}
+PROTO_POLICY = {
+    "priority": pb.FAILOVER_POLICY_PRIORITY,
+    "weighted": pb.FAILOVER_POLICY_WEIGHTED,
+    "ewma_latency": pb.FAILOVER_POLICY_LATENCY,
+    "locality": pb.FAILOVER_POLICY_UNSPECIFIED,
+}
+PROTO_ENDPOINT_TYPE = {
+    "kubernetes": pb.ENDPOINT_TYPE_KUBERNETES,
+    "modal": pb.ENDPOINT_TYPE_MODAL,
+    "runpod": pb.ENDPOINT_TYPE_RUNPOD,
+    "baseten": pb.ENDPOINT_TYPE_BASETEN,
+    "replicate": pb.ENDPOINT_TYPE_REPLICATE,
+}
+PROTO_HEALTH = {
+    "healthy": pb.HEALTH_READY,
+    "degraded": pb.HEALTH_DEGRADED,
+    "draining": pb.HEALTH_DRAINING,
+    "unhealthy": pb.HEALTH_DOWN,
+    "unknown": pb.HEALTH_UNSPECIFIED,
+}
+PROTO_STICKY_MODE = {"endpoint": pb.STICKY_MODE_ENDPOINT, "provider": pb.STICKY_MODE_PROVIDER}
+PROTO_STICKY_ON_UNHEALTHY = {
+    "rehome": pb.STICKY_ON_UNHEALTHY_REHOME,
+    "fail": pb.STICKY_ON_UNHEALTHY_FAIL,
 }
 
 
@@ -151,3 +181,67 @@ def write_snapshot(snapshot: dict[str, Any], path: str | Path) -> Path:
     tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=False) + "\n")
     tmp.replace(target)
     return target
+
+
+def snapshot_changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
+    if previous is None:
+        return True
+    return previous["routes"] != current["routes"]
+
+
+def endpoint_to_proto(entry: dict[str, Any]) -> pb.Endpoint:
+    return pb.Endpoint(
+        id=entry["id"],
+        provider=entry["provider"],
+        type=PROTO_ENDPOINT_TYPE.get(entry["type"], pb.ENDPOINT_TYPE_UNSPECIFIED),
+        url=entry["url"],
+        region=entry["region"] or "",
+        priority=entry["priority"],
+        weight=entry["weight"],
+        health=PROTO_HEALTH.get(entry["health"], pb.HEALTH_UNSPECIFIED),
+        ready_replicas=entry["ready_replicas"],
+        max_concurrency=entry["max_concurrency"],
+        inject_headers=dict(entry["inject_headers"]),
+    )
+
+
+def route_to_proto(route: dict[str, Any]) -> pb.Route:
+    failover = route["failover"]
+    message = pb.Route(
+        id=route["id"],
+        hostname=route["hostname"],
+        path_prefix=route["path_prefix"],
+        protocol=PROTO_PROTOCOL.get(route["protocol"], pb.PROTOCOL_UNSPECIFIED),
+        failover=pb.Failover(
+            policy=PROTO_POLICY.get(failover["policy"], pb.FAILOVER_POLICY_UNSPECIFIED),
+            retry_on=list(failover["retry_on"]),
+            max_retries=failover["max_retries"],
+        ),
+        endpoints=[endpoint_to_proto(entry) for entry in route["endpoints"]],
+    )
+    if route["auth"] is not None:
+        message.auth.CopyFrom(pb.Auth(api_key_hashes=list(route["auth"]["api_key_hashes"])))
+    sticky = route["sticky"]
+    if sticky is not None:
+        message.sticky.CopyFrom(
+            pb.Sticky(
+                key=sticky["key"],
+                ttl_seconds=int(parse_duration(sticky["ttl"]).total_seconds()),
+                mode=PROTO_STICKY_MODE.get(sticky["mode"], pb.STICKY_MODE_UNSPECIFIED),
+                on_unhealthy=PROTO_STICKY_ON_UNHEALTHY.get(
+                    sticky["on_unhealthy"], pb.STICKY_ON_UNHEALTHY_UNSPECIFIED
+                ),
+                fallback_key=sticky["fallback_key"] or "",
+            )
+        )
+    return message
+
+
+def snapshot_to_proto(snapshot: dict[str, Any]) -> pb.Snapshot:
+    at = Timestamp()
+    at.FromJsonString(snapshot["at"])
+    return pb.Snapshot(
+        version=snapshot[SNAPSHOT_VERSION_FIELD],
+        at=at,
+        routes=[route_to_proto(route) for route in snapshot["routes"]],
+    )
