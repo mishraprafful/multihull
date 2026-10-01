@@ -1,0 +1,11 @@
+---
+interface Props {
+  state: 'healthy' | 'degraded' | 'failover';
+  label?: string;
+}
+
+const { state, label } = Astro.props;
+const text = label ?? { healthy: 'Ready', degraded: 'Degraded', failover: 'Failover' }[state];
+---
+
+<span class="mh-pill" data-state={state} role="status">{text}</span>

@@ -1,0 +1,30 @@
+---
+title: Modal
+description: Serverless containers via the Modal Python SDK.
+---
+
+Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a class with `@modal.web_server` that execs the container command, then `app.deploy(name=f"multihull-{svc}")`. Nothing is shelled out.
+
+```yaml
+- provider: modal-main
+  type: modal
+  priority: 2
+  modal: {environment: main, region: eu}
+```
+
+Credentials: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or `~/.modal.toml`.
+
+## Translation
+
+| Spec field | Modal |
+|---|---|
+| `container.image` | `modal.Image.from_registry(ref@digest, secret=)` |
+| `container.command`, `port` | `@modal.web_server(port, startup_timeout)` wrapping `subprocess.Popen(command)` |
+| `resources.gpu` | `gpu="A10G"`, `gpu="L4"`, and so on |
+| `scaling.replicas` | `min_containers`, `max_containers`, `buffer_containers` |
+| `scaling.concurrency` | `@modal.concurrent(max_inputs=)` |
+| `container.health` | `startup_timeout`; the router probes `web_url + path` |
+| `container.secrets` | `modal.Secret.from_dict`, named `multihull-<svc>` |
+| endpoint | `Function.web_url` plus proxy-auth headers injected by the router |
+
+Ref stored in state: app name plus environment.

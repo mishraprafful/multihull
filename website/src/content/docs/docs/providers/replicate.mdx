@@ -1,0 +1,34 @@
+---
+title: Replicate
+description: Cog images with Replicate deployments.
+---
+
+Replicate requires Cog, so the spec must set `build.target: cog`. `cog build` and push run via subprocess because Cog has no library API; the deployment itself is managed with `replicate.deployments.create/update`.
+
+```yaml
+container:
+  build: {context: ., target: cog}
+
+targets:
+  - provider: replicate-main
+    type: replicate
+    priority: 3
+    replicate: {owner: acme}
+```
+
+Credentials: `REPLICATE_API_TOKEN`.
+
+## Translation
+
+| Spec field | Replicate |
+|---|---|
+| `container.image` | Cog image pushed to `r8.im` |
+| `container.command`, `port` | Cog `predict.py` shim only |
+| `resources.gpu` | deployment `hardware` |
+| `scaling.replicas` | `min_instances`, `max_instances` |
+| `scaling.concurrency` | not applicable |
+| `container.health` | provider-managed; the router probes |
+| `container.secrets` | deployment env |
+| endpoint | deployment predictions URL |
+
+Ref stored in state: `owner/name` plus deployment. Planned for v0.2.

@@ -1,0 +1,76 @@
+---
+title: Multihull
+description: Deploy hot GPU containers to many providers. One URL. Automatic failover.
+template: splash
+hero:
+  tagline: Deploy hot GPU containers to many providers. One URL. Automatic failover.
+  image:
+    file: ../../assets/mark.svg
+  actions:
+    - text: Quickstart
+      link: /docs/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: Read the design
+      link: /docs/design/architecture/
+      variant: minimal
+---
+
+import Horizon from '../../components/Horizon.astro';
+import StatusPill from '../../components/StatusPill.astro';
+
+<div class="mh-value-props">
+  <div>
+    <h3>One spec</h3>
+    <p>Describe image, GPU class, scaling and targets once in <code>multihull.yaml</code>. Each provider gets its native payload.</p>
+  </div>
+  <div>
+    <h3>Always warm</h3>
+    <p>At least two providers stay hot by default. Fallbacks never scale to zero. Health beats price.</p>
+  </div>
+  <div>
+    <h3>Per-request failover</h3>
+    <p>A stateless Rust router retries across providers before the first byte is committed. Callers see one URL.</p>
+  </div>
+</div>
+
+<Horizon />
+
+## A minimal spec
+
+```yaml title="multihull.yaml"
+apiVersion: multihull/v1
+name: llama-8b
+
+container:
+  image: ghcr.io/acme/vllm-llama:1.4.0
+  port: 8000
+  health: {path: /health}
+
+resources:
+  gpu: [L4, A10G]
+
+targets:
+  - provider: gke-prod
+    type: kubernetes
+    priority: 1
+  - provider: modal-main
+    type: modal
+    priority: 2
+
+route:
+  hostname: llama.api.acme.com
+  protocol: openai
+```
+
+## What `hull status` shows
+
+| Target | State | Replicas | GPU |
+|---|---|---|---|
+| gke-prod | <StatusPill state="healthy" /> | 2/2 | L4 |
+| modal-main | <StatusPill state="degraded" /> | 1/1 | A10G |
+| runpod-eu | <StatusPill state="failover" label="Serving failover" /> | 1/1 | L4 |
+
+<Horizon />
+
+[Start with the Quickstart](/docs/quickstart/), or read how [targets and failover](/docs/concepts/targets-and-failover/) work.
