@@ -28,12 +28,12 @@ Goal: an open-source framework that
 | Desired and observed state | `outrigger.yaml` in git is desired state; provider refs live in a state backend (local SQLite default, S3/GCS or Postgres for teams); Terraform-style plan and apply; optional `rig controller` daemon reconciles continuously |
 | v1 providers | Kubernetes (any GPU cluster), Modal, RunPod Serverless, Baseten, Replicate (Cog images only). **Fly.io dropped**: Fly deprecated GPUs on 31 Jul 2026. |
 | Router placement | Self-hosted anywhere, stateless, multi-region optional |
-| Name | Outrigger. Package `outrigger-ai` (imports as `outrigger`), CLI `rig`, GitHub org `outrigger-ai`. |
+| Name | Outrigger. Package `gpu-outrigger` (imports as `outrigger`), CLI `rig`, GitHub `mishraprafful/outrigger`. |
 | Deliverables after approval | Design docs, repo scaffold, docs website skeleton with theme |
 
 ## Name and theme
 
-An outrigger is the float lashed alongside a canoe that keeps it upright when the hull leans: extra hulls on other providers so the deployment never capsizes. Availability (checked 2026-09-29): free on crates.io; `outrigger-ai` free on PyPI and crates.io; 70 GitHub repo-name collisions, fewest of 17 candidates. `outrigger.dev` and `.io` are registered; use `outrigger.sh` or `outrigger-ai.dev` (unchecked). Trademarks and npm not checked.
+An outrigger is the float lashed alongside a canoe that keeps it upright when the hull leans: extra hulls on other providers so the deployment never capsizes. Availability (checked 2026-09-29): free on crates.io; `gpu-outrigger` free on PyPI and crates.io (checked 2026-10-01); 70 GitHub repo-name collisions, fewest of 17 candidates. `outrigger.dev` and `.io` are registered; use `outrigger.sh` or `gpu-outrigger.dev` (unchecked). Trademarks and npm not checked.
 
 **Design theme: "Open water."** Calm, instrument-like, nautical without kitsch.
 - Colours: deep navy `#0B1D2E` background, foam `#F4F1EA` text on dark, sand `#E9DCC3` surfaces on light, teal `#1FB6A6` primary and healthy, coral `#FF6B57` failover and errors, amber `#F5B841` degraded. Dark and light both first-class.
@@ -144,7 +144,7 @@ GPU classes are a normalised enum (`L4, A10G, A100-40, A100-80, H100, H200, B200
 
 ## Control plane (Python)
 
-Package `outrigger` (distribution `outrigger-ai`), Python 3.11+, `uv`, pydantic v2, typer, httpx, `kubernetes` client, `modal`, `runpod`, `truss`, `replicate`, `grpcio` for the router stream.
+Package `outrigger` (distribution `gpu-outrigger`), Python 3.11+, `uv`, pydantic v2, typer, httpx, `kubernetes` client, `modal`, `runpod`, `truss`, `replicate`, `grpcio` for the router stream.
 
 **Modules**
 - `outrigger.spec`: pydantic models, JSON Schema export, defaults, validation (for example Replicate requires `build.target: cog`).
