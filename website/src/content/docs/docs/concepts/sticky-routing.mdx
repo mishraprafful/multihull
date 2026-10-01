@@ -1,0 +1,42 @@
+---
+title: Sticky routing
+description: Opt-in session affinity for KV-cache reuse and stateful servers.
+---
+
+Affinity is a performance preference, not a correctness guarantee. Health and capacity always win.
+
+```yaml
+route:
+  sticky:
+    key: header:X-Session-Id
+    ttl: 30m
+    mode: endpoint
+    onUnhealthy: rehome
+    fallbackKey: body:$.messages[0]
+```
+
+| Field | Values |
+|---|---|
+| `key` | `header:NAME`, `cookie:NAME`, `body:$.jsonpath`, `client-ip` |
+| `ttl` | Affinity expires after this much idleness |
+| `mode` | `endpoint` (same replica) or `provider` (same provider, any replica) |
+| `onUnhealthy` | `rehome` (pick a new owner, continue) or `fail` (503, `error.type = session_lost`) |
+| `fallbackKey` | Used when the primary key is absent |
+
+## How placement works
+
+Rendezvous hashing over `endpoint_id`, weighted by `max_concurrency`. Every router replica computes the same owner from the same snapshot, so no shared session table is needed. Adding or removing an endpoint moves only its own share of sessions. A per-router LRU, bounded by `ttl`, pins exceptions created by rehoming.
+
+## When the owner is unhealthy
+
+If the owner's circuit is open, its adaptive limit has no headroom, or it left the snapshot, the request is rehomed to the next rendezvous candidate (same provider first when `mode: provider`). The response carries `X-Hull-Rehomed: <from>-><to>` and the pin is recorded until `ttl`.
+
+Sessions stay in the highest healthy tier that already owns them; a recovered primary does not pull sessions back until they idle past `ttl`. Draining endpoints accept no new sessions and keep existing ones until `ttl` or `drainTimeout` (default 10 m).
+
+## Missing key
+
+With no key and no fallback the request routes normally and the response carries a freshly minted `X-Hull-Session` header (and a cookie when `cookie:` is configured).
+
+## Metrics
+
+`router_sticky_requests_total{outcome=hit|miss|rehomed|failed}`, `router_sticky_sessions_active`, and `/debug/sessions`. Keys are never logged in clear, only a truncated blake3.

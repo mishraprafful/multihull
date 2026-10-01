@@ -1,0 +1,41 @@
+{
+  "truss": {
+    "model_name": "multihull-llama-8b",
+    "base_image": {
+      "image": "llama-8b:build"
+    },
+    "docker_server": {
+      "start_command": "vllm serve meta-llama/Llama-3.1-8B-Instruct",
+      "server_port": 8000,
+      "predict_endpoint": "/v1/chat/completions",
+      "readiness_endpoint": "/health",
+      "liveness_endpoint": "/health"
+    },
+    "resources": {
+      "accelerator": "L4",
+      "use_gpu": true,
+      "memory": "32Gi"
+    },
+    "runtime": {
+      "predict_concurrency": 32,
+      "health_checks": {
+        "initial_delay_seconds": 120
+      }
+    },
+    "environment_variables": {
+      "VLLM_LOGGING_LEVEL": "INFO"
+    },
+    "secrets": {
+      "hf-token": null
+    },
+    "model_metadata": {
+      "multihull.dev/service": "llama-8b"
+    }
+  },
+  "autoscaling": {
+    "min_replica": 1,
+    "max_replica": 8,
+    "concurrency_target": 32,
+    "scale_down_delay": 300
+  }
+}

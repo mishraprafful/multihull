@@ -1,0 +1,48 @@
+---
+title: Health and circuits
+description: How the router tells busy from broken, and how it recovers.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Outcome taxonomy
+
+| Outcome | Examples | Effect |
+|---|---|---|
+| Success | 2xx | Raises adaptive limit |
+| Capacity | 429, queue depth, TTFT timeout | Lowers limit by 0.7; never ejects |
+| Transient | connect failure, 502, 503, 504, reset | Feeds circuit |
+| Fatal | 500 with body, 4xx | Feeds circuit |
+| ClientAbort | caller disconnected | Ignored |
+
+<Aside type="tip" title="Busy is not broken">
+Capacity outcomes feed the limiter and admission queue, never the circuit. A cold or saturated endpoint is throttled, not ejected.
+</Aside>
+
+## Probes
+
+Active probes every 5 s with jitter, provider-specific (RunPod 204 means warming). An optional 60 s warm check (`max_tokens=1`) yields `Degraded`, not `Down`. Passive: ring of the last 100 outcomes plus 10 s buckets.
+
+## Circuit per endpoint
+
+```
+        5 consecutive Transient/Fatal  OR  error ratio > 50% over 10s (min 20 samples)
+CLOSED ──────────────────────────────────────────────────────────────► OPEN
+  ▲                                                                     │
+  │ 3 consecutive probe successes                   wait 5s * 2^n (cap 5m) + jitter
+  │         ┌───────────┐  admit ramp 1 req → 5% → 25% → 100% over 30s  │
+  └─────────│ HALF-OPEN │◄───────────────────────────────────────────────┘
+            └───────────┘  any failure → OPEN, n += 1
+```
+
+## Circuit per provider
+
+Opens when 50% of a provider's endpoints are open, or on 401/403 (credentials are broken, not capacity).
+
+## Panic threshold
+
+If more than 50% of all endpoints are open, the router routes to all of them rather than none.
+
+## Cold-start masking
+
+Gradient2 adaptive concurrency per endpoint on time-to-first-token. A bounded per-service admission queue waits up to 5 s, then returns 429 with `Retry-After`. Sustained pressure lowers the spillover threshold and sends a pre-warm signal to the controller, which raises warm replicas on healthy targets.

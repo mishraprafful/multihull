@@ -10,9 +10,10 @@ Rules for entries
 
 ## Current state
 
-- Design phase. The architecture plan lives in `docs/design/architecture-plan.md` and is under review in PR 1.
-- No production code yet. `python/` and `router/` hold 0.0.1 placeholders for name reservation (PR 2).
-- GitHub repo `mishraprafful/multihull` is private. Branch `main` has only the initial commit.
+- Architecture plan merged (PR 1) at `docs/design/architecture-plan.md`. Name placeholders merged (PR 2).
+- v0.1 scaffold on branch `feat/scaffold`, PR 3: Python control plane (spec, five translators, SQLite state, engine, `hull` CLI, 59 tests), Rust workspace (router-core policies, proxy, discovery client, admin, testkit, `multihull` binary, 107 tests), `proto/discovery.proto`, Helm chart, llama-8b example, Starlight site (17 pages, builds).
+- Scoped out of the scaffold: `hull deploy/destroy/logs/controller`, Python SDK module, gRPC transport on the Python side, HTTP snapshot source and TLS in the router, sticky routing and provider circuits wired into the proxy handler, live calls against real providers.
+- GitHub repo `mishraprafful/multihull` is private.
 - Package names: `multihull` on PyPI and crates.io were free on 2026-10-01. Not yet published; publishing needs the owner's registry tokens.
 - Local toolchain on the owner's machine: Python 3.14 with `uv`, Node 24 with `npm`, Docker, kubectl, rustup via Homebrew with stable Rust 1.98.1. `cargo` needs `$(brew --prefix rustup)/bin` or `~/.cargo/bin` on `PATH`. No `helm`, `buf` or `protoc`.
 
@@ -37,14 +38,21 @@ Rules for entries
 
 ## Next steps
 
-1. Get PR 1 reviewed and merged.
-2. Owner publishes the 0.0.1 placeholders to PyPI and crates.io from PR 2 (commands in the PR 2 conversation; tokens stay local).
-3. Scaffold per the plan: pydantic spec with JSON Schema, `Provider` Protocol, Kubernetes and Modal translators with golden tests, local SQLite state, `hull init/plan/status`.
-4. `proto/discovery.proto` shared by Python and Rust.
-5. Router workspace skeleton with `outcome`, `circuit`, `limit`, `sticky`, `snapshot` types.
-6. Astro Starlight site with the Open water theme.
+1. Review and merge PR 3 (scaffold).
+2. Owner publishes the 0.0.1 placeholders to PyPI and crates.io (tokens stay local).
+3. `hull deploy` end to end against a real Kubernetes cluster and Modal, with `hull destroy` and `hull logs`.
+4. Python gRPC `Discovery.Stream` server (`hull controller`) using `grpcio-tools` from `proto/discovery.proto`.
+5. Router: wire sticky routing and provider circuits into the proxy handler, add hyper-rustls for TLS upstreams and listener, implement the HTTP snapshot source.
+6. CI: GitHub Actions for `uv run pytest`, `cargo test`, `npm run build`, `helm lint`.
+7. Website: generate `docs/reference/spec-schema` from `hull schema`.
 
 ## Session log
+
+### 2026-10-01 (later)
+- Merged PR 2. Scaffolded v0.1 on `feat/scaffold` with three parallel agents (python, router+proto, website+examples+charts) and opened PR 3.
+- Python: 59 tests pass with ruff clean. Spec adds `kubernetes.keda`, `kubernetes.prometheusUrl`, `replicate.owner`, target `weight` beyond the plan. Kubernetes apply resolves secrets from env vars named after the secret (`hf-token` to `HF_TOKEN`).
+- Router: 107 tests pass with clippy `-D warnings`. Proto compiled with `tonic-prost-build` and vendored protoc. Published crate `multihull` now lives at `router/crates/multihull`.
+- Website: Astro 7 with Starlight 0.42; `prebuild` copies the architecture plan into the site. Chart validated with a template renderer script only, since helm is not installed.
 
 ### 2026-10-01
 - Rewrote the plan for a Python control plane, native provider interfaces, Terraform-style state, the reliability principle and sticky routing.

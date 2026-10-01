@@ -1,13 +1,61 @@
-[package]
-name = "multihull"
+[workspace]
+resolver = "2"
+members = [
+    "crates/router-core",
+    "crates/router-proxy",
+    "crates/router-cp",
+    "crates/router-auth",
+    "crates/router-obs",
+    "crates/router-admin",
+    "crates/router-testkit",
+    "crates/multihull",
+]
+
+[workspace.package]
 version = "0.0.1"
 edition = "2021"
-description = "Stateless request router for multi-provider GPU inference with automatic failover."
 license = "Apache-2.0"
 repository = "https://github.com/mishraprafful/multihull"
 homepage = "https://github.com/mishraprafful/multihull"
-readme = "README.md"
-keywords = ["gpu", "inference", "proxy", "failover", "router"]
-categories = ["network-programming", "web-programming::http-server"]
 
-[dependencies]
+[workspace.dependencies]
+router-core = { path = "crates/router-core", version = "0.0.1" }
+router-proxy = { path = "crates/router-proxy", version = "0.0.1" }
+router-cp = { path = "crates/router-cp", version = "0.0.1" }
+router-auth = { path = "crates/router-auth", version = "0.0.1" }
+router-obs = { path = "crates/router-obs", version = "0.0.1" }
+router-admin = { path = "crates/router-admin", version = "0.0.1" }
+router-testkit = { path = "crates/router-testkit", version = "0.0.1" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "fs", "signal", "io-util"] }
+hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "client", "client-legacy", "http1", "http2", "server-graceful"] }
+http = "1"
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tonic = { version = "0.14", default-features = false, features = ["codegen", "transport", "channel"] }
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+protoc-bin-vendored = "3"
+prost = "0.14"
+prost-types = "0.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+arc-swap = "1"
+dashmap = "6"
+matchit = "0.9"
+blake3 = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+metrics = "0.24"
+thiserror = "2"
+anyhow = "1"
+rand = "0.9"
+notify = "8"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
+clap = { version = "4", features = ["derive"] }
+toml = "0.9"
+bytes = "1"
+tokio-stream = "0.1"
+futures-util = { version = "0.3", default-features = false }

@@ -1,0 +1,51 @@
+---
+title: Router overview
+description: A stateless Rust data plane that consumes endpoint snapshots.
+---
+
+The router is stateless. It reads a static `router.toml` and a dynamic endpoint snapshot, then routes each request by priority, weight or latency with per-request failover.
+
+## Request path
+
+1. Route match on host, path tree and headers. With `protocol: openai`, the body is buffered (up to 1 MiB) to read the `model` key.
+2. Score endpoints with one function: `priority_spillover` (default), `weighted`, `ewma_latency`, `locality`, optional sticky affinity.
+3. Attempt engine: phase timeouts (connect 2 s, first byte 30 s, idle 60 s, total 10 m), retry before the first committed byte, retry budget, hedging in v0.2.
+4. Auth: client `Authorization` stripped, provider header injected from the snapshot.
+
+## Snapshot sources
+
+| Source | When |
+|---|---|
+| gRPC stream from `hull controller` | Teams; carries `Degraded` signals back |
+| `snapshot.json` written by `hull deploy` | Solo dev, CI |
+| HTTPS or object-store URL polled | Multi-region routers without controller reachability |
+
+The last snapshot is persisted to disk and served indefinitely on control-plane loss, with an alert after 1 h.
+
+## Configuration
+
+```toml title="router.toml"
+[listener]
+addr = "0.0.0.0:8080"
+
+[admin]
+addr = "0.0.0.0:9090"
+
+[snapshot]
+source = "file"
+path = "/var/lib/multihull/snapshot.json"
+```
+
+Everything else is dynamic. SIGHUP reloads TLS; SIGTERM drains for up to 10 m.
+
+## Observability
+
+OTel spans `router.request` and `upstream.attempt{provider, endpoint, n, outcome}`. Prometheus: `router_requests_total`, `router_failovers_total{from,to,reason}`, `router_circuit_state`, `router_upstream_ttft_seconds`, `router_queue_wait_seconds`, `router_concurrency_limit`, `router_retry_budget_remaining`, `router_output_tokens_total`. JSON access log with `attempts[]`. `/debug/endpoints` on the admin listener.
+
+## Auth
+
+Keys look like `hull_<key_id>_<secret>`. Only blake3 hashes reach the snapshot; comparison is constant time. Per-key token bucket, concurrency cap, provider and service allowlists.
+
+## Deploying
+
+The Helm chart in `charts/multihull` runs the router as a Deployment with a Service, ConfigMap for `router.toml`, and an optional PodDisruptionBudget and controller.

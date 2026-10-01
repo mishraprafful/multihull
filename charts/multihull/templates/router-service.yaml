@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "multihull.fullname" . }}-router
+  labels:
+    {{- include "multihull.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+  {{- with .Values.router.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.router.service.type }}
+  selector:
+    {{- include "multihull.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+  ports:
+    - name: http
+      port: {{ .Values.router.service.port }}
+      targetPort: http
+      protocol: TCP
+    - name: admin
+      port: {{ .Values.router.admin }}
+      targetPort: admin
+      protocol: TCP

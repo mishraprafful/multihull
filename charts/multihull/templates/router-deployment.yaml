@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "multihull.fullname" . }}-router
+  labels:
+    {{- include "multihull.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+spec:
+  replicas: {{ .Values.router.replicas }}
+  selector:
+    matchLabels:
+      {{- include "multihull.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: router
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.router.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "multihull.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: router
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "multihull.serviceAccountName" . }}
+      containers:
+        - name: router
+          image: {{ include "multihull.routerImage" . | quote }}
+          imagePullPolicy: {{ .Values.router.image.pullPolicy }}
+          args:
+            - "--config"
+            - "/etc/multihull/router.toml"
+          ports:
+            - name: http
+              containerPort: {{ .Values.router.listen }}
+              protocol: TCP
+            - name: admin
+              containerPort: {{ .Values.router.admin }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+          resources:
+            {{- toYaml .Values.router.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/multihull/router.toml
+              subPath: router.toml
+              readOnly: true
+            {{- if .Values.router.tls.secretName }}
+            - name: tls
+              mountPath: /etc/multihull/tls
+              readOnly: true
+            {{- end }}
+            {{- if eq .Values.router.snapshot.type "file" }}
+            - name: snapshot
+              mountPath: /var/lib/multihull
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "multihull.fullname" . }}-router
+        {{- if .Values.router.tls.secretName }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.router.tls.secretName }}
+        {{- end }}
+        {{- if eq .Values.router.snapshot.type "file" }}
+        - name: snapshot
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.router.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.router.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.router.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

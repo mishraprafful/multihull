@@ -1,0 +1,31 @@
+---
+title: Kubernetes
+description: Any GPU cluster, built-in kinds only, via the Kubernetes API.
+---
+
+Uses the `kubernetes` Python client with server-side apply (field manager `multihull`). Built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and `concurrency` is set), optional Gateway API HTTPRoute or Ingress. No CRDs, no operator.
+
+```yaml
+- provider: gke-prod
+  type: kubernetes
+  priority: 1
+  replicas: {min: 2}
+  kubernetes: {context: gke_acme_europe-west4_prod, namespace: inference}
+```
+
+Credentials: the kubeconfig context named in the target.
+
+## Translation
+
+| Spec field | Kubernetes |
+|---|---|
+| `container.image` | `Deployment.spec.template.spec.containers[0].image` |
+| `container.command`, `port` | container `command`, `containerPort` |
+| `resources.gpu` | `nodeSelector` + `nvidia.com/gpu` limit + tolerations |
+| `scaling.replicas` | Deployment `replicas` + HPA min/max (KEDA when concurrency set) |
+| `scaling.concurrency` | KEDA trigger target |
+| `container.health` | readiness and liveness probes |
+| `container.secrets` | `Secret` + `envFrom` |
+| endpoint | LoadBalancer Service or Gateway `HTTPRoute` |
+
+Ref stored in state: namespace plus resource names. Every resource carries the label `multihull.dev/service=<name>` for `rediscover`.

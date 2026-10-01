@@ -1,0 +1,63 @@
+---
+title: Quickstart
+description: From a Dockerfile to a multi-provider deployment with the hull CLI.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Five commands take a container from your laptop to two or more GPU providers behind one URL.
+
+<Steps>
+
+1. **Install**
+
+   ```sh
+   uv tool install multihull
+   ```
+
+2. **Initialise a spec**
+
+   `hull init` detects a Dockerfile, vLLM or TGI setup and writes `multihull.yaml`.
+
+   ```sh
+   hull init
+   ```
+
+3. **Check credentials and GPU availability**
+
+   ```sh
+   $ hull doctor
+   gke-prod    OK
+   modal-main  OK
+   runpod-eu   OK  (L4 in EU-RO-1)
+   ```
+
+   Credentials come from each provider's native location (kubeconfig, `~/.modal.toml`, `RUNPOD_API_KEY`). Nothing goes in the file.
+
+4. **Plan**
+
+   Renders every provider's native payload to `.multihull/plan/` and diffs it against recorded state.
+
+   ```sh
+   hull plan
+   ```
+
+5. **Deploy and watch**
+
+   ```sh
+   $ hull deploy
+   $ hull status
+   gke-prod    Ready  2/2  L4    https://gke.int/llama
+   modal-main  Ready  1/1  A10G  https://acme--multihull-llama-8b.modal.run
+   runpod-eu   Ready  1/1  L4    https://api.runpod.ai/v2/abc/
+   ```
+
+   All targets apply concurrently. One failing target never blocks the others.
+
+</Steps>
+
+## Next
+
+- Run the router: see [Router overview](/docs/router/overview/) or the Helm chart in `charts/multihull`.
+- Prove failover: `hull failover test -p gke-prod` drains the primary for 60 s and reports traffic shift and error count.
+- Example spec: `examples/llama-8b/multihull.yaml` in the repository.

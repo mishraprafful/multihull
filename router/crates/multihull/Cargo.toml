@@ -1,0 +1,29 @@
+[package]
+name = "multihull"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Stateless request router for multi-provider GPU inference with automatic failover."
+readme = "README.md"
+keywords = ["gpu", "inference", "proxy", "failover", "router"]
+categories = ["network-programming", "web-programming::http-server"]
+
+[[bin]]
+name = "multihull"
+path = "src/main.rs"
+
+[dependencies]
+router-admin = { workspace = true }
+router-core = { workspace = true }
+router-cp = { workspace = true }
+router-obs = { workspace = true }
+router-proxy = { workspace = true }
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }

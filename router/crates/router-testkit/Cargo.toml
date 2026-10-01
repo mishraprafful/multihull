@@ -1,0 +1,16 @@
+[package]
+name = "router-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Mock upstream with fault injection for Multihull router tests."
+publish = false
+
+[dependencies]
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }

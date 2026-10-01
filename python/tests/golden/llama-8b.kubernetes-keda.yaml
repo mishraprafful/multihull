@@ -1,0 +1,143 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: multihull-llama-8b
+  namespace: inference
+  labels:
+    multihull.dev/service: llama-8b
+    multihull.dev/provider: gke-prod
+  annotations:
+    multihull.dev/secret-keys: hf-token
+type: Opaque
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-8b
+  namespace: inference
+  labels:
+    multihull.dev/service: llama-8b
+    multihull.dev/provider: gke-prod
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      multihull.dev/service: llama-8b
+  template:
+    metadata:
+      labels:
+        multihull.dev/service: llama-8b
+        multihull.dev/provider: gke-prod
+    spec:
+      containers:
+      - name: llama-8b
+        image: ghcr.io/acme/vllm-llama:1.4.0
+        ports:
+        - name: http
+          containerPort: 8000
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+            memory: 32Gi
+          requests:
+            memory: 32Gi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          failureThreshold: 3
+        command:
+        - vllm
+        - serve
+        - meta-llama/Llama-3.1-8B-Instruct
+        env:
+        - name: VLLM_LOGGING_LEVEL
+          value: INFO
+        envFrom:
+        - secretRef:
+            name: multihull-llama-8b
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: multihull.dev/gpu-class
+                operator: In
+                values:
+                - L4
+                - A10G
+                - A100-40
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: multihull.dev/gpu-class
+                operator: In
+                values:
+                - L4
+          - weight: 90
+            preference:
+              matchExpressions:
+              - key: multihull.dev/gpu-class
+                operator: In
+                values:
+                - A10G
+          - weight: 80
+            preference:
+              matchExpressions:
+              - key: multihull.dev/gpu-class
+                operator: In
+                values:
+                - A100-40
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-8b
+  namespace: inference
+  labels:
+    multihull.dev/service: llama-8b
+    multihull.dev/provider: gke-prod
+spec:
+  type: LoadBalancer
+  selector:
+    multihull.dev/service: llama-8b
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: llama-8b
+  namespace: inference
+  labels:
+    multihull.dev/service: llama-8b
+    multihull.dev/provider: gke-prod
+spec:
+  scaleTargetRef:
+    name: llama-8b
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  cooldownPeriod: 300
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-operated.monitoring.svc:9090
+      query: sum(router_upstream_inflight{service="llama-8b",provider="gke-prod"})
+      threshold: '32'

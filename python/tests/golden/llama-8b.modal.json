@@ -1,0 +1,37 @@
+{
+  "app_name": "multihull-llama-8b",
+  "environment": "main",
+  "region": "eu",
+  "tags": {
+    "multihull.dev/service": "llama-8b"
+  },
+  "image": {
+    "ref": "ghcr.io/acme/vllm-llama:1.4.0",
+    "secret": null
+  },
+  "gpu": "L4",
+  "memory_mib": 32768,
+  "min_containers": 1,
+  "max_containers": 8,
+  "buffer_containers": 1,
+  "scaledown_window": 300,
+  "max_inputs": 32,
+  "web_server": {
+    "port": 8000,
+    "startup_timeout": 120
+  },
+  "command": [
+    "vllm",
+    "serve",
+    "meta-llama/Llama-3.1-8B-Instruct"
+  ],
+  "env": {
+    "VLLM_LOGGING_LEVEL": "INFO"
+  },
+  "secret": {
+    "name": "multihull-llama-8b",
+    "keys": [
+      "hf-token"
+    ]
+  }
+}

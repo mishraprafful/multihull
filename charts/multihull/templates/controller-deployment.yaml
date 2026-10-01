@@ -1,0 +1,82 @@
+{{- if .Values.controller.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "multihull.fullname" . }}-controller
+  labels:
+    {{- include "multihull.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "multihull.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        {{- include "multihull.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "multihull.serviceAccountName" . }}
+      containers:
+        - name: controller
+          image: {{ include "multihull.controllerImage" . | quote }}
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          command:
+            - hull
+            - controller
+            - "--spec"
+            - "/etc/multihull/multihull.yaml"
+            - "--listen"
+            - "0.0.0.0:{{ .Values.controller.grpcPort }}"
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.controller.grpcPort }}
+              protocol: TCP
+          env:
+            - name: MULTIHULL_STATE_BACKEND
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "controller.stateBackend.existingSecret is required when controller.enabled" .Values.controller.stateBackend.existingSecret }}
+                  key: {{ .Values.controller.stateBackend.key }}
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          {{- if .Values.controller.specConfigMap }}
+          volumeMounts:
+            - name: spec
+              mountPath: /etc/multihull/multihull.yaml
+              subPath: multihull.yaml
+              readOnly: true
+          {{- end }}
+      {{- if .Values.controller.specConfigMap }}
+      volumes:
+        - name: spec
+          configMap:
+            name: {{ .Values.controller.specConfigMap }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "multihull.fullname" . }}-controller
+  labels:
+    {{- include "multihull.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "multihull.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+  ports:
+    - name: grpc
+      port: {{ .Values.controller.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+{{- end }}

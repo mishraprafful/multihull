@@ -1,0 +1,180 @@
+:root {
+  --mh-navy: #0b1d2e;
+  --mh-foam: #f4f1ea;
+  --mh-sand: #e9dcc3;
+  --mh-teal: #1fb6a6;
+  --mh-coral: #ff6b57;
+  --mh-amber: #f5b841;
+
+  --sl-font: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+:root,
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #0f3a3a;
+  --sl-color-accent: var(--mh-teal);
+  --sl-color-accent-high: #8fe3d9;
+  --sl-color-white: var(--mh-foam);
+  --sl-color-gray-1: #e6e2d8;
+  --sl-color-gray-2: #c4c0b6;
+  --sl-color-gray-3: #8c9aa6;
+  --sl-color-gray-4: #4a5c6c;
+  --sl-color-gray-5: #223548;
+  --sl-color-gray-6: #142a3e;
+  --sl-color-black: var(--mh-navy);
+  --sl-color-bg: var(--mh-navy);
+  --sl-color-bg-nav: #0d2235;
+  --sl-color-bg-sidebar: #0d2235;
+  --sl-color-bg-inline-code: #142a3e;
+  --sl-color-text: var(--mh-foam);
+  --sl-color-text-accent: var(--mh-teal);
+  --sl-color-hairline: #223548;
+  --sl-color-hairline-light: #1a3144;
+  --sl-color-hairline-shade: #0a1826;
+  --mh-surface: #122839;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d3f1ec;
+  --sl-color-accent: #158f83;
+  --sl-color-accent-high: #0b3d38;
+  --sl-color-white: #10212f;
+  --sl-color-gray-1: #223548;
+  --sl-color-gray-2: #3b4f61;
+  --sl-color-gray-3: #6a7c8b;
+  --sl-color-gray-4: #a39b8a;
+  --sl-color-gray-5: #d9ccb2;
+  --sl-color-gray-6: var(--mh-sand);
+  --sl-color-gray-7: #f1ead9;
+  --sl-color-black: #faf7f0;
+  --sl-color-bg: #faf7f0;
+  --sl-color-bg-nav: var(--mh-sand);
+  --sl-color-bg-sidebar: #f1ead9;
+  --sl-color-bg-inline-code: var(--mh-sand);
+  --sl-color-text: #10212f;
+  --sl-color-text-accent: #158f83;
+  --sl-color-hairline: #d9ccb2;
+  --sl-color-hairline-light: #e3d9c4;
+  --sl-color-hairline-shade: #cfc1a4;
+  --mh-surface: var(--mh-sand);
+}
+
+.sl-markdown-content hr,
+.mh-horizon {
+  border: 0;
+  height: 2px;
+  margin: 2.5rem 0;
+  background: linear-gradient(90deg, transparent, var(--sl-color-accent) 20%, var(--sl-color-accent) 80%, transparent);
+  opacity: 0.7;
+}
+
+.sl-markdown-content code,
+.sl-markdown-content pre,
+.expressive-code {
+  font-family: var(--sl-font-mono);
+}
+
+.sl-markdown-content table {
+  font-variant-numeric: tabular-nums;
+}
+
+.hero h1 {
+  letter-spacing: -0.02em;
+}
+
+.hero .tagline {
+  color: var(--sl-color-gray-2);
+}
+
+.mh-value-props {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  margin: 2rem 0;
+}
+
+.mh-value-props > div {
+  background: var(--mh-surface);
+  border: 1px solid var(--sl-color-hairline);
+  border-top: 3px solid var(--sl-color-accent);
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+}
+
+.mh-value-props h3 {
+  margin: 0 0 0.5rem;
+  font-size: var(--sl-text-lg);
+}
+
+.mh-value-props p {
+  margin: 0;
+  color: var(--sl-color-gray-2);
+}
+
+.mh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.15em 0.7em;
+  border-radius: 999px;
+  font-family: var(--sl-font-mono);
+  font-size: 0.8em;
+  font-weight: 500;
+  line-height: 1.6;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.mh-pill::before {
+  content: '';
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.mh-pill[data-state='healthy'] {
+  color: var(--mh-teal);
+  background: color-mix(in srgb, var(--mh-teal) 14%, transparent);
+}
+
+.mh-pill[data-state='degraded'] {
+  color: var(--mh-amber);
+  background: color-mix(in srgb, var(--mh-amber) 16%, transparent);
+}
+
+.mh-pill[data-state='failover'] {
+  color: var(--mh-coral);
+  background: color-mix(in srgb, var(--mh-coral) 16%, transparent);
+}
+
+:root[data-theme='light'] .mh-pill[data-state='degraded'] {
+  color: #8a5e00;
+}
+
+:root[data-theme='light'] .mh-pill[data-state='failover'] {
+  color: #b83a28;
+}
+
+:root[data-theme='light'] .mh-pill[data-state='healthy'] {
+  color: #0f7a70;
+}
+
+.starlight-aside--danger {
+  --sl-color-asides-text-accent: var(--mh-coral);
+  --sl-color-asides-border: var(--mh-coral);
+  background: color-mix(in srgb, var(--mh-coral) 12%, transparent);
+}
+
+.starlight-aside--caution {
+  --sl-color-asides-text-accent: var(--mh-amber);
+  --sl-color-asides-border: var(--mh-amber);
+  background: color-mix(in srgb, var(--mh-amber) 12%, transparent);
+}
+
+.starlight-aside--tip {
+  --sl-color-asides-text-accent: var(--mh-teal);
+  --sl-color-asides-border: var(--mh-teal);
+  background: color-mix(in srgb, var(--mh-teal) 12%, transparent);
+}
