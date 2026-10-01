@@ -1,0 +1,13 @@
+[package]
+name = "multihull"
+version = "0.0.1"
+edition = "2021"
+description = "Stateless request router for multi-provider GPU inference with automatic failover."
+license = "Apache-2.0"
+repository = "https://github.com/mishraprafful/multihull"
+homepage = "https://github.com/mishraprafful/multihull"
+readme = "README.md"
+keywords = ["gpu", "inference", "proxy", "failover", "router"]
+categories = ["network-programming", "web-programming::http-server"]
+
+[dependencies]
