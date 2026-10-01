@@ -1,0 +1,20 @@
+{
+  "image": {
+    "push": "r8.im/acme/multihull-llama-8b",
+    "build": "cog"
+  },
+  "deployment": {
+    "name": "multihull-llama-8b",
+    "model": "acme/multihull-llama-8b",
+    "version": "{version}",
+    "hardware": "gpu-l40s",
+    "min_instances": 1,
+    "max_instances": 8
+  },
+  "env": {
+    "VLLM_LOGGING_LEVEL": "INFO"
+  },
+  "secrets": [
+    "hf-token"
+  ]
+}
