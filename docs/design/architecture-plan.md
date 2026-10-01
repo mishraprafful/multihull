@@ -29,7 +29,6 @@ Goal: an open-source framework that
 | v1 providers | Kubernetes (any GPU cluster), Modal, RunPod Serverless, Baseten, Replicate (Cog images only). **Fly.io dropped**: Fly deprecated GPUs on 31 Jul 2026. |
 | Router placement | Self-hosted anywhere, stateless, multi-region optional |
 | Name | Multihull. Package `multihull`, CLI `hull`, GitHub `mishraprafful/multihull`. |
-| Deliverables after approval | Design docs, repo scaffold, docs website skeleton with theme |
 
 ## Name and theme
 
@@ -313,19 +312,6 @@ multihull/
 3. **Retry safety vs streaming.** Zero-bytes-committed rule, full body buffering, documented SSE limit with SDK retry contract.
 4. **Storms and recovery herds.** 20% retry budget, two-level circuits, jittered exponential ejection, ramped half-open, panic threshold.
 5. **State without a Kubernetes API.** Terraform-style backend with locking plus tag-based `rediscover` so a lost state file is recoverable.
-
-## Deliverables in this session (after approval)
-
-1. `docs/design/*.md`: principles, architecture, spec, translators table, control plane, data plane, roadmap, prior art with citations.
-2. Repo scaffold at `/Users/prafful.mishra/coding/mishraprafful/multihull/`:
-   - `python/`: pydantic spec with JSON Schema export, `Provider` Protocol, Kubernetes and Modal translators producing native payloads (apply calls stubbed behind a `--dry-run` default), local SQLite state backend, `hull` CLI with `init/plan/status`, golden tests for spec → Kubernetes manifests and spec → Modal parameters. `uv run pytest` passes.
-   - `proto/discovery.proto`.
-   - `router/`: Cargo workspace with crate skeletons and the `outcome`, `circuit`, `limit`, `snapshot` types.
-   - `charts/multihull/` skeleton, `examples/llama-8b/`.
-3. `website/`: Astro Starlight with Open water tokens, landing page, quickstart, design docs in the sidebar.
-4. `git init` plus atomic Conventional Commits per area. No remote push.
-
-Toolchain on this machine: Go 1.25.1 (no longer needed), Python 3.14 with uv, Node 24 with npm, Docker, kubectl. **Missing: cargo/rustc, helm, buf/protoc.** Rust scaffold will be written but `cargo check` needs `rustup` installed first (command proposed, not run). Proto generation via `grpcio-tools` in Python and `tonic-build` in Rust, no system protoc.
 
 ## Verification
 
