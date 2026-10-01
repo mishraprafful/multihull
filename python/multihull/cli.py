@@ -13,6 +13,7 @@ from rich.table import Table
 
 from multihull import deploy as deploymod
 from multihull import discovery, engine
+from multihull import logs as logsmod
 from multihull import spec as specmod
 from multihull.durations import parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
@@ -336,6 +337,37 @@ def destroy(
     console.print(f"wrote {discovery.write_snapshot(document, snapshot_out)}")
     if not all(r.ok for r in results):
         raise typer.Exit(1)
+
+
+@app.command()
+def logs(
+    path: SpecArg = DEFAULT_SPEC,
+    provider: Annotated[str, typer.Option("--provider", "-p", help="Target provider name")] = "",
+    since: Annotated[str, typer.Option(help="How far back to read, e.g. 10m")] = "10m",
+    follow: Annotated[bool, typer.Option("--follow", "-f", help="Keep streaming")] = False,
+    state_path: StateOpt = DEFAULT_STATE,
+) -> None:
+    service = load_or_exit(path)
+    if not provider:
+        errors.print("[red]--provider is required[/red]")
+        raise typer.Exit(2)
+    if unknown_targets(service, [provider]):
+        errors.print(f"[red]unknown target {provider}[/red]")
+        raise typer.Exit(2)
+    record = LocalState(state_path).get(service.name, provider)
+    if record is None:
+        errors.print(f"[red]no state for {service.name}/{provider}; run hull deploy first[/red]")
+        raise typer.Exit(1)
+    window = duration_or_exit(since, "--since")
+    source = provider_for(service.target(provider), live=True)
+    try:
+        for line in logsmod.stream_logs(source, Ref.from_json(record.ref), window, follow):
+            typer.echo(line)
+    except KeyboardInterrupt:
+        return
+    except RuntimeError as exc:
+        errors.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
 
 
 @app.command()
