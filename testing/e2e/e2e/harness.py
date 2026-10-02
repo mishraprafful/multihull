@@ -28,6 +28,8 @@ CONTROLLER_SNAPSHOT_PATH = Path("snapshot.json")
 SPEC_NAME = "multihull.yaml"
 STICKY_SPEC_NAME = "multihull-sticky.yaml"
 READY_HEALTH = {"ready"}
+DEGRADED_COOLDOWN = "5s"
+DEGRADED_COOLDOWN_SECONDS = 5.0
 
 
 def free_port() -> int:
@@ -252,7 +254,12 @@ class Controller(Process):
     def snapshot_path(self) -> Path:
         return self.workdir / CONTROLLER_SNAPSHOT_PATH
 
-    def start(self, spec_path: Path | None = None, interval: str = "2s") -> None:
+    def start(
+        self,
+        spec_path: Path | None = None,
+        interval: str = "2s",
+        degraded_cooldown: str = DEGRADED_COOLDOWN,
+    ) -> None:
         if spec_path is not None:
             self.spec_path = spec_path
         if self.snapshot_path.exists():
@@ -270,6 +277,8 @@ class Controller(Process):
                 str(self.snapshot_path),
                 "--interval",
                 interval,
+                "--degraded-cooldown",
+                degraded_cooldown,
                 *state_args(self.workdir),
             ]
         )
