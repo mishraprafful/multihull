@@ -44,7 +44,7 @@ Rules for entries
 | 2026-10-02 | Docs on Cloudflare Pages, deployed from GitHub Actions with wrangler, not Cloudflare's Git integration | The build needs uv and Python for generated reference pages; Actions already has them |
 | 2026-10-02 | Cloudflare secrets at repository level, not in an environment | Environment secrets limited to `main` never reach PR preview runs |
 | 2026-10-02 | Docker provider plus mock model server as the free failover layer | A laptop or CI runner stands in for several providers, so failover is exercised on every PR without GPUs or cloud credentials |
-| 2026-10-02 | Hero pills read serving, down, recovering instead of breaker states | Closed, open and half-open are router internals; the home page should say what each provider is doing |
+| 2026-10-02 | Hero pills read serving, down, recovering instead of breaker states | Owner read a green closed pill as wrong and asked for open to be green. Swapping colours would contradict the router's own breaker terms, so the words changed instead: green always means the provider is serving |
 | 2026-10-02 | Website refresh proposal dropped from the repo (PR 26) | The PR description carries the rationale next to the diff; a one-off proposal in `docs/design` would go stale |
 
 ## Open questions
