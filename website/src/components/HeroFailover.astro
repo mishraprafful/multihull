@@ -1,0 +1,501 @@
+<figure class="hf">
+  <svg
+    viewBox="0 0 960 420"
+    role="img"
+    aria-labelledby="hf-title hf-desc"
+    aria-label="A trimaran seen from above. Three hulls are three GPU providers: Kubernetes, Modal and RunPod. Requests from one URL reach the router and flow to the primary hull. When the primary circuit opens, traffic reroutes to Modal with zero errors, then returns once Kubernetes passes its half-open ramp."
+  >
+    <title id="hf-title">Per-request failover across three providers</title>
+    <desc id="hf-desc">
+      Requests from one URL on the left reach the router at the forward crossbeam and flow to the Kubernetes hull.
+      Its circuit opens, the status pill turns coral and the stream moves to Modal within one beat while the error counter stays at zero.
+      Kubernetes recovers through an amber half-open ramp and traffic returns.
+    </desc>
+
+    <defs>
+      <path id="hf-hull-shape" d="M16-20H340Q395-14 410 0Q395 14 340 20H16Q0 20 0 0Q0-20 16-20Z" />
+      <path id="hf-wave" vector-effect="non-scaling-stroke" d="M0 0q10-8 20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0t20 0" />
+      <clipPath id="hf-spark-clip"><rect x="0" y="-14" width="400" height="28" /></clipPath>
+      <g id="hf-mark" stroke-width="4" stroke-linecap="round" fill="none">
+        <line x1="12" y1="10" x2="12" y2="54" />
+        <line x1="32" y1="6" x2="32" y2="58" />
+        <line x1="52" y1="10" x2="52" y2="54" />
+        <line x1="12" y1="24" x2="52" y2="24" />
+        <line x1="12" y1="42" x2="52" y2="42" />
+      </g>
+    </defs>
+
+    <rect class="hf-water" x="0" y="38" width="960" height="382" />
+    <line class="hf-horizon" x1="0" y1="38" x2="960" y2="38" />
+
+    <g class="hf-legend t2">
+      <circle class="c-ok" cx="708" cy="21" r="4" />
+      <text class="t2" x="718" y="21">closed</text>
+      <circle class="c-down" cx="782" cy="21" r="4" />
+      <text class="t2" x="792" y="21">open</text>
+      <circle class="c-warn" cx="846" cy="21" r="4" />
+      <text class="t2" x="856" y="21">half-open</text>
+    </g>
+
+    <rect class="hf-url" x="40" y="189" width="190" height="32" rx="16" />
+    <text class="t2 url" x="135" y="205.5">llama.api.acme.com</text>
+    <text class="t-narrow" x="135" y="205.5">one URL</text>
+
+    <rect class="hf-counter t2" x="40" y="236" width="98" height="24" rx="12" />
+    <text class="t1 c-ok counter" x="89" y="248.5">0 errors</text>
+    <rect class="hf-counter muted t2" x="146" y="236" width="84" height="24" rx="12" />
+    <text class="t2 counter ph-a" x="188" y="248.5">failovers 0</text>
+    <text class="t2 counter ph-bcd" x="188" y="248.5">failovers 1</text>
+
+    <line class="hf-lane" x1="230" y1="205" x2="444" y2="205" />
+
+    <g class="hf-hull" transform="translate(440 100)">
+      <use class="hf-hull-body" href="#hf-hull-shape" />
+      <text class="t2 badge" x="52" y="0.5">P1</text>
+      <circle class="hf-dock" cx="80" cy="0" r="4" />
+      <text class="t1 name" x="175" y="-3">Kubernetes</text>
+      <text class="t2 spec" x="175" y="11">2 x L4</text>
+      <g class="hf-breaker breaker1" transform="translate(224 0)">
+        <circle cx="0" cy="0" r="2.5" />
+        <circle cx="16" cy="0" r="2.5" />
+        <rect class="hf-arm arm1" x="0" y="-1.25" width="14" height="2.5" />
+      </g>
+      <rect class="hf-pill pill1" x="290" y="-9" width="72" height="18" rx="9" />
+      <text class="t2 pill-text c-ok ph-ad" x="326" y="0.5">closed</text>
+      <text class="t2 pill-text c-down ph-b" x="326" y="0.5">open</text>
+      <text class="t2 pill-text c-warn ph-c" x="326" y="0.5">half-open</text>
+      <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
+        <g class="hf-health health1">
+          <g class="hf-scroll"><use href="#hf-wave" /></g>
+        </g>
+      </g>
+    </g>
+
+    <g class="hf-hull" transform="translate(440 205)">
+      <use class="hf-hull-body" href="#hf-hull-shape" />
+      <text class="t2 badge" x="52" y="0.5">P2</text>
+      <circle class="hf-dock" cx="80" cy="0" r="4" />
+      <text class="t1 name" x="175" y="-3">Modal</text>
+      <text class="t2 spec" x="175" y="11">1 x A10G</text>
+      <g class="hf-breaker" transform="translate(224 0)">
+        <circle cx="0" cy="0" r="2.5" />
+        <circle cx="16" cy="0" r="2.5" />
+        <rect class="hf-arm" x="0" y="-1.25" width="14" height="2.5" />
+      </g>
+      <rect class="hf-pill" x="290" y="-9" width="72" height="18" rx="9" />
+      <text class="t2 pill-text c-ok" x="326" y="0.5">closed</text>
+      <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
+        <g class="hf-health health2">
+          <g class="hf-scroll"><use href="#hf-wave" /></g>
+        </g>
+      </g>
+    </g>
+
+    <g class="hf-hull" transform="translate(440 310)">
+      <use class="hf-hull-body" href="#hf-hull-shape" />
+      <text class="t2 badge" x="52" y="0.5">P3</text>
+      <circle class="hf-dock" cx="80" cy="0" r="4" />
+      <text class="t1 name" x="175" y="-3">RunPod</text>
+      <text class="t2 spec" x="175" y="11">1 x L4</text>
+      <g class="hf-breaker" transform="translate(224 0)">
+        <circle cx="0" cy="0" r="2.5" />
+        <circle cx="16" cy="0" r="2.5" />
+        <rect class="hf-arm" x="0" y="-1.25" width="14" height="2.5" />
+      </g>
+      <rect class="hf-pill" x="290" y="-9" width="72" height="18" rx="9" />
+      <text class="t2 pill-text c-ok" x="326" y="0.5">closed</text>
+      <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
+        <g class="hf-health">
+          <g class="hf-scroll"><use href="#hf-wave" /></g>
+        </g>
+      </g>
+    </g>
+
+    <line class="hf-beam" x1="470" y1="100" x2="470" y2="310" />
+    <line class="hf-beam" x1="690" y1="100" x2="690" y2="310" />
+
+    <rect class="hf-router" x="444" y="179" width="52" height="52" rx="10" />
+    <use class="hf-router-mark" href="#hf-mark" transform="translate(458 184) scale(0.375)" />
+    <text class="t2 router-label" x="470" y="220">router</text>
+
+    <circle class="hf-pkt p1" r="4.5" />
+    <circle class="hf-pkt p2" r="4.5" />
+    <circle class="hf-pkt p3" r="4.5" />
+    <circle class="hf-pkt p4" r="4.5" />
+    <circle class="hf-probe q1" r="3.5" />
+    <circle class="hf-probe q2" r="3.5" />
+    <circle class="hf-probe q3" r="3.5" />
+
+    <text class="t2 caption ph-a" x="40" y="392">All circuits closed. Requests flow to priority 1.</text>
+    <text class="t2 caption ph-b" x="40" y="392">Kubernetes circuit opens. Next request lands on Modal. Callers see zero errors.</text>
+    <text class="t2 caption ph-c" x="40" y="392">Half-open: admit 1 request, then 5%, 25%, 100%.</text>
+    <text class="t2 caption ph-d" x="40" y="392">Recovered. Traffic returns to priority 1.</text>
+  </svg>
+</figure>
+
+<style>
+  .hf {
+    margin: 2rem 0 1rem;
+    color: var(--sl-color-text);
+  }
+
+  .hf svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  text {
+    font-family: var(--sl-font-mono);
+    font-size: 10px;
+    fill: var(--sl-color-gray-3);
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+
+  .t1 {
+    font-family: var(--sl-font);
+    font-size: 13px;
+    font-weight: 600;
+    fill: var(--sl-color-text);
+  }
+
+  .t-narrow {
+    display: none;
+    font-size: 24px;
+    fill: var(--sl-color-text);
+  }
+
+  .url {
+    font-size: 13px;
+    fill: var(--sl-color-text);
+  }
+
+  .counter {
+    font-size: 11px;
+  }
+
+  .counter.t1 {
+    font-family: var(--sl-font-mono);
+    font-size: 12px;
+  }
+
+  .caption {
+    font-size: 12px;
+    text-anchor: start;
+    fill: var(--sl-color-gray-2);
+  }
+
+  .hf-legend text {
+    text-anchor: start;
+  }
+
+  .c-ok { fill: var(--mh-ok); }
+  .c-down { fill: var(--mh-down); }
+  .c-warn { fill: var(--mh-warn); }
+
+  .hf-water {
+    fill: color-mix(in srgb, var(--mh-teal) 7%, transparent);
+  }
+
+  .hf-horizon {
+    stroke: var(--sl-color-hairline);
+    stroke-width: 1.5;
+  }
+
+  .hf-url,
+  .hf-router {
+    fill: var(--mh-surface);
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 1.5;
+  }
+
+  .hf-router {
+    stroke: var(--mh-ok);
+    stroke-width: 2;
+  }
+
+  .hf-router-mark {
+    stroke: var(--mh-ok);
+  }
+
+  .hf-counter {
+    fill: color-mix(in srgb, var(--mh-ok) 14%, transparent);
+    stroke: var(--mh-ok);
+    stroke-width: 1.5;
+  }
+
+  .hf-counter.muted {
+    fill: transparent;
+    stroke: var(--sl-color-gray-5);
+  }
+
+  .hf-lane {
+    stroke: var(--sl-color-gray-5);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 6;
+  }
+
+  .hf-hull-body {
+    fill: var(--mh-surface);
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 1.5;
+  }
+
+  .hf-dock {
+    fill: var(--sl-color-gray-3);
+  }
+
+  .hf-beam {
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 8;
+    stroke-linecap: round;
+  }
+
+  .hf-breaker {
+    fill: var(--mh-ok);
+    stroke: var(--mh-ok);
+    stroke-width: 0;
+  }
+
+  .hf-arm {
+    transform-box: fill-box;
+    transform-origin: 0 50%;
+  }
+
+  .hf-pill {
+    fill: color-mix(in srgb, var(--mh-ok) 14%, transparent);
+    stroke: var(--mh-ok);
+    stroke-width: 1.2;
+  }
+
+  .hf-health use {
+    fill: none;
+    stroke: var(--mh-ok);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    opacity: 0.85;
+  }
+
+  .hf-health {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .hf-pkt {
+    fill: var(--mh-ok);
+    stroke: var(--sl-color-bg);
+    stroke-width: 1.5;
+  }
+
+  .hf-probe {
+    fill: var(--mh-warn);
+    stroke: var(--sl-color-bg);
+    stroke-width: 1.5;
+    opacity: 0;
+  }
+
+  .ph-a, .ph-c, .ph-d, .ph-ad {
+    opacity: 0;
+  }
+
+  .ph-b, .ph-bcd {
+    opacity: 1;
+  }
+
+  .pill1 {
+    fill: color-mix(in srgb, var(--mh-down) 14%, transparent);
+    stroke: var(--mh-down);
+  }
+
+  .breaker1 {
+    fill: var(--mh-down);
+  }
+
+  .arm1 {
+    transform: rotate(-40deg);
+  }
+
+  .health1 {
+    transform: scaleY(0.08);
+  }
+
+  .health1 use {
+    stroke: var(--mh-down);
+  }
+
+  .health2 {
+    transform: scaleY(1.35);
+  }
+
+  .p1 { transform: translate(290px, 205px); }
+  .p2 { transform: translate(360px, 205px); }
+  .p3 { transform: translate(425px, 205px); }
+  .p4 { transform: translate(504px, 205px); }
+
+  @media (max-width: 40rem) {
+    .t2 { display: none; }
+    .t-narrow { display: block; }
+    .t1 { font-size: 26px; }
+    .counter.t1 { font-size: 22px; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .hf-scroll {
+      animation: hf-scroll 3s linear infinite;
+    }
+
+    .hf-pkt {
+      animation: hf-pkt 12s linear infinite;
+    }
+
+    .p2 { animation-delay: -11.6s; }
+    .p3 { animation-delay: -11.2s; }
+    .p4 { animation-delay: -10.8s; }
+
+    .hf-probe {
+      animation: hf-probe 12s linear infinite;
+    }
+
+    .q2 { animation-delay: -11s; }
+    .q3 { animation-delay: -10.2s; }
+
+    .pill1 { animation: hf-pill1 12s linear infinite; }
+    .breaker1 { animation: hf-breaker1 12s linear infinite; }
+    .arm1 { animation: hf-arm1 12s ease-out infinite; }
+    .health1 { animation: hf-health1 12s linear infinite; }
+    .health1 use { animation: hf-stroke1 12s linear infinite; }
+    .health2 { animation: hf-health2 12s ease-in-out infinite; }
+
+    .ph-a { animation: hf-ph-a 12s steps(1, end) infinite; }
+    .ph-b { animation: hf-ph-b 12s steps(1, end) infinite; }
+    .ph-c { animation: hf-ph-c 12s steps(1, end) infinite; }
+    .ph-d { animation: hf-ph-d 12s steps(1, end) infinite; }
+    .ph-ad { animation: hf-ph-ad 12s steps(1, end) infinite; }
+    .ph-bcd { animation: hf-ph-bcd 12s steps(1, end) infinite; }
+  }
+
+  @keyframes hf-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-40px); }
+  }
+
+  @keyframes hf-pkt {
+    0% { transform: translate(236px, 205px); opacity: 0; }
+    0.4% { opacity: 1; }
+    4.5% { transform: translate(470px, 205px); }
+    6.5% { transform: translate(470px, 100px); }
+    7.5% { transform: translate(520px, 100px); opacity: 1; }
+    7.9% { transform: translate(520px, 100px); opacity: 0; }
+    16.7% { transform: translate(236px, 205px); opacity: 0; }
+    17.1% { opacity: 1; }
+    21.2% { transform: translate(470px, 205px); }
+    23.2% { transform: translate(470px, 100px); }
+    24.2% { transform: translate(520px, 100px); opacity: 1; }
+    24.6% { transform: translate(520px, 100px); opacity: 0; }
+    40.8% { transform: translate(236px, 205px); opacity: 0; }
+    41.2% { opacity: 1; }
+    46.3% { transform: translate(470px, 205px); }
+    48.3% { transform: translate(520px, 205px); opacity: 1; }
+    48.7% { transform: translate(520px, 205px); opacity: 0; }
+    55% { transform: translate(236px, 205px); opacity: 0; }
+    55.4% { opacity: 1; }
+    60.5% { transform: translate(470px, 205px); }
+    62.5% { transform: translate(520px, 205px); opacity: 1; }
+    62.9% { transform: translate(520px, 205px); opacity: 0; }
+    70% { transform: translate(236px, 205px); opacity: 0; }
+    70.4% { opacity: 1; }
+    75.5% { transform: translate(470px, 205px); }
+    77.5% { transform: translate(520px, 205px); opacity: 1; }
+    77.9% { transform: translate(520px, 205px); opacity: 0; }
+    83.3% { transform: translate(236px, 205px); opacity: 0; }
+    83.7% { opacity: 1; }
+    87.8% { transform: translate(470px, 205px); }
+    89.8% { transform: translate(470px, 100px); }
+    90.8% { transform: translate(520px, 100px); opacity: 1; }
+    91.2% { transform: translate(520px, 100px); opacity: 0; }
+    100% { transform: translate(236px, 205px); opacity: 0; }
+  }
+
+  @keyframes hf-probe {
+    0%, 63.2% { transform: translate(470px, 205px); opacity: 0; }
+    63.4% { opacity: 1; }
+    65.4% { transform: translate(470px, 100px); }
+    66.4% { transform: translate(520px, 100px); opacity: 1; }
+    66.8%, 100% { transform: translate(520px, 100px); opacity: 0; }
+  }
+
+  @keyframes hf-pill1 {
+    0%, 36.4% { fill: color-mix(in srgb, var(--mh-ok) 14%, transparent); stroke: var(--mh-ok); }
+    36.5%, 62.4% { fill: color-mix(in srgb, var(--mh-down) 14%, transparent); stroke: var(--mh-down); }
+    62.5%, 82.4% { fill: color-mix(in srgb, var(--mh-warn) 14%, transparent); stroke: var(--mh-warn); }
+    82.5%, 100% { fill: color-mix(in srgb, var(--mh-ok) 14%, transparent); stroke: var(--mh-ok); }
+  }
+
+  @keyframes hf-breaker1 {
+    0%, 36.4% { fill: var(--mh-ok); }
+    36.5%, 62.4% { fill: var(--mh-down); }
+    62.5%, 82.4% { fill: var(--mh-warn); }
+    82.5%, 100% { fill: var(--mh-ok); }
+  }
+
+  @keyframes hf-arm1 {
+    0%, 36.3% { transform: rotate(0deg); }
+    36.8%, 62.4% { transform: rotate(-40deg); }
+    62.9%, 82.2% { transform: rotate(-18deg); }
+    82.7%, 100% { transform: rotate(0deg); }
+  }
+
+  @keyframes hf-health1 {
+    0%, 36.2% { transform: scaleY(1); }
+    36.6%, 62.4% { transform: scaleY(0.08); }
+    62.5% { transform: scaleY(0.15); }
+    82.4%, 100% { transform: scaleY(1); }
+  }
+
+  @keyframes hf-stroke1 {
+    0%, 36.4% { stroke: var(--mh-ok); }
+    36.5%, 62.4% { stroke: var(--mh-down); }
+    62.5%, 82.4% { stroke: var(--mh-warn); }
+    82.5%, 100% { stroke: var(--mh-ok); }
+  }
+
+  @keyframes hf-health2 {
+    0%, 36.4% { transform: scaleY(1); }
+    38%, 80% { transform: scaleY(1.35); }
+    84%, 100% { transform: scaleY(1); }
+  }
+
+  @keyframes hf-ph-a {
+    0% { opacity: 1; }
+    36.5%, 100% { opacity: 0; }
+  }
+
+  @keyframes hf-ph-b {
+    0% { opacity: 0; }
+    36.5% { opacity: 1; }
+    62.5%, 100% { opacity: 0; }
+  }
+
+  @keyframes hf-ph-c {
+    0% { opacity: 0; }
+    62.5% { opacity: 1; }
+    82.5%, 100% { opacity: 0; }
+  }
+
+  @keyframes hf-ph-d {
+    0% { opacity: 0; }
+    82.5%, 100% { opacity: 1; }
+  }
+
+  @keyframes hf-ph-ad {
+    0% { opacity: 1; }
+    36.5% { opacity: 0; }
+    82.5%, 100% { opacity: 1; }
+  }
+
+  @keyframes hf-ph-bcd {
+    0% { opacity: 0; }
+    36.5%, 100% { opacity: 1; }
+  }
+</style>
