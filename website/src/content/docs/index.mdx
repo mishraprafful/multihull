@@ -18,6 +18,10 @@ hero:
 
 import Horizon from '../../components/Horizon.astro';
 import StatusPill from '../../components/StatusPill.astro';
+import HeroFailover from '../../components/HeroFailover.astro';
+import SpecToProviders from '../../components/SpecToProviders.astro';
+
+<HeroFailover />
 
 <div class="mh-value-props">
   <div>
@@ -62,6 +66,8 @@ route:
   hostname: llama.api.acme.com
   protocol: openai
 ```
+
+<SpecToProviders />
 
 ## What `hull status` shows
 
