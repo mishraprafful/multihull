@@ -108,6 +108,11 @@
   padding: 1.25rem;
 }
 
+.mh-value-props > div {
+  margin: 0;
+  height: 100%;
+}
+
 .mh-value-props h3 {
   margin: 0 0 0.5rem;
   font-size: var(--sl-text-lg);
