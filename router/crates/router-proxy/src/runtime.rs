@@ -84,15 +84,21 @@ impl EndpointRuntime {
         now: Duration,
         rng: &mut impl Rng,
     ) -> ProbeTransition {
-        let transition = lock(&self.probe).record(outcome, status);
-        match transition {
-            ProbeTransition::WentDown => {
-                lock(&self.circuit).eject(now, rng);
+        let mut tracker = lock(&self.probe);
+        let transition = tracker.record(outcome, status);
+        let down = tracker.is_down();
+        drop(tracker);
+        let mut circuit = lock(&self.circuit);
+        match (outcome, transition) {
+            (ProbeOutcome::Failure, _) if down => {
+                circuit.eject(now, rng);
             }
-            ProbeTransition::CameUp => {
-                lock(&self.circuit).restore();
+            (ProbeOutcome::Failure, _) => circuit.record(Outcome::Transient, now, rng),
+            (ProbeOutcome::Success, ProbeTransition::CameUp) => {
+                circuit.restore();
             }
-            ProbeTransition::Unchanged => {}
+            (ProbeOutcome::Success, _) => circuit.record_probe_success(now, rng),
+            (ProbeOutcome::Warming, _) => {}
         }
         transition
     }
@@ -392,7 +398,7 @@ impl Runtime {
             }
             ProbeTransition::Unchanged => {}
         }
-        if transition != ProbeTransition::Unchanged {
+        if outcome != ProbeOutcome::Warming {
             self.publish_circuit_gauges(endpoint, now);
         }
     }
@@ -418,7 +424,7 @@ impl Runtime {
 
     pub fn endpoint_circuit_open(&self, endpoint: &Endpoint, now: Duration) -> bool {
         self.get(&endpoint.id)
-            .map(|rt| rt.circuit_state(now).is_open() || rt.probe_down())
+            .map(|rt| rt.circuit_state(now).is_open())
             .unwrap_or(false)
     }
 
@@ -617,7 +623,6 @@ impl EndpointStateView for RuntimeView<'_> {
         match self.runtime.get(id) {
             Some(endpoint) => {
                 !endpoint.circuit_state(self.now).is_open()
-                    && !endpoint.probe_down()
                     && !self.runtime.provider_open(&endpoint.provider, self.now)
                     && endpoint.has_headroom()
             }
@@ -842,6 +847,35 @@ mod tests {
         assert_eq!(status.probe.state, ProbeState::Up);
         assert_eq!(status.probe.probes, 7);
         assert!(runtime.view(&excluded, None).available("a"));
+    }
+
+    #[test]
+    fn probe_failures_keep_reopening_a_circuit_closed_by_traffic() {
+        let runtime = Runtime::default();
+        let a = endpoint("a");
+        let mut rng = ThreadRng;
+        for _ in 0..3 {
+            runtime.record_probe(&a, ProbeOutcome::Failure, Some(503));
+        }
+        let rt = runtime.get("a").unwrap();
+        assert!(rt.circuit_state(runtime.now()).is_open());
+        assert!(lock(&rt.circuit).restore());
+        assert!(!runtime.endpoint_circuit_open(&a, runtime.now()));
+        runtime.record_probe(&a, ProbeOutcome::Failure, Some(503));
+        assert!(runtime.endpoint_circuit_open(&a, runtime.now()));
+        assert!(rt.probe_down());
+        runtime.record_probe(&a, ProbeOutcome::Success, Some(200));
+        assert!(runtime.endpoint_circuit_open(&a, runtime.now()));
+        assert!(lock(&rt.circuit).restore());
+        runtime.record_probe(&a, ProbeOutcome::Success, Some(200));
+        assert!(!runtime.endpoint_circuit_open(&a, runtime.now()));
+        runtime.record_probe(&a, ProbeOutcome::Failure, Some(503));
+        let status = runtime.status(&a).unwrap();
+        assert_eq!(status.circuit, "open");
+        assert_eq!(status.probe.state, ProbeState::Down);
+        assert_eq!(status.probe.consecutive_failures, 1);
+        rt.record_outcome(Outcome::Transient, runtime.now(), &mut rng);
+        assert!(runtime.endpoint_circuit_open(&a, runtime.now()));
     }
 
     #[test]
