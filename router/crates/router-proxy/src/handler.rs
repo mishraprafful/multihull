@@ -14,7 +14,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::attempt::{response_headers, send};
+use crate::attempt::{response_headers, send, UpstreamResponse};
 use crate::body::{ProxyBody, TimedBody};
 use crate::error::ProxyError;
 use crate::runtime::{OutstandingGuard, ThreadRng};
@@ -22,6 +22,8 @@ use crate::state::ProxyState;
 use crate::sticky::{
     mint_session_id, rehomed_header, session_cookie, StickyPlan, REHOMED_HEADER, SESSION_HEADER,
 };
+
+const RESERVATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(5);
 
 pub async fn handle(
     state: Arc<ProxyState>,
@@ -79,18 +81,6 @@ async fn proxy(
     let preset = preset_for(&route);
     state.runtime.record_request(&route.id);
 
-    let admitted = state
-        .runtime
-        .admission
-        .wait_for_slot(&route.id, || !state.runtime.route_saturated(&route))
-        .await;
-    let waited = match admitted {
-        Ok(waited) => waited,
-        Err(_) => state.runtime.admission.config().max_wait,
-    };
-    state.runtime.record_queue_wait(&route, waited);
-    admitted.map_err(|_| (ProxyError::QueueOverflow, 0))?;
-
     let mut rng = ThreadRng;
     let mut session = resolve_session(&state, &route, &parts.headers, &body, peer.ip())
         .map_err(|error| (error, 0))?;
@@ -100,10 +90,22 @@ async fn proxy(
     let mut excluded_providers: HashSet<String> = HashSet::new();
     let mut attempts: u32 = 0;
     let mut last_error = ProxyError::NoHealthyUpstream;
-    let mut fallback: Option<(Response<Incoming>, Endpoint, OutstandingGuard)> = None;
+    let mut fallback: Option<(UpstreamResponse, Endpoint, OutstandingGuard)> = None;
 
-    loop {
-        let endpoint = preferred
+    let queued_at = Instant::now();
+    let max_wait = state.runtime.admission.config().max_wait;
+    let mut reserved = loop {
+        let admitted = state
+            .runtime
+            .admission
+            .wait_for_slot_until(&route.id, queued_at + max_wait, || {
+                !state.runtime.route_saturated(&route)
+            })
+            .await;
+        if admitted.is_err() {
+            break None;
+        }
+        let picked = preferred
             .take()
             .and_then(|id| take_preferred(&state, &route, &id, &mut rng))
             .or_else(|| {
@@ -116,7 +118,34 @@ async fn proxy(
                     &mut rng,
                 )
             });
-        let Some(endpoint) = endpoint else {
+        if picked.is_some() || !state.runtime.route_has_routable(&route) {
+            break picked;
+        }
+        if Instant::now() >= queued_at + max_wait {
+            break None;
+        }
+        tokio::time::sleep(RESERVATION_RETRY_DELAY).await;
+    };
+    state
+        .runtime
+        .record_queue_wait(&route, queued_at.elapsed().min(max_wait));
+    if reserved.is_none() && state.runtime.route_saturated(&route) {
+        finish_session(&state, &route, session.take(), None);
+        return Err((ProxyError::QueueOverflow, 0));
+    }
+
+    loop {
+        let picked = reserved.take().or_else(|| {
+            pick_endpoint(
+                &state,
+                &route,
+                &excluded,
+                &excluded_providers,
+                preset,
+                &mut rng,
+            )
+        });
+        let Some((endpoint, guard)) = picked else {
             return match fallback.take() {
                 Some((response, endpoint, guard)) => {
                     let extra = finish_session(&state, &route, session.take(), Some(&endpoint));
@@ -131,8 +160,6 @@ async fn proxy(
             };
         };
         attempts += 1;
-        let runtime = state.runtime.endpoint(&endpoint);
-        let guard = OutstandingGuard::acquire(runtime.clone());
         let remaining = deadline.saturating_duration_since(Instant::now());
         let first_byte = state.config.timeouts.first_byte.min(remaining);
         let attempt = send(
@@ -165,7 +192,8 @@ async fn proxy(
         )
         .increment(1);
 
-        if outcome == Outcome::Success || outcome == Outcome::Fatal {
+        let server_error = matches!(attempt.status(), Some(500..=599));
+        if outcome == Outcome::Success || (outcome == Outcome::Fatal && !server_error) {
             let response = attempt
                 .response
                 .expect("status present for success or fatal");
@@ -179,6 +207,7 @@ async fn proxy(
             bytes_committed: false,
             body_buffered: true,
             idempotent,
+            server_error,
             retries_used: attempts.saturating_sub(1),
             max_retries: route.failover.max_retries,
         };
@@ -418,22 +447,24 @@ fn record_sticky(outcome: StickyOutcome) {
     .increment(1);
 }
 
+type Reservation = (Endpoint, OutstandingGuard);
+
 fn take_preferred(
     state: &ProxyState,
     route: &Route,
     id: &str,
     rng: &mut ThreadRng,
-) -> Option<Endpoint> {
+) -> Option<Reservation> {
     let endpoint = route.endpoints.iter().find(|e| e.id == id)?;
     let now = state.runtime.now();
     if !state.runtime.endpoint_healthy(endpoint, now) {
         return None;
     }
-    state
-        .runtime
-        .endpoint(endpoint)
-        .admit(now, rng)
-        .then(|| endpoint.clone())
+    let runtime = state.runtime.endpoint(endpoint);
+    if !runtime.admit(now, rng) {
+        return None;
+    }
+    runtime.try_reserve().map(|guard| (endpoint.clone(), guard))
 }
 
 fn authorize(route: &Route, headers: &http::HeaderMap) -> Result<(), (ProxyError, u32)> {
@@ -471,7 +502,7 @@ fn pick_endpoint(
     excluded_providers: &HashSet<String>,
     preset: Preset,
     rng: &mut ThreadRng,
-) -> Option<Endpoint> {
+) -> Option<Reservation> {
     let eligible: Vec<&Endpoint> = route
         .endpoints
         .iter()
@@ -527,8 +558,16 @@ fn pick_endpoint(
         let id = chosen?;
         let endpoint = routable.iter().find(|e| e.id == id)?;
         let runtime = state.runtime.endpoint(endpoint);
-        if panic_mode || runtime.admit(now, rng) {
-            return Some(Endpoint::clone(endpoint));
+        if panic_mode {
+            return Some((
+                Endpoint::clone(endpoint),
+                OutstandingGuard::acquire(runtime),
+            ));
+        }
+        if runtime.admit(now, rng) {
+            if let Some(guard) = runtime.try_reserve() {
+                return Some((Endpoint::clone(endpoint), guard));
+            }
         }
         locally_excluded.insert(id);
     }
@@ -540,7 +579,7 @@ fn rng_index(rng: &mut ThreadRng, len: usize) -> usize {
 }
 
 fn forward(
-    response: Response<Incoming>,
+    upstream: UpstreamResponse,
     state: &ProxyState,
     endpoint: &Endpoint,
     attempts: u32,
@@ -548,8 +587,18 @@ fn forward(
     guard: OutstandingGuard,
     extra: Vec<(HeaderName, HeaderValue)>,
 ) -> Response<ProxyBody> {
+    let UpstreamResponse {
+        response,
+        first_frame,
+    } = upstream;
     let (parts, body) = response.into_parts();
-    let timed = TimedBody::new(body, state.config.timeouts.idle, deadline, guard);
+    let timed = TimedBody::new(
+        body,
+        first_frame,
+        state.config.timeouts.idle,
+        deadline,
+        guard,
+    );
     let mut builder = Response::builder()
         .status(parts.status)
         .version(parts.version);

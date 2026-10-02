@@ -36,6 +36,7 @@ STOP_TIMEOUT_SECONDS = 10
 NANOSECONDS = 1_000_000_000
 RUNNING_STATES = frozenset({"running"})
 STARTING_STATES = frozenset({"created", "restarting", "paused"})
+DOCKER_HEALTH_STARTING = "starting"
 
 
 def docker_block(desired: Target) -> DockerBlock:
@@ -46,11 +47,23 @@ def container_name(desired: Target) -> str:
     return f"{desired.resource_name}-{desired.provider}"
 
 
+def health_probe_command(url: str) -> str:
+    python_probe = f"import urllib.request; urllib.request.urlopen('{url}', timeout=2)"
+    return " || ".join(
+        [
+            f"curl -fsS {url}",
+            f"wget -qO- {url}",
+            f'python3 -c "{python_probe}"',
+            "exit 1",
+        ]
+    )
+
+
 def healthcheck(desired: Target) -> dict[str, Any]:
     container = desired.service.container
     url = f"http://localhost:{container.port}{container.health.path}"
     return {
-        "test": ["CMD-SHELL", f"curl -fsS {url} || wget -qO- {url} || exit 1"],
+        "test": ["CMD-SHELL", health_probe_command(url)],
         "interval": HEALTH_INTERVAL_SECONDS * NANOSECONDS,
         "timeout": int(HEALTH_TIMEOUT_SECONDS) * NANOSECONDS,
         "retries": HEALTH_RETRIES,
@@ -127,6 +140,11 @@ def exposed_container_port(attrs: dict[str, Any]) -> int | None:
     return None
 
 
+def probe_failure_phase(state: dict[str, Any]) -> str:
+    docker_health = (state.get("Health") or {}).get("Status") or DOCKER_HEALTH_STARTING
+    return "Pending" if docker_health == DOCKER_HEALTH_STARTING else "Failed"
+
+
 def ref_from_container(
     container: Any, service: str, provider: str, container_port: int | None, host: str
 ) -> Ref:
@@ -167,10 +185,12 @@ class DockerProvider:
         client: Any | None = None,
         http_client: httpx.Client | None = None,
         client_factory: Callable[[], Any] | None = None,
+        provider_name: str | None = None,
     ) -> None:
         self._client = client
         self._http = http_client
         self._client_factory = client_factory
+        self.provider_name = provider_name
 
     @property
     def client(self) -> Any:
@@ -247,10 +267,11 @@ class DockerProvider:
         try:
             response = self.http.get(url)
         except httpx.HTTPError as exc:
-            return Observed("Pending", 0, 1, f"health probe failed: {exc.__class__.__name__}")
+            phase = probe_failure_phase(state)
+            return Observed(phase, 0, 1, f"health probe failed: {exc.__class__.__name__}")
         if response.is_success:
             return Observed("Ready", 1, 1, f"health {response.status_code}")
-        return Observed("Pending", 0, 1, f"health returned {response.status_code}")
+        return Observed(probe_failure_phase(state), 0, 1, f"health returned {response.status_code}")
 
     def scale(self, ref: Ref, min: int, max: int) -> None:
         if min != 1 or max != 1:
@@ -283,9 +304,10 @@ class DockerProvider:
         return CredHealth(ok=True, message=f"docker daemon {version} reachable", identity=version)
 
     def rediscover(self, service: str) -> Ref | None:
-        containers = self.client.containers.list(
-            all=True, filters={"label": [f"{SERVICE_LABEL}={service}", f"{OWNER_LABEL}={OWNER}"]}
-        )
+        selectors = [f"{SERVICE_LABEL}={service}", f"{OWNER_LABEL}={OWNER}"]
+        if self.provider_name:
+            selectors.append(f"{PROVIDER_LABEL}={self.provider_name}")
+        containers = self.client.containers.list(all=True, filters={"label": selectors})
         if not containers:
             return None
         container = containers[0]

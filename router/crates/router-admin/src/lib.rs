@@ -7,6 +7,7 @@ use axum::{Json, Router};
 use router_core::snapshot::Health;
 use router_core::sticky::truncate_hash;
 use router_core::Snapshot;
+use router_obs::PrometheusHandle;
 use router_proxy::ProxyState;
 use serde::Serialize;
 use std::net::SocketAddr;
@@ -17,6 +18,7 @@ use tokio::net::TcpListener;
 pub struct AdminState {
     pub snapshot: Arc<ArcSwap<Snapshot>>,
     pub proxy: Option<Arc<ProxyState>>,
+    pub metrics: Option<PrometheusHandle>,
 }
 
 impl AdminState {
@@ -24,11 +26,17 @@ impl AdminState {
         Self {
             snapshot,
             proxy: None,
+            metrics: None,
         }
     }
 
     pub fn with_proxy(mut self, proxy: Arc<ProxyState>) -> Self {
         self.proxy = Some(proxy);
+        self
+    }
+
+    pub fn with_metrics(mut self, metrics: PrometheusHandle) -> Self {
+        self.metrics = Some(metrics);
         self
     }
 }
@@ -51,11 +59,23 @@ async fn healthz() -> &'static str {
     "ok\n"
 }
 
-async fn metrics() -> Response {
+pub const METRICS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
+
+pub fn render_metrics(handle: Option<&PrometheusHandle>) -> String {
+    match handle {
+        Some(handle) => {
+            handle.run_upkeep();
+            handle.render()
+        }
+        None => "# metrics recorder not installed\n".to_string(),
+    }
+}
+
+async fn metrics(State(state): State<AdminState>) -> Response {
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-        "# metrics exporter not wired yet\n",
+        [(header::CONTENT_TYPE, METRICS_CONTENT_TYPE)],
+        render_metrics(state.metrics.as_ref()),
     )
         .into_response()
 }
@@ -219,10 +239,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn metrics_placeholder_is_text() {
+    async fn metrics_without_a_recorder_is_a_comment() {
         let (status, body) = get_body("/metrics").await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.starts_with('#'));
+    }
+
+    #[tokio::test]
+    async fn metrics_renders_prometheus_text_from_the_installed_recorder() {
+        let handle = router_obs::install_prometheus().expect("first recorder in this process");
+        metrics::counter!(
+            router_obs::metrics::FAILOVERS_TOTAL,
+            router_obs::metrics::labels::FROM => "gke-prod",
+            router_obs::metrics::labels::REASON => "transient"
+        )
+        .increment(2);
+        let response = router(state().with_metrics(handle))
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            METRICS_CONTENT_TYPE
+        );
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(body.contains("# TYPE router_failovers_total counter"));
+        assert!(body.contains("router_failovers_total{from=\"gke-prod\",reason=\"transient\"} 2"));
     }
 
     #[tokio::test]

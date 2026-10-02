@@ -52,6 +52,7 @@ class EndpointType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ENDPOINT_TYPE_RUNPOD: _ClassVar[EndpointType]
     ENDPOINT_TYPE_BASETEN: _ClassVar[EndpointType]
     ENDPOINT_TYPE_REPLICATE: _ClassVar[EndpointType]
+    ENDPOINT_TYPE_DOCKER: _ClassVar[EndpointType]
 
 class Health(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -85,6 +86,7 @@ ENDPOINT_TYPE_MODAL: EndpointType
 ENDPOINT_TYPE_RUNPOD: EndpointType
 ENDPOINT_TYPE_BASETEN: EndpointType
 ENDPOINT_TYPE_REPLICATE: EndpointType
+ENDPOINT_TYPE_DOCKER: EndpointType
 HEALTH_UNSPECIFIED: Health
 HEALTH_READY: Health
 HEALTH_DEGRADED: Health

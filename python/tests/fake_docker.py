@@ -23,6 +23,7 @@ class FakeContainer:
         self.run_kwargs = copy.deepcopy(run_kwargs)
         self.status = "running"
         self.exit_code = 0
+        self.health: str | None = None
         self.reloads = 0
         self.stopped = False
         self.started = 0
@@ -45,10 +46,13 @@ class FakeContainer:
             if self.status == "running"
             else {}
         )
+        state: dict[str, Any] = {"Status": self.status, "ExitCode": self.exit_code}
+        if self.health is not None:
+            state["Health"] = {"Status": self.health}
         return {
             "Id": self.id,
             "Name": f"/{self.name}",
-            "State": {"Status": self.status, "ExitCode": self.exit_code},
+            "State": state,
             "Config": {
                 "Labels": dict(self.labels),
                 "ExposedPorts": {key: {} for key in ports},

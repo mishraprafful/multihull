@@ -1,0 +1,39 @@
+[project]
+name = "multihull-e2e"
+version = "0.0.1"
+description = "Local end-to-end harness for Multihull: docker targets, controller, router, fault scenarios"
+requires-python = ">=3.12"
+dependencies = [
+  "multihull",
+  "docker>=7.1",
+  "httpx>=0.27",
+  "openai>=1.50",
+  "pytest>=8",
+  "pytest-timeout>=2.3",
+  "pyyaml>=6",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.6"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+multihull = { path = "../../python", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "W"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["e2e", "multihull"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+timeout = 600
+timeout_method = "thread"

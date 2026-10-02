@@ -67,6 +67,28 @@ def providers_for(service: specmod.ServiceSpec, live: bool) -> dict[str, Provide
     return providers
 
 
+def reachable_providers(service: specmod.ServiceSpec) -> dict[str, Provider]:
+    providers: dict[str, Provider] = {}
+    for target in service.targets:
+        try:
+            providers[target.provider] = provider_for(target, live=True)
+        except Exception as exc:
+            errors.print(f"[yellow]{target.provider}: skipping rediscover ({exc})[/yellow]")
+    return providers
+
+
+def rebuild_state(service: specmod.ServiceSpec, state: LocalState) -> list[str]:
+    providers = reachable_providers(service)
+    found = [
+        result.provider
+        for result in engine.rediscover(service, state, providers)
+        if result.ref is not None
+    ]
+    if found:
+        engine.refresh(service.name, state, providers)
+    return found
+
+
 def duration_or_exit(text: str, option: str) -> timedelta:
     try:
         return parse_duration(text)
@@ -218,6 +240,11 @@ def status(
     service = load_or_exit(path)
     state = LocalState(state_path)
     records = state.list(service.name)
+    if not records:
+        found = rebuild_state(service, state)
+        if found:
+            console.print(f"rebuilt state from rediscover: {', '.join(found)}")
+            records = state.list(service.name)
     table = Table(title=f"status {service.name}")
     table.add_column("provider")
     table.add_column("type")

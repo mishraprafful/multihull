@@ -98,6 +98,78 @@ mod tests {
     }
 
     #[test]
+    fn load_parses_a_control_plane_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.json");
+        std::fs::write(&path, CONTROL_PLANE_DOCUMENT).unwrap();
+        let snapshot = load(&path).unwrap();
+        assert_eq!(snapshot.version, 3);
+        assert_eq!(snapshot.at.as_ref().unwrap().seconds, 1_790_938_555);
+        let route = &snapshot.routes[0];
+        assert_eq!(route.hostname, "llama.local");
+        assert_eq!(route.protocol, router_core::snapshot::Protocol::Http);
+        assert_eq!(
+            route.failover.policy,
+            router_core::snapshot::FailoverPolicy::Priority
+        );
+        assert!(route.auth.api_key_hashes.is_empty());
+        let sticky = route.sticky.as_ref().unwrap();
+        assert_eq!(sticky.ttl_seconds, 300);
+        assert_eq!(sticky.mode, router_core::snapshot::StickyMode::Endpoint);
+        let primary = snapshot.find_endpoint("e2e-three/primary").unwrap();
+        assert_eq!(primary.kind, router_core::snapshot::EndpointType::Docker);
+        assert_eq!(primary.health, router_core::snapshot::Health::Ready);
+        assert!(primary.accepts_traffic());
+        let secondary = snapshot.find_endpoint("e2e-three/secondary").unwrap();
+        assert_eq!(secondary.health, router_core::snapshot::Health::Down);
+        assert!(!secondary.accepts_traffic());
+    }
+
+    const CONTROL_PLANE_DOCUMENT: &str = r#"{
+  "version": 3,
+  "at": {"seconds": 1790938555, "nanos": 0},
+  "routes": [
+    {
+      "id": "e2e-three",
+      "hostname": "llama.local",
+      "path_prefix": "/",
+      "protocol": "http",
+      "failover": {"policy": "priority", "retry_on": ["5xx", "timeout", "capacity"], "max_retries": 2},
+      "auth": {"api_key_hashes": []},
+      "sticky": {"key": "header:X-Session-Id", "ttl_seconds": 300, "mode": "endpoint", "on_unhealthy": "rehome", "fallback_key": ""},
+      "endpoints": [
+        {
+          "id": "e2e-three/primary",
+          "provider": "primary",
+          "type": "docker",
+          "url": "http://127.0.0.1:62967",
+          "region": "",
+          "priority": 1,
+          "weight": 1,
+          "health": "ready",
+          "ready_replicas": 1,
+          "max_concurrency": 32,
+          "inject_headers": {}
+        },
+        {
+          "id": "e2e-three/secondary",
+          "provider": "secondary",
+          "type": "docker",
+          "url": "http://127.0.0.1:62966",
+          "region": "",
+          "priority": 2,
+          "weight": 1,
+          "health": "down",
+          "ready_replicas": 0,
+          "max_concurrency": 32,
+          "inject_headers": {}
+        }
+      ]
+    }
+  ]
+}"#;
+
+    #[test]
     fn load_reports_missing_and_invalid_files() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing.json");

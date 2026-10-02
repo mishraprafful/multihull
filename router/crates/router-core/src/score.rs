@@ -114,6 +114,26 @@ fn priority_spillover(
         .iter()
         .filter(|c| c.priority == chosen && state.available(&c.id))
         .collect();
+    if pool.is_empty() {
+        return best_available_level(candidates, state, rng);
+    }
+    power_of_two_choices(&pool, rng, |c| f64::from(state.outstanding(&c.id)))
+}
+
+fn best_available_level(
+    candidates: &[Candidate],
+    state: &impl EndpointStateView,
+    rng: &mut impl Rng,
+) -> Option<EndpointId> {
+    let available: Vec<&Candidate> = candidates
+        .iter()
+        .filter(|c| state.available(&c.id))
+        .collect();
+    let level = available.iter().map(|c| c.priority).min()?;
+    let pool: Vec<&Candidate> = available
+        .into_iter()
+        .filter(|c| c.priority == level)
+        .collect();
     power_of_two_choices(&pool, rng, |c| f64::from(state.outstanding(&c.id)))
 }
 
@@ -222,6 +242,50 @@ mod tests {
         }
         fn local_region(&self) -> Option<&str> {
             self.region.as_deref()
+        }
+    }
+
+    struct FlappingState {
+        calls: std::cell::Cell<u32>,
+        flips_after: u32,
+        flapping: String,
+    }
+
+    impl EndpointStateView for FlappingState {
+        fn available(&self, id: &str) -> bool {
+            self.calls.set(self.calls.get() + 1);
+            id != self.flapping || self.calls.get() <= self.flips_after
+        }
+        fn outstanding(&self, _id: &str) -> u32 {
+            0
+        }
+        fn ewma_ttft_secs(&self, _id: &str) -> Option<f64> {
+            None
+        }
+        fn local_region(&self) -> Option<&str> {
+            None
+        }
+    }
+
+    #[test]
+    fn priority_spillover_falls_back_when_the_chosen_level_loses_headroom_mid_selection() {
+        let candidates = vec![
+            Candidate::new("p1".to_string(), 1),
+            Candidate::new("p2".to_string(), 2),
+            Candidate::new("p3".to_string(), 3),
+        ];
+        let state = FlappingState {
+            calls: std::cell::Cell::new(0),
+            flips_after: 3,
+            flapping: "p1".to_string(),
+        };
+        let mut rng = SeededRng::new(1);
+        for _ in 0..20 {
+            let chosen = select(&candidates, Preset::PrioritySpillover, &state, &mut rng);
+            assert!(
+                matches!(chosen.as_deref(), Some("p2") | Some("p1")),
+                "{chosen:?}"
+            );
         }
     }
 

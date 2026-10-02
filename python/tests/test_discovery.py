@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
 from multihull import discovery
 from multihull._proto import discovery_pb2 as pb
-from multihull.providers import create
+from multihull.providers import PROVIDERS, create
 from multihull.providers.base import Observed, Ref
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
@@ -76,6 +77,65 @@ def test_snapshot_shape(
     assert path.exists() and not path.with_suffix(".json.tmp").exists()
 
 
+def test_written_snapshot_uses_the_router_json_shape(
+    llama_spec: ServiceSpec, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LLAMA_API_KEYS", "hull_fixture_one")
+    raw = llama_spec.model_dump(by_alias=True, exclude_none=True)
+    raw["route"]["sticky"] = {"key": "header:X-Session-Id", "ttl": "15m"}
+    spec = ServiceSpec.model_validate(raw)
+    state = LocalState(tmp_path / "state.db")
+    providers = {t.provider: FakeProvider() for t in spec.targets}
+    for target in spec.targets:
+        ref = Ref(target.provider, target.type, spec.name, {"id": "1"})
+        state.put(StateRecord(spec.name, target.provider, ref.to_json(), None, "h", "Ready"))
+    snapshot = discovery.build_snapshot(
+        spec,
+        state,
+        providers,
+        observed={"gke-prod": Observed("Ready", 2, 2), "modal-main": Observed("Failed", 0, 1)},
+        version=7,
+    )
+    written = json.loads(discovery.write_snapshot(snapshot, tmp_path / "snapshot.json").read_text())
+
+    assert written["version"] == 7
+    assert set(written["at"]) == {"seconds", "nanos"} and written["at"]["seconds"] > 0
+    route = written["routes"][0]
+    assert route["protocol"] == "http" and route["path_prefix"] == "/"
+    assert route["failover"]["policy"] == "priority" and route["failover"]["max_retries"] == 2
+    assert len(route["auth"]["api_key_hashes"]) == 1
+    assert route["sticky"] == {
+        "key": "header:X-Session-Id",
+        "ttl_seconds": 900,
+        "mode": "endpoint",
+        "on_unhealthy": "rehome",
+        "fallback_key": "",
+    }
+    by_provider = {e["provider"]: e for e in route["endpoints"]}
+    assert by_provider["gke-prod"]["health"] == "ready"
+    assert by_provider["gke-prod"]["type"] == "kubernetes"
+    assert by_provider["modal-main"]["health"] == "down"
+    assert by_provider["runpod-eu"]["health"] == "ready"
+    assert all(isinstance(e["region"], str) for e in route["endpoints"])
+    assert discovery.router_document(snapshot) == written
+
+
+def test_router_document_without_auth_or_sticky(
+    mock_docker_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    ref = Ref("docker-a", "docker", mock_docker_spec.name, {"host": "127.0.0.1", "host_port": "1"})
+    state.put(StateRecord(mock_docker_spec.name, "docker-a", ref.to_json(), None, "h"))
+    snapshot = discovery.build_snapshot(
+        mock_docker_spec, state, {"docker-a": create("docker")}, version=1
+    )
+    route = discovery.router_document(snapshot)["routes"][0]
+    assert route["auth"] == {"api_key_hashes": []} and route["sticky"] is None
+    assert route["endpoints"][0]["type"] == "docker"
+    assert route["endpoints"][0]["health"] == "unspecified"
+    assert route["endpoints"][0]["region"] == ""
+
+
 def test_snapshot_skips_unreachable_endpoint(
     llama_spec: ServiceSpec, tmp_path: Path, monkeypatch
 ) -> None:
@@ -131,7 +191,15 @@ def test_snapshot_docker_endpoints(mock_docker_spec: ServiceSpec, tmp_path: Path
     message = discovery.snapshot_to_proto(snapshot)
     proto_endpoints = message.routes[0].endpoints
     assert [e.url for e in proto_endpoints] == [e["url"] for e in endpoints]
-    assert {e.type for e in proto_endpoints} == {pb.ENDPOINT_TYPE_UNSPECIFIED}
+    assert {e.type for e in proto_endpoints} == {pb.ENDPOINT_TYPE_DOCKER}
+
+
+def test_every_provider_type_has_a_distinct_proto_endpoint_type() -> None:
+    assert set(discovery.PROTO_ENDPOINT_TYPE) == set(PROVIDERS)
+    values = list(discovery.PROTO_ENDPOINT_TYPE.values())
+    assert len(set(values)) == len(values)
+    assert pb.ENDPOINT_TYPE_UNSPECIFIED not in values
+    assert discovery.PROTO_ENDPOINT_TYPE["docker"] == pb.ENDPOINT_TYPE_DOCKER
 
 
 def test_load_api_keys_from_file(tmp_path: Path) -> None:

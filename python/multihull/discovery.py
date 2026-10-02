@@ -38,7 +38,7 @@ PROTO_ENDPOINT_TYPE = {
     "runpod": pb.ENDPOINT_TYPE_RUNPOD,
     "baseten": pb.ENDPOINT_TYPE_BASETEN,
     "replicate": pb.ENDPOINT_TYPE_REPLICATE,
-    "docker": pb.ENDPOINT_TYPE_UNSPECIFIED,
+    "docker": pb.ENDPOINT_TYPE_DOCKER,
 }
 PROTO_HEALTH = {
     "healthy": pb.HEALTH_READY,
@@ -179,9 +179,67 @@ def write_snapshot(snapshot: dict[str, Any], path: str | Path) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=False) + "\n")
+    tmp.write_text(json.dumps(router_document(snapshot), indent=2, sort_keys=False) + "\n")
     tmp.replace(target)
     return target
+
+
+def proto_enum_name(enum: Any, value: int, prefix: str) -> str:
+    return enum.Name(value).removeprefix(prefix).lower()
+
+
+def router_endpoint(endpoint: pb.Endpoint) -> dict[str, Any]:
+    return {
+        "id": endpoint.id,
+        "provider": endpoint.provider,
+        "type": proto_enum_name(pb.EndpointType, endpoint.type, "ENDPOINT_TYPE_"),
+        "url": endpoint.url,
+        "region": endpoint.region,
+        "priority": endpoint.priority,
+        "weight": endpoint.weight,
+        "health": proto_enum_name(pb.Health, endpoint.health, "HEALTH_"),
+        "ready_replicas": endpoint.ready_replicas,
+        "max_concurrency": endpoint.max_concurrency,
+        "inject_headers": dict(endpoint.inject_headers),
+    }
+
+
+def router_sticky(sticky: pb.Sticky) -> dict[str, Any]:
+    return {
+        "key": sticky.key,
+        "ttl_seconds": sticky.ttl_seconds,
+        "mode": proto_enum_name(pb.StickyMode, sticky.mode, "STICKY_MODE_"),
+        "on_unhealthy": proto_enum_name(
+            pb.StickyOnUnhealthy, sticky.on_unhealthy, "STICKY_ON_UNHEALTHY_"
+        ),
+        "fallback_key": sticky.fallback_key,
+    }
+
+
+def router_route(route: pb.Route) -> dict[str, Any]:
+    return {
+        "id": route.id,
+        "hostname": route.hostname,
+        "path_prefix": route.path_prefix,
+        "protocol": proto_enum_name(pb.Protocol, route.protocol, "PROTOCOL_"),
+        "failover": {
+            "policy": proto_enum_name(pb.FailoverPolicy, route.failover.policy, "FAILOVER_POLICY_"),
+            "retry_on": list(route.failover.retry_on),
+            "max_retries": route.failover.max_retries,
+        },
+        "auth": {"api_key_hashes": list(route.auth.api_key_hashes)},
+        "sticky": router_sticky(route.sticky) if route.HasField("sticky") else None,
+        "endpoints": [router_endpoint(endpoint) for endpoint in route.endpoints],
+    }
+
+
+def router_document(snapshot: dict[str, Any]) -> dict[str, Any]:
+    message = snapshot_to_proto(snapshot)
+    return {
+        "version": message.version,
+        "at": {"seconds": message.at.seconds, "nanos": message.at.nanos},
+        "routes": [router_route(route) for route in message.routes],
+    }
 
 
 def snapshot_changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:

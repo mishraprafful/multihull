@@ -40,6 +40,17 @@ impl Admission {
     pub async fn wait_for_slot(
         &self,
         route_id: &str,
+        has_headroom: impl FnMut() -> bool,
+    ) -> Result<Duration, AdmissionError> {
+        let deadline = Instant::now() + self.config.max_wait;
+        self.wait_for_slot_until(route_id, deadline, has_headroom)
+            .await
+    }
+
+    pub async fn wait_for_slot_until(
+        &self,
+        route_id: &str,
+        deadline: Instant,
         mut has_headroom: impl FnMut() -> bool,
     ) -> Result<Duration, AdmissionError> {
         if has_headroom() {
@@ -56,7 +67,7 @@ impl Admission {
         }
         let _slot = QueueSlot(counter);
         let started = Instant::now();
-        let deadline = tokio::time::Instant::from_std(started + self.config.max_wait);
+        let deadline = tokio::time::Instant::from_std(deadline);
         loop {
             let notified = self.released.notified();
             tokio::pin!(notified);

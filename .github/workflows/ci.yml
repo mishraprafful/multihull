@@ -21,6 +21,8 @@ jobs:
       router: ${{ steps.filter.outputs.router }}
       website: ${{ steps.filter.outputs.website }}
       chart: ${{ steps.filter.outputs.chart }}
+      mock_server: ${{ steps.filter.outputs.mock_server }}
+      e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -44,6 +46,15 @@ jobs:
               - '.github/workflows/ci.yml'
             chart:
               - 'charts/**'
+              - '.github/workflows/ci.yml'
+            mock_server:
+              - 'testing/mock-server/**'
+              - '.github/workflows/ci.yml'
+            e2e:
+              - 'python/**'
+              - 'router/**'
+              - 'proto/**'
+              - 'testing/**'
               - '.github/workflows/ci.yml'
 
   python:
@@ -119,3 +130,65 @@ jobs:
           --set controller.stateBackend.existingSecret=multihull-state
           --set controller.specConfigMap=multihull-spec
           > /dev/null
+
+  mock-server:
+    needs: changes
+    if: needs.changes.outputs.mock_server == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: testing/mock-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: testing/mock-server/uv.lock
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q
+
+  e2e:
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/e2e/uv.lock
+            python/uv.lock
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build --release -p multihull
+        working-directory: router
+      - run: docker build -t multihull-mock-server:e2e testing/mock-server
+      - run: uv sync --locked --project testing/e2e
+      - run: >
+          uv run --project testing/e2e pytest -q --timeout 600 -x
+          -c testing/e2e/pyproject.toml testing/e2e/tests
+          --junitxml testing/e2e/e2e-results.xml --basetemp testing/e2e/e2e-tmp
+        env:
+          E2E_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
+          E2E_MOCK_IMAGE: multihull-mock-server:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-logs
+          path: |
+            testing/e2e/e2e-tmp/**/*.log
+            testing/e2e/e2e-tmp/**/*.toml
+            testing/e2e/e2e-tmp/**/snapshot.json
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: testing/e2e/e2e-results.xml
+          if-no-files-found: ignore

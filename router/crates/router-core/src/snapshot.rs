@@ -219,6 +219,7 @@ pub enum EndpointType {
     Runpod,
     Baseten,
     Replicate,
+    Docker,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -314,6 +315,16 @@ mod tests {
         assert_eq!(endpoint.weight, 1);
         assert_eq!(endpoint.max_concurrency, 32);
         assert!(endpoint.accepts_traffic());
+    }
+
+    #[test]
+    fn docker_endpoint_type_uses_lowercase_json_name() {
+        let json = r#"{"id":"e","url":"http://127.0.0.1:18001","type":"docker"}"#;
+        let endpoint: Endpoint = serde_json::from_str(json).unwrap();
+        assert_eq!(endpoint.kind, EndpointType::Docker);
+        assert!(serde_json::to_string(&endpoint)
+            .unwrap()
+            .contains("\"type\":\"docker\""));
     }
 
     #[test]

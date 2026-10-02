@@ -23,6 +23,7 @@ pub enum BodyError {
 
 pub struct TimedBody {
     inner: Incoming,
+    first: Option<Frame<Bytes>>,
     idle: Duration,
     deadline: Instant,
     idle_timer: Pin<Box<Sleep>>,
@@ -33,12 +34,14 @@ pub struct TimedBody {
 impl TimedBody {
     pub fn new(
         inner: Incoming,
+        first: Option<Frame<Bytes>>,
         idle: Duration,
         deadline: Instant,
         guard: OutstandingGuard,
     ) -> Self {
         Self {
             inner,
+            first,
             idle,
             deadline,
             idle_timer: Box::pin(tokio::time::sleep(idle)),
@@ -59,6 +62,9 @@ impl Body for TimedBody {
         if self.total_timer.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Some(Err(BodyError::TotalTimeout)));
         }
+        if let Some(frame) = self.first.take() {
+            return Poll::Ready(Some(Ok(frame)));
+        }
         match Pin::new(&mut self.inner).poll_frame(cx) {
             Poll::Ready(frame) => {
                 let idle = self.idle;
@@ -75,10 +81,22 @@ impl Body for TimedBody {
     }
 
     fn is_end_stream(&self) -> bool {
-        self.inner.is_end_stream() || Instant::now() >= self.deadline
+        self.first.is_none() && (self.inner.is_end_stream() || Instant::now() >= self.deadline)
     }
 
     fn size_hint(&self) -> hyper::body::SizeHint {
-        self.inner.size_hint()
+        let buffered = self
+            .first
+            .as_ref()
+            .and_then(Frame::data_ref)
+            .map(|data| data.len() as u64)
+            .unwrap_or(0);
+        let inner = self.inner.size_hint();
+        let mut hint = hyper::body::SizeHint::new();
+        hint.set_lower(inner.lower() + buffered);
+        if let Some(upper) = inner.upper() {
+            hint.set_upper(upper + buffered);
+        }
+        hint
     }
 }

@@ -9,5 +9,6 @@ publish = false
 
 [dependencies]
 metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

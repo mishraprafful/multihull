@@ -59,12 +59,22 @@ class RefreshResult:
     changed: bool
 
 
+@dataclass
+class RediscoverResult:
+    provider: str
+    type: str
+    ref: Ref | None
+    message: str
+
+
 def provider_kwargs(target: TargetSpec, live: bool) -> dict[str, Any]:
     if target.type == "kubernetes":
         context = target.kubernetes.context if target.kubernetes else None
         return {"context": context, "connect": live}
     if target.type == "modal":
         return {"dry_run": not live}
+    if target.type == "docker":
+        return {"provider_name": target.provider}
     return {}
 
 
@@ -257,6 +267,42 @@ def destroy(
         for result in results:
             if result.ok:
                 state.delete(service, result.provider)
+    return results
+
+
+def rediscover(
+    spec: ServiceSpec,
+    state: StateBackend,
+    providers: Mapping[str, Provider],
+    image_digest: str | None = None,
+) -> list[RediscoverResult]:
+    known = {record.provider for record in state.list(spec.name)}
+    results: list[RediscoverResult] = []
+    for target in sorted(spec.targets, key=lambda t: t.priority):
+        if target.provider in known or target.provider not in providers:
+            continue
+        provider = providers[target.provider]
+        try:
+            ref = provider.rediscover(spec.name)
+        except Exception as exc:
+            results.append(RediscoverResult(target.provider, target.type, None, str(exc)))
+            continue
+        if ref is None or ref.provider != target.provider:
+            results.append(RediscoverResult(target.provider, target.type, None, "nothing found"))
+            continue
+        rendered = provider.plan(Target(spec, target, image_digest), ref)
+        with state.lock():
+            state.put(
+                StateRecord(
+                    service=spec.name,
+                    provider=target.provider,
+                    ref=ref.to_json(),
+                    image_digest=image_digest,
+                    spec_hash=payload_hash(rendered.payload),
+                    last_status="Unknown",
+                )
+            )
+        results.append(RediscoverResult(target.provider, target.type, ref, "rediscovered"))
     return results
 
 

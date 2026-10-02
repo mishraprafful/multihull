@@ -101,7 +101,14 @@ def test_run_kwargs_shape(mock_docker_spec: ServiceSpec) -> None:
     assert kwargs["labels"][OWNER_LABEL] == "multihull"
     assert kwargs["restart_policy"] == {"Name": "unless-stopped"}
     assert kwargs["healthcheck"]["start_period"] == 2 * 1_000_000_000
-    assert "/health" in kwargs["healthcheck"]["test"][1]
+    probe = kwargs["healthcheck"]["test"][1]
+    assert "/health" in probe
+    assert probe.split(" || ")[:3] == [
+        "curl -fsS http://localhost:8000/health",
+        "wget -qO- http://localhost:8000/health",
+        'python3 -c "import urllib.request; '
+        "urllib.request.urlopen('http://localhost:8000/health', timeout=2)\"",
+    ]
     assert "network" not in kwargs and kwargs["command"] is None
 
 
@@ -224,6 +231,55 @@ def test_rediscover_by_labels(mock_docker_spec: ServiceSpec) -> None:
     assert stopped is not None and stopped.ids["host_port"] == "18002"
 
 
+def test_rediscover_scoped_to_the_provider_name(mock_docker_spec: ServiceSpec) -> None:
+    fake = FakeDockerClient()
+    http = httpx.Client(transport=health_transport())
+    scoped = {
+        name: DockerProvider(client=fake, http_client=http, provider_name=name)
+        for name in ("docker-a", "docker-b", "docker-c")
+    }
+    applied = {
+        name: provider.apply(docker_target(mock_docker_spec, name), None)
+        for name, provider in scoped.items()
+    }
+    for name, provider in scoped.items():
+        found = provider.rediscover("mock-three")
+        assert found == applied[name]
+        assert found is not None and found.provider == name
+    assert DockerProvider(client=fake, provider_name="docker-z").rediscover("mock-three") is None
+
+
+def test_engine_rediscover_rebuilds_state_for_a_no_op_plan(
+    mock_docker_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    fake = FakeDockerClient()
+    http = httpx.Client(transport=health_transport())
+    providers = {
+        t.provider: DockerProvider(client=fake, http_client=http, provider_name=t.provider)
+        for t in mock_docker_spec.targets
+    }
+    state = LocalState(tmp_path / "state.db")
+    engine.apply(mock_docker_spec, state, dry_run=False, providers=providers)
+    before = {r.provider: r for r in state.list(mock_docker_spec.name)}
+    for record in before.values():
+        state.delete(mock_docker_spec.name, record.provider)
+    assert state.list(mock_docker_spec.name) == []
+
+    results = engine.rediscover(mock_docker_spec, state, providers)
+    assert [(r.provider, r.message) for r in results] == [
+        ("docker-a", "rediscovered"),
+        ("docker-b", "rediscovered"),
+        ("docker-c", "rediscovered"),
+    ]
+    after = {r.provider: r for r in state.list(mock_docker_spec.name)}
+    assert {name: r.ref for name, r in after.items()} == {name: r.ref for name, r in before.items()}
+    assert {name: r.spec_hash for name, r in after.items()} == {
+        name: r.spec_hash for name, r in before.items()
+    }
+    assert {p.change for p in engine.plan(mock_docker_spec, state, providers)} == {"unchanged"}
+    assert engine.rediscover(mock_docker_spec, state, providers) == []
+
+
 def test_status_ready(mock_docker_spec: ServiceSpec) -> None:
     provider, _ = provider_with()
     ref = provider.apply(docker_target(mock_docker_spec, "docker-a"), None)
@@ -232,17 +288,40 @@ def test_status_ready(mock_docker_spec: ServiceSpec) -> None:
     assert (observed.ready_replicas, observed.desired_replicas) == (1, 1)
 
 
-def test_status_not_ready_when_health_fails(mock_docker_spec: ServiceSpec) -> None:
-    provider, _ = provider_with(transport=health_transport(503))
+def test_status_pending_while_health_fails_during_start_period(
+    mock_docker_spec: ServiceSpec,
+) -> None:
+    provider, fake = provider_with(transport=health_transport(503))
     ref = provider.apply(docker_target(mock_docker_spec, "docker-a"), None)
     observed = provider.status(ref)
     assert observed.phase == "Pending" and observed.ready_replicas == 0
     assert "503" in observed.message
+    fake.containers.get(ref.ids["container"]).health = "starting"
+    assert provider.status(ref).phase == "Pending"
 
     unreachable, _ = provider_with(transport=failing_transport())
     ref = unreachable.apply(docker_target(mock_docker_spec, "docker-b"), None)
     observed = unreachable.status(ref)
     assert observed.phase == "Pending" and "ConnectError" in observed.message
+
+
+def test_status_failed_when_health_fails_after_start_period(
+    mock_docker_spec: ServiceSpec,
+) -> None:
+    provider, fake = provider_with(transport=health_transport(503))
+    ref = provider.apply(docker_target(mock_docker_spec, "docker-a"), None)
+    container = fake.containers.get(ref.ids["container"])
+    for docker_health in ("healthy", "unhealthy"):
+        container.health = docker_health
+        observed = provider.status(ref)
+        assert observed.phase == "Failed" and observed.ready_replicas == 0
+        assert "503" in observed.message
+
+    unreachable, fake = provider_with(transport=failing_transport())
+    ref = unreachable.apply(docker_target(mock_docker_spec, "docker-b"), None)
+    fake.containers.get(ref.ids["container"]).health = "healthy"
+    observed = unreachable.status(ref)
+    assert observed.phase == "Failed" and "ConnectError" in observed.message
 
 
 def test_status_exited_and_missing(mock_docker_spec: ServiceSpec) -> None:
