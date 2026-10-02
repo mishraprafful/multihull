@@ -177,6 +177,29 @@ impl Circuit {
         }
     }
 
+    pub fn eject(&mut self, now: Duration, rng: &mut impl Rng) -> bool {
+        self.advance(now);
+        match self.state {
+            State::Closed => {
+                self.open(now, 0, rng);
+                true
+            }
+            State::HalfOpen { backoff_n, .. } => {
+                self.open(now, backoff_n + 1, rng);
+                true
+            }
+            State::Open { .. } => false,
+        }
+    }
+
+    pub fn restore(&mut self) -> bool {
+        if self.state.is_closed() {
+            return false;
+        }
+        self.close();
+        true
+    }
+
     fn advance(&mut self, now: Duration) {
         if let State::Open {
             since,
@@ -601,6 +624,34 @@ mod tests {
         let mut seeded = SeededRng::new(3);
         let jittered = config.backoff(0, &mut seeded);
         assert!(jittered >= secs(5) && jittered <= Duration::from_millis(6250));
+    }
+
+    #[test]
+    fn eject_opens_from_closed_and_half_open_and_restore_closes() {
+        let mut circuit = Circuit::default();
+        let mut rng = ZeroRng;
+        assert!(circuit.eject(secs(1), &mut rng));
+        assert_eq!(
+            circuit.state(),
+            State::Open {
+                since: secs(1),
+                backoff_n: 0,
+                wait: secs(5)
+            }
+        );
+        assert!(!circuit.eject(secs(2), &mut rng));
+        assert!(circuit.eject(secs(7), &mut rng));
+        assert_eq!(
+            circuit.state(),
+            State::Open {
+                since: secs(7),
+                backoff_n: 1,
+                wait: secs(10)
+            }
+        );
+        assert!(circuit.restore());
+        assert!(circuit.state().is_closed());
+        assert!(!circuit.restore());
     }
 
     #[test]

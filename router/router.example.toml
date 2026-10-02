@@ -20,3 +20,15 @@ total = 600
 [log]
 format = "json"
 filter = "info,router_proxy=debug"
+
+[probe]
+# Active health probe per endpoint: GET <endpoint url><health_path from the snapshot, default /health>.
+enabled = true
+# Seconds between probe rounds; each round is jittered by +-jitter_fraction.
+interval = 5
+timeout = 2
+jitter_fraction = 0.2
+# Consecutive failures that eject the endpoint (open its circuit) and consecutive
+# successes that restore it. RunPod 204 (warming) and 429 count as neither.
+failure_threshold = 3
+success_threshold = 3

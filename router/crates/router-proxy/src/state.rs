@@ -31,6 +31,7 @@ impl ProxyState {
             config.circuit.clone(),
             config.admission.clone(),
             config.pressure.clone(),
+            config.probe.clone(),
         );
         Ok(Arc::new(Self {
             config,

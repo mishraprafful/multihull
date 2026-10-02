@@ -1,6 +1,7 @@
 use router_core::circuit::CircuitConfig;
 use router_core::limit::AdmissionQueue;
 use router_core::pressure::PressureConfig;
+use router_core::probe::ProbeConfig;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -9,13 +10,13 @@ use std::time::Duration;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PhaseTimeouts {
-    #[serde(with = "duration_secs")]
+    #[serde(with = "router_core::serde_secs")]
     pub connect: Duration,
-    #[serde(with = "duration_secs")]
+    #[serde(with = "router_core::serde_secs")]
     pub first_byte: Duration,
-    #[serde(with = "duration_secs")]
+    #[serde(with = "router_core::serde_secs")]
     pub idle: Duration,
-    #[serde(with = "duration_secs")]
+    #[serde(with = "router_core::serde_secs")]
     pub total: Duration,
 }
 
@@ -41,6 +42,7 @@ pub struct ProxyConfig {
     pub circuit: CircuitConfig,
     pub admission: AdmissionQueue,
     pub pressure: PressureConfig,
+    pub probe: ProbeConfig,
 }
 
 impl Default for ProxyConfig {
@@ -56,24 +58,8 @@ impl Default for ProxyConfig {
             circuit: CircuitConfig::default(),
             admission: AdmissionQueue::default(),
             pressure: PressureConfig::default(),
+            probe: ProbeConfig::default(),
         }
-    }
-}
-
-mod duration_secs {
-    use serde::{Deserialize, Deserializer, Serializer};
-    use std::time::Duration;
-
-    pub fn serialize<S: Serializer>(value: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_f64(value.as_secs_f64())
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
-        let secs = f64::deserialize(deserializer)?;
-        if secs < 0.0 {
-            return Err(serde::de::Error::custom("timeout must be non-negative"));
-        }
-        Ok(Duration::from_secs_f64(secs))
     }
 }
 

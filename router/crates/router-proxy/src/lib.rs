@@ -4,6 +4,7 @@ pub mod body;
 pub mod config;
 pub mod error;
 pub mod handler;
+pub mod probe;
 pub mod route_table;
 pub mod runtime;
 pub mod server;

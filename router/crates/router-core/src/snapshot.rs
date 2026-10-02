@@ -183,7 +183,11 @@ pub struct Endpoint {
     pub max_concurrency: u32,
     #[serde(default)]
     pub inject_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub health_path: String,
 }
+
+pub const DEFAULT_HEALTH_PATH: &str = "/health";
 
 fn default_weight() -> u32 {
     1
@@ -194,6 +198,14 @@ fn default_max_concurrency() -> u32 {
 }
 
 impl Endpoint {
+    pub fn health_path(&self) -> &str {
+        if self.health_path.is_empty() {
+            DEFAULT_HEALTH_PATH
+        } else {
+            &self.health_path
+        }
+    }
+
     pub fn accepts_traffic(&self) -> bool {
         matches!(
             self.health,
@@ -295,6 +307,7 @@ mod tests {
                     ready_replicas: 2,
                     max_concurrency: 64,
                     inject_headers: BTreeMap::from([("X-Token".to_string(), "env".to_string())]),
+                    health_path: "/healthz".into(),
                 }],
             }],
         };
@@ -314,6 +327,7 @@ mod tests {
         assert_eq!(parsed.routes[0].failover.max_retries, 2);
         assert_eq!(endpoint.weight, 1);
         assert_eq!(endpoint.max_concurrency, 32);
+        assert_eq!(endpoint.health_path(), "/health");
         assert!(endpoint.accepts_traffic());
     }
 

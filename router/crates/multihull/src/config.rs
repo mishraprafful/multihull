@@ -1,4 +1,5 @@
 use anyhow::Context;
+use router_core::probe::ProbeConfig;
 use router_proxy::PhaseTimeouts;
 use serde::Deserialize;
 use std::net::SocketAddr;
@@ -26,6 +27,8 @@ pub struct Config {
     pub max_buffered_body_bytes: usize,
     #[serde(default)]
     pub log: LogConfig,
+    #[serde(default)]
+    pub probe: ProbeConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -86,7 +89,15 @@ impl Config {
     }
 
     pub fn parse(text: &str) -> anyhow::Result<Self> {
-        Ok(toml::from_str(text)?)
+        let config: Self = toml::from_str(text)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    fn validate(&self) -> anyhow::Result<()> {
+        self.probe
+            .validate()
+            .map_err(|message| anyhow::anyhow!("[probe]: {message}"))
     }
 
     pub fn proxy_config(&self) -> router_proxy::ProxyConfig {
@@ -99,6 +110,7 @@ impl Config {
             circuit: router_core::circuit::CircuitConfig::default(),
             admission: router_core::limit::AdmissionQueue::default(),
             pressure: router_core::pressure::PressureConfig::default(),
+            probe: self.probe.clone(),
         }
     }
 }
@@ -142,6 +154,23 @@ mod tests {
         assert_eq!(config.timeouts, PhaseTimeouts::default());
         assert_eq!(config.max_buffered_body_bytes, 1024 * 1024);
         assert!(config.tls.is_none());
+    }
+
+    #[test]
+    fn probe_table_overrides_defaults_and_is_validated() {
+        let config = Config::parse(
+            "[snapshot]\nsource = \"x\"\n[probe]\ninterval = 2\ntimeout = 0.5\nfailure_threshold = 2\n",
+        )
+        .unwrap();
+        assert_eq!(config.probe.interval, Duration::from_secs(2));
+        assert_eq!(config.probe.timeout, Duration::from_millis(500));
+        assert_eq!(config.probe.failure_threshold, 2);
+        assert_eq!(config.probe.success_threshold, 3);
+        assert_eq!(config.proxy_config().probe, config.probe);
+        let error = Config::parse("[snapshot]\nsource = \"x\"\n[probe]\ninterval = 0\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("[probe]: probe.interval"), "{error}");
     }
 
     #[test]

@@ -3,6 +3,7 @@ use router_core::circuit::{Circuit, CircuitConfig, ProviderCircuit, State};
 use router_core::limit::{AdmissionQueue, Gradient2, Gradient2Config};
 use router_core::outcome::Outcome;
 use router_core::pressure::{PressureConfig, PressureDetector};
+use router_core::probe::{ProbeConfig, ProbeOutcome, ProbeState, ProbeTracker, ProbeTransition};
 use router_core::retry::RetryBudget;
 use router_core::rng::Rng;
 use router_core::score::EndpointStateView;
@@ -21,13 +22,19 @@ pub struct EndpointRuntime {
     pub provider: String,
     circuit: Mutex<Circuit>,
     limiter: Mutex<Gradient2>,
+    probe: Mutex<ProbeTracker>,
     outstanding: AtomicU32,
     ewma_ttft: Mutex<Option<f64>>,
     released: Arc<Notify>,
 }
 
 impl EndpointRuntime {
-    fn new(endpoint: &Endpoint, circuit: CircuitConfig, released: Arc<Notify>) -> Self {
+    fn new(
+        endpoint: &Endpoint,
+        circuit: CircuitConfig,
+        probe: &ProbeConfig,
+        released: Arc<Notify>,
+    ) -> Self {
         Self {
             id: endpoint.id.clone(),
             provider: endpoint.provider.clone(),
@@ -35,6 +42,7 @@ impl EndpointRuntime {
             limiter: Mutex::new(Gradient2::new(Gradient2Config::for_max_concurrency(
                 endpoint.max_concurrency,
             ))),
+            probe: Mutex::new(ProbeTracker::new(probe)),
             outstanding: AtomicU32::new(0),
             ewma_ttft: Mutex::new(None),
             released,
@@ -51,6 +59,42 @@ impl EndpointRuntime {
 
     pub fn circuit_state(&self, now: Duration) -> State {
         lock(&self.circuit).peek(now)
+    }
+
+    pub fn probe_down(&self) -> bool {
+        lock(&self.probe).is_down()
+    }
+
+    pub fn probe_status(&self) -> ProbeStatus {
+        let tracker = lock(&self.probe);
+        ProbeStatus {
+            state: tracker.state(),
+            consecutive_failures: tracker.consecutive_failures(),
+            consecutive_successes: tracker.consecutive_successes(),
+            last_outcome: tracker.last_outcome(),
+            last_status: tracker.last_status(),
+            probes: tracker.probes(),
+        }
+    }
+
+    pub fn record_probe(
+        &self,
+        outcome: ProbeOutcome,
+        status: Option<u16>,
+        now: Duration,
+        rng: &mut impl Rng,
+    ) -> ProbeTransition {
+        let transition = lock(&self.probe).record(outcome, status);
+        match transition {
+            ProbeTransition::WentDown => {
+                lock(&self.circuit).eject(now, rng);
+            }
+            ProbeTransition::CameUp => {
+                lock(&self.circuit).restore();
+            }
+            ProbeTransition::Unchanged => {}
+        }
+        transition
     }
 
     pub fn ewma_ttft_secs(&self) -> Option<f64> {
@@ -126,6 +170,16 @@ pub struct SessionEntry {
     pub pin: PinEntry,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProbeStatus {
+    pub state: ProbeState,
+    pub consecutive_failures: u32,
+    pub consecutive_successes: u32,
+    pub last_outcome: Option<ProbeOutcome>,
+    pub last_status: Option<u16>,
+    pub probes: u64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EndpointStatus {
     pub circuit: &'static str,
@@ -133,6 +187,7 @@ pub struct EndpointStatus {
     pub outstanding: u32,
     pub concurrency_limit: u32,
     pub ewma_ttft_secs: Option<f64>,
+    pub probe: ProbeStatus,
 }
 
 pub struct Runtime {
@@ -144,6 +199,7 @@ pub struct Runtime {
     pressure: Mutex<PressureDetector>,
     released: Arc<Notify>,
     circuit_config: CircuitConfig,
+    probe_config: ProbeConfig,
     started: Instant,
 }
 
@@ -153,6 +209,7 @@ impl Default for Runtime {
             CircuitConfig::default(),
             AdmissionQueue::default(),
             PressureConfig::default(),
+            ProbeConfig::default(),
         )
     }
 }
@@ -162,6 +219,7 @@ impl Runtime {
         circuit_config: CircuitConfig,
         admission: AdmissionQueue,
         pressure: PressureConfig,
+        probe_config: ProbeConfig,
     ) -> Self {
         let released = Arc::new(Notify::new());
         Self {
@@ -173,6 +231,7 @@ impl Runtime {
             admission: Admission::new(admission, released.clone()),
             released,
             circuit_config,
+            probe_config,
             started: Instant::now(),
         }
     }
@@ -188,6 +247,7 @@ impl Runtime {
                 Arc::new(EndpointRuntime::new(
                     endpoint,
                     self.circuit_config.clone(),
+                    &self.probe_config,
                     self.released.clone(),
                 ))
             })
@@ -290,6 +350,45 @@ impl Runtime {
         self.publish_circuit_gauges(endpoint, now);
     }
 
+    pub fn record_probe(&self, endpoint: &Endpoint, outcome: ProbeOutcome, status: Option<u16>) {
+        let runtime = self.endpoint(endpoint);
+        let now = self.now();
+        let transition = runtime.record_probe(outcome, status, now, &mut ThreadRng);
+        metrics::counter!(
+            router_obs::metrics::PROBE_TOTAL,
+            router_obs::metrics::labels::ENDPOINT => endpoint.id.clone(),
+            router_obs::metrics::labels::OUTCOME => outcome.label()
+        )
+        .increment(1);
+        match transition {
+            ProbeTransition::WentDown => {
+                tracing::warn!(
+                    endpoint = %endpoint.id,
+                    provider = %endpoint.provider,
+                    status = ?status,
+                    "active probe ejected endpoint"
+                );
+                metrics::counter!(
+                    router_obs::metrics::FAILOVERS_TOTAL,
+                    router_obs::metrics::labels::FROM => endpoint.provider.clone(),
+                    router_obs::metrics::labels::REASON => "probe"
+                )
+                .increment(1);
+            }
+            ProbeTransition::CameUp => {
+                tracing::info!(
+                    endpoint = %endpoint.id,
+                    provider = %endpoint.provider,
+                    "active probe restored endpoint"
+                );
+            }
+            ProbeTransition::Unchanged => {}
+        }
+        if transition != ProbeTransition::Unchanged {
+            self.publish_circuit_gauges(endpoint, now);
+        }
+    }
+
     pub fn provider_open(&self, provider: &str, now: Duration) -> bool {
         if provider.is_empty() {
             return false;
@@ -308,7 +407,7 @@ impl Runtime {
 
     pub fn endpoint_circuit_open(&self, endpoint: &Endpoint, now: Duration) -> bool {
         self.get(&endpoint.id)
-            .map(|rt| rt.circuit_state(now).is_open())
+            .map(|rt| rt.circuit_state(now).is_open() || rt.probe_down())
             .unwrap_or(false)
     }
 
@@ -334,6 +433,7 @@ impl Runtime {
             outstanding: runtime.outstanding(),
             concurrency_limit: runtime.limit(),
             ewma_ttft_secs: runtime.ewma_ttft_secs(),
+            probe: runtime.probe_status(),
         })
     }
 
@@ -506,6 +606,7 @@ impl EndpointStateView for RuntimeView<'_> {
         match self.runtime.get(id) {
             Some(endpoint) => {
                 !endpoint.circuit_state(self.now).is_open()
+                    && !endpoint.probe_down()
                     && !self.runtime.provider_open(&endpoint.provider, self.now)
                     && endpoint.has_headroom()
             }
@@ -691,6 +792,45 @@ mod tests {
         assert!(!rt.has_headroom());
         drop(guards);
         assert!(rt.try_reserve().is_some());
+    }
+
+    #[test]
+    fn probe_failures_eject_and_probe_successes_restore() {
+        let runtime = Runtime::default();
+        let a = endpoint("a");
+        let b = endpoint("b");
+        runtime.endpoint(&b);
+        for _ in 0..2 {
+            runtime.record_probe(&a, ProbeOutcome::Failure, Some(503));
+            assert!(!runtime.endpoint_circuit_open(&a, runtime.now()));
+        }
+        runtime.record_probe(&a, ProbeOutcome::Failure, Some(503));
+        let now = runtime.now();
+        assert!(runtime.endpoint_circuit_open(&a, now));
+        assert!(!runtime.endpoint_healthy(&a, now));
+        assert!(runtime.endpoint_healthy(&b, now));
+        let status = runtime.status(&a).unwrap();
+        assert_eq!(status.circuit, "open");
+        assert_eq!(status.probe.state, ProbeState::Down);
+        assert_eq!(status.probe.consecutive_failures, 3);
+        let excluded = HashSet::new();
+        assert!(!runtime.view(&excluded, None).available("a"));
+
+        runtime.record_probe(&a, ProbeOutcome::Warming, Some(204));
+        assert!(runtime.endpoint_circuit_open(&a, runtime.now()));
+        for _ in 0..2 {
+            runtime.record_probe(&a, ProbeOutcome::Success, Some(200));
+            assert!(runtime.endpoint_circuit_open(&a, runtime.now()));
+        }
+        runtime.record_probe(&a, ProbeOutcome::Success, Some(200));
+        let now = runtime.now();
+        assert!(!runtime.endpoint_circuit_open(&a, now));
+        assert!(runtime.endpoint_healthy(&a, now));
+        let status = runtime.status(&a).unwrap();
+        assert_eq!(status.circuit, "closed");
+        assert_eq!(status.probe.state, ProbeState::Up);
+        assert_eq!(status.probe.probes, 7);
+        assert!(runtime.view(&excluded, None).available("a"));
     }
 
     #[test]

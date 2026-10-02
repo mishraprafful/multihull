@@ -85,6 +85,8 @@ async fn main() -> anyhow::Result<()> {
         })
     };
 
+    let probe_task = tokio::spawn(router_proxy::probe::run(proxy_state.clone()));
+
     let swap_task = {
         let snapshot = snapshot.clone();
         let proxy_state = proxy_state.clone();
@@ -143,6 +145,7 @@ async fn main() -> anyhow::Result<()> {
         }
         _ = swap_task => anyhow::bail!("snapshot swap task ended"),
         _ = housekeeping_task => anyhow::bail!("housekeeping task ended"),
+        _ = probe_task => anyhow::bail!("probe task ended"),
     }
     Ok(())
 }
