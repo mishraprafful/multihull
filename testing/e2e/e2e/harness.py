@@ -6,7 +6,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -300,6 +300,26 @@ class Controller(Process):
         return [line for line in self.log_text().splitlines() if needle in line]
 
 
+TomlValue = bool | int | float | str
+
+
+def toml_literal(value: TomlValue) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return json.dumps(value)
+    return repr(value)
+
+
+def toml_tables(tables: Mapping[str, Mapping[str, TomlValue]]) -> str:
+    lines: list[str] = []
+    for name, entries in tables.items():
+        lines.append(f"[{name}]")
+        lines.extend(f"{key} = {toml_literal(value)}" for key, value in entries.items())
+        lines.append("")
+    return "\n".join(lines)
+
+
 def write_router_config(
     path: Path,
     listen_port: int,
@@ -307,6 +327,7 @@ def write_router_config(
     source: str,
     first_byte_seconds: int = 3,
     log_filter: str = "info",
+    tuning: Mapping[str, Mapping[str, TomlValue]] | None = None,
 ) -> Path:
     path.write_text(
         "\n".join(
@@ -325,6 +346,7 @@ def write_router_config(
                 'format = "json"',
                 f'filter = "{log_filter}"',
                 "",
+                toml_tables(tuning or {}),
             ]
         )
     )
@@ -332,11 +354,19 @@ def write_router_config(
 
 
 class Router(Process):
-    def __init__(self, binary: Path, config_path: Path, log_path: Path, source: str) -> None:
+    def __init__(
+        self,
+        binary: Path,
+        config_path: Path,
+        log_path: Path,
+        source: str,
+        tuning: Mapping[str, Mapping[str, TomlValue]] | None = None,
+    ) -> None:
         super().__init__("router", log_path)
         self.binary = binary
         self.config_path = config_path
         self.source = source
+        self.tuning = dict(tuning or {})
         self.listen_port = free_port()
         self.admin_port = free_port()
         self.http = httpx.Client(timeout=5.0)
@@ -350,7 +380,9 @@ class Router(Process):
         return f"http://127.0.0.1:{self.admin_port}"
 
     def start(self) -> None:
-        write_router_config(self.config_path, self.listen_port, self.admin_port, self.source)
+        write_router_config(
+            self.config_path, self.listen_port, self.admin_port, self.source, tuning=self.tuning
+        )
         self.spawn([str(self.binary), "--config", str(self.config_path)])
 
     def healthz(self) -> bool:
