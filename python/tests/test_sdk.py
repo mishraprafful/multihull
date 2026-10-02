@@ -44,8 +44,35 @@ def test_target_factory_builds_spec_targets() -> None:
     assert runpod.runpod.dataCenters == ["EU-RO-1"] and runpod.replicas.min == 0
     assert target.baseten("bt", 4).type == "baseten"
     assert target.replicate("rep", 5, owner="acme").replicate.owner == "acme"
+    local = target.docker("local", 6, host_port=18001, env={"MOCK": "1"}, pull=False)
+    assert local.type == "docker" and local.docker.hostPort == 18001
+    assert local.docker.env == {"MOCK": "1"} and local.docker.pull is False
+    assert local.docker.host == "127.0.0.1" and local.docker.image is None
+    assert target.docker("plain", 7).docker.hostPort is None
     with pytest.raises(ValueError):
         target.kubernetes("bad", 0)
+
+
+def test_docker_only_service_from_builders(tmp_path: Path) -> None:
+    service = Service(
+        name="mock-sdk",
+        container={"image": "multihull-mock-server:dev", "port": 8000},
+        resources={"gpu": []},
+        reliability={"minWarmProviders": 2},
+        targets=[
+            target.docker("docker-a", 1, host_port=18101),
+            target.docker("docker-b", 2, host_port=18102),
+        ],
+        route={"hostname": "mock.localhost"},
+        state=LocalState(tmp_path / "state.db"),
+        snapshot_path=tmp_path / "snapshot.json",
+    )
+    plans = service.plan()
+    assert [(p.provider, p.type, p.change) for p in plans] == [
+        ("docker-a", "docker", "new"),
+        ("docker-b", "docker", "new"),
+    ]
+    assert plans[0].plan.payload["ports"] == {"8000/tcp": ("127.0.0.1", 18101)}
 
 
 def test_mutating_targets_revalidates(tmp_path: Path) -> None:

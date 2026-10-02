@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from multihull import discovery
+from multihull._proto import discovery_pb2 as pb
 from multihull.providers import create
 from multihull.providers.base import Observed, Ref
 from multihull.spec import ServiceSpec
@@ -91,6 +92,46 @@ def test_snapshot_skips_unreachable_endpoint(
     snapshot = discovery.build_snapshot(llama_spec, state, providers)
     assert snapshot["routes"][0]["endpoints"] == []
     assert snapshot["routes"][0]["auth"] == {"api_key_hashes": [], "algorithm": "blake3"}
+
+
+def test_snapshot_docker_endpoints(mock_docker_spec: ServiceSpec, tmp_path: Path) -> None:
+    state = LocalState(tmp_path / "state.db")
+    providers = {t.provider: create("docker") for t in mock_docker_spec.targets}
+    for index, target in enumerate(mock_docker_spec.targets, start=1):
+        ref = Ref(
+            target.provider,
+            "docker",
+            mock_docker_spec.name,
+            {
+                "container": f"sha{index:03d}",
+                "name": f"multihull-mock-three-{target.provider}",
+                "host": "127.0.0.1",
+                "host_port": str(18000 + index),
+                "health_path": "/health",
+            },
+        )
+        state.put(StateRecord(mock_docker_spec.name, target.provider, ref.to_json(), None, "h"))
+    snapshot = discovery.build_snapshot(
+        mock_docker_spec,
+        state,
+        providers,
+        observed={"docker-a": Observed("Ready", 1, 1)},
+        version=3,
+    )
+    endpoints = snapshot["routes"][0]["endpoints"]
+    assert [(e["type"], e["url"], e["priority"]) for e in endpoints] == [
+        ("docker", "http://127.0.0.1:18001", 1),
+        ("docker", "http://127.0.0.1:18002", 2),
+        ("docker", "http://127.0.0.1:18003", 3),
+    ]
+    assert endpoints[0]["health"] == "healthy" and endpoints[0]["ready_replicas"] == 1
+    assert endpoints[1]["health"] == "unknown"
+    assert all(e["region"] is None and e["inject_headers"] == {} for e in endpoints)
+    assert snapshot["routes"][0]["auth"] is None
+    message = discovery.snapshot_to_proto(snapshot)
+    proto_endpoints = message.routes[0].endpoints
+    assert [e.url for e in proto_endpoints] == [e["url"] for e in endpoints]
+    assert {e.type for e in proto_endpoints} == {pb.ENDPOINT_TYPE_UNSPECIFIED}
 
 
 def test_load_api_keys_from_file(tmp_path: Path) -> None:

@@ -116,6 +116,30 @@ class TargetFactory:
     ) -> TargetSpec:
         return self.build(provider, "replicate", priority, {"owner": owner}, replicas, weight)
 
+    def docker(
+        self,
+        provider: str,
+        priority: int,
+        *,
+        image: str | None = None,
+        host: str = "127.0.0.1",
+        host_port: int | None = None,
+        env: Mapping[str, str] | None = None,
+        network: str | None = None,
+        pull: bool = True,
+        replicas: Mapping[str, int] | tuple[int, int] | None = None,
+        weight: int = 1,
+    ) -> TargetSpec:
+        block = {
+            "image": image,
+            "host": host,
+            "hostPort": host_port,
+            "env": dict(env or {}),
+            "network": network,
+            "pull": pull,
+        }
+        return self.build(provider, "docker", priority, block, replicas, weight)
+
 
 target = TargetFactory()
 

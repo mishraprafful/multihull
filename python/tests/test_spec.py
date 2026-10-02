@@ -90,6 +90,53 @@ def test_block_must_match_type(llama_raw: dict[str, Any]) -> None:
         ServiceSpec.model_validate(raw)
 
 
+def test_empty_gpu_rejected_unless_all_targets_docker(llama_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(llama_raw)
+    raw["resources"]["gpu"] = []
+    with pytest.raises(ValidationError, match="gke-prod \\(kubernetes\\), modal-main \\(modal\\)"):
+        ServiceSpec.model_validate(raw)
+    raw["targets"].append({"provider": "local", "type": "docker", "priority": 4})
+    with pytest.raises(ValidationError, match="only when every target is of type docker"):
+        ServiceSpec.model_validate(raw)
+
+
+def test_empty_gpu_allowed_for_docker_only_targets(mock_docker_spec: ServiceSpec) -> None:
+    assert mock_docker_spec.resources.gpu == []
+    assert [t.type for t in mock_docker_spec.targets] == ["docker"] * 3
+    assert mock_docker_spec.target("docker-a").docker is not None
+    assert mock_docker_spec.target("docker-a").docker.hostPort == 18001
+    assert mock_docker_spec.target("docker-c").docker.pull is False
+
+
+def test_gpu_list_tolerated_with_docker_targets(mock_docker_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(mock_docker_raw)
+    raw["resources"]["gpu"] = ["L4"]
+    assert ServiceSpec.model_validate(raw).resources.gpu == [GPU.L4]
+
+
+def test_docker_block_defaults_and_bounds(mock_docker_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(mock_docker_raw)
+    raw["targets"][0].pop("docker")
+    loaded = ServiceSpec.model_validate(raw)
+    assert loaded.target("docker-a").docker is None
+    block = specmod.DockerBlock()
+    assert (block.host, block.hostPort, block.pull, block.env, block.network, block.image) == (
+        "127.0.0.1",
+        None,
+        True,
+        {},
+        None,
+        None,
+    )
+    raw["targets"][1]["docker"]["hostPort"] = 70000
+    with pytest.raises(ValidationError):
+        ServiceSpec.model_validate(raw)
+    raw["targets"][1]["docker"] = {"hostPort": 0}
+    raw["targets"][1]["modal"] = {"environment": "main"}
+    with pytest.raises(ValidationError, match="block modal does not match type docker"):
+        ServiceSpec.model_validate(raw)
+
+
 def test_unknown_gpu_rejected(llama_raw: dict[str, Any]) -> None:
     raw = copy.deepcopy(llama_raw)
     raw["resources"]["gpu"] = ["T4"]
@@ -126,3 +173,13 @@ def test_json_schema_shape() -> None:
     }
     assert schema["$defs"]["GPU"]["enum"] == [g.value for g in GPU]
     assert "from" in schema["$defs"]["ApiKeys"]["properties"]
+    assert "docker" in schema["$defs"]["TargetSpec"]["properties"]["type"]["enum"]
+    assert schema["$defs"]["Resources"]["properties"]["gpu"]["default"] == []
+    assert set(schema["$defs"]["DockerBlock"]["properties"]) == {
+        "image",
+        "host",
+        "hostPort",
+        "env",
+        "network",
+        "pull",
+    }

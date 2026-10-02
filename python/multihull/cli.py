@@ -194,6 +194,9 @@ def plan(
             str(file) if file else "",
         )
     console.print(table)
+    for target_plan in plans:
+        for note in target_plan.plan.notes if target_plan.plan else []:
+            console.print(f"[yellow]note[/yellow] {target_plan.provider}: {note}")
 
 
 def colour_change(change: str) -> str:

@@ -1,0 +1,37 @@
+apiVersion: multihull/v1
+name: mock-three
+
+container:
+  image: multihull-mock-server:dev
+  port: 8000
+  health: {path: /health, initialDelaySeconds: 2}
+  env: {MOCK_MODEL: mock-llm}
+
+resources:
+  gpu: []
+
+scaling:
+  concurrency: 8
+  replicas: {min: 1, max: 1}
+
+reliability:
+  minWarmProviders: 3
+
+targets:
+  - provider: docker-a
+    type: docker
+    priority: 1
+    docker: {hostPort: 18001}
+  - provider: docker-b
+    type: docker
+    priority: 2
+    docker: {hostPort: 18002, env: {MOCK_FAULT: none}}
+  - provider: docker-c
+    type: docker
+    priority: 3
+    docker: {hostPort: 18003, pull: false}
+
+route:
+  hostname: mock.localhost
+  protocol: openai
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}
