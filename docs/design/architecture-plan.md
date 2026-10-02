@@ -233,7 +233,7 @@ CLOSED ────────────────────────�
             └───────────┘  any failure → OPEN, n += 1
 ```
 
-**Failover**: phase timeouts (connect 2 s, first byte 30 s, idle 60 s, total 10 m). Retry only if zero bytes committed to the client, body fully buffered, and (idempotent method, or `Idempotency-Key`, or outcome is Capacity or connect failure). Retry to a different provider, max 2. Retry budget 20% of live volume per service. Hedging in v0.2 after p95 TTFT. SSE: once the first byte is forwarded the stream is committed; on mid-stream failure the router emits a final `upstream_disconnected, retryable: true` event and the SDK retries with the same idempotency key. Mid-stream failover is not attempted (nondeterministic generation).
+**Failover**: phase timeouts (connect 2 s, first byte 30 s, idle 60 s, total 10 m). Retry only if zero bytes committed to the client, body fully buffered, and (idempotent method, or `Idempotency-Key`, or outcome is Capacity or connect failure). Retry to a different provider, max 2. Retry budget per route: 20% of admitted requests over a trailing 10 s window plus a floor of 10 retries per second, so low-volume routes can still fail over. Hedging in v0.2 after p95 TTFT. SSE: once the first byte is forwarded the stream is committed. Design intent: on mid-stream failure the router emits a final `upstream_disconnected, retryable: true` event and the SDK retries with the same idempotency key. Implementation status: planned; today the router drops the stream and the client sees a connection error after the delivered chunks. Mid-stream failover is not attempted (nondeterministic generation).
 
 ```
 Client        Router                 Modal (P2)              RunPod (P3)
