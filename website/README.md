@@ -12,7 +12,7 @@ The reference pages need `uv` on `PATH`; the build fails with a clear message if
 
 ## Deploy
 
-`.github/workflows/docs.yml` builds the site in GitHub Actions and deploys `dist/` to the Cloudflare Pages project `multihull` with Wrangler, creating the project on first run. Pushes to `main` deploy to production (`https://multihull.pages.dev`). Pull requests get a preview deployment and a sticky comment with its URL. Without the secrets below, the workflow builds and skips the deploy.
+`.github/workflows/docs.yml` builds the site in GitHub Actions and deploys `dist/` to the Cloudflare Pages project `multihull` with Wrangler, creating the project on first run. Pushes to `main` deploy to production (`https://multihull.pages.dev`). Pull requests get a preview deployment and a sticky comment with its URL. Only changes under `website/` (or to the workflow file) trigger it. The architecture page and the generated reference pages come from `docs/design/` and the Python CLI, so changes there reach the live site on the next website change or a manual run: `gh workflow run docs.yml`. Without the secrets below, the workflow builds and skips the deploy.
 
 Add the two repository secrets from a terminal, so values never land in chat or files:
 
