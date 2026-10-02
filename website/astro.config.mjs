@@ -2,7 +2,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://multihull.dev',
+  site: process.env.SITE_URL ?? 'https://multihull.pages.dev',
   integrations: [
     starlight({
       title: 'Multihull',
