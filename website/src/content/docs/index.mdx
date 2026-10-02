@@ -18,8 +18,12 @@ hero:
 
 import Horizon from '../../components/Horizon.astro';
 import StatusPill from '../../components/StatusPill.astro';
+import HeroFailover from '../../components/HeroFailover.astro';
+import SpecToProviders from '../../components/SpecToProviders.astro';
 
-<div class="mh-value-props">
+<HeroFailover />
+
+<div class="mh-value-props not-content">
   <div>
     <h3>One spec</h3>
     <p>Describe image, GPU class, scaling and targets once in <code>multihull.yaml</code>. Each provider gets its native payload.</p>
@@ -62,6 +66,8 @@ route:
   hostname: llama.api.acme.com
   protocol: openai
 ```
+
+<SpecToProviders />
 
 ## What `hull status` shows
 
