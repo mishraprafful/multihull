@@ -25,22 +25,22 @@ The last snapshot is persisted to disk and served indefinitely on control-plane 
 ## Configuration
 
 ```toml title="router.toml"
-[listener]
-addr = "0.0.0.0:8080"
-
-[admin]
-addr = "0.0.0.0:9090"
+listen = "0.0.0.0:8080"
+admin_listen = "0.0.0.0:9090"
 
 [snapshot]
-source = "file"
-path = "/var/lib/multihull/snapshot.json"
+source = "file:///var/lib/multihull/snapshot.json"
+
+[probe]
+interval = 5
+timeout = 2
 ```
 
-Everything else is dynamic. SIGHUP reloads TLS; SIGTERM drains for up to 10 m.
+`[timeouts]`, `[circuit]`, `[admission]`, `[pressure]`, `[probe]` and `[retry]` tune the data plane; `router/router.example.toml` lists every key with its default. Everything else is dynamic. SIGHUP reloads TLS; SIGTERM drains for up to 10 m.
 
 ## Observability
 
-OTel spans `router.request` and `upstream.attempt{provider, endpoint, n, outcome}`. Prometheus: `router_requests_total`, `router_failovers_total{from,to,reason}`, `router_circuit_state`, `router_upstream_ttft_seconds`, `router_queue_wait_seconds`, `router_concurrency_limit`, `router_retry_budget_remaining`, `router_output_tokens_total`. JSON access log with `attempts[]`. `/debug/endpoints` on the admin listener.
+OTel spans `router.request` and `upstream.attempt{provider, endpoint, n, outcome}`. Prometheus: `router_requests_total`, `router_failovers_total{from,to,reason}`, `router_circuit_state`, `router_probe_total{endpoint,outcome}`, `router_upstream_ttft_seconds`, `router_queue_wait_seconds`, `router_concurrency_limit`, `router_retry_budget_remaining`, `router_output_tokens_total`. JSON access log with `attempts[]`. `/debug/endpoints`, `/debug/sessions` and `/debug/config` on the admin listener.
 
 ## Auth
 
