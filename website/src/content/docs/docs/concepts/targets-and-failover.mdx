@@ -50,7 +50,7 @@ Recovery runs in the other direction. An ejected target waits out its backoff, t
 
 ## Streaming
 
-Once the first SSE byte is forwarded the stream is committed. On mid-stream failure the router emits a final `upstream_disconnected, retryable: true` event; the SDK retries with the same idempotency key. Mid-stream failover is never attempted.
+Once the first SSE byte is forwarded the stream is committed and mid-stream failover is never attempted. On a mid-stream upstream failure the router currently drops the stream: the client sees a connection error after the chunks already delivered and retries with the same idempotency key. A terminal `upstream_disconnected, retryable: true` event that tells the client the retry is safe is planned, not yet implemented.
 
 ## States you will see
 
