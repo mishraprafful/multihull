@@ -3,13 +3,15 @@
     viewBox="0 0 960 420"
     role="img"
     aria-labelledby="hf-title hf-desc"
-    aria-label="A trimaran seen from above. Three hulls are three GPU providers: Kubernetes, Modal and RunPod. Requests from one URL reach the router and flow to the primary hull. When the primary circuit opens, traffic reroutes to Modal with zero errors, then returns once Kubernetes passes its half-open ramp."
+    aria-label="A trimaran seen from above. Three hulls are three GPU providers: Kubernetes, Modal and RunPod. Requests from one URL reach the router and flow to the primary hull. When the primary circuit opens, traffic reroutes to Modal with zero errors. When Modal's circuit opens too, traffic reroutes to RunPod, still with zero errors. Modal recovers through its half-open ramp and traffic climbs back to it, then Kubernetes recovers and traffic returns to priority 1."
   >
     <title id="hf-title">Per-request failover across three providers</title>
     <desc id="hf-desc">
       Requests from one URL on the left reach the router ahead of the hulls, cross the forward beam and flow to the Kubernetes hull.
       Its circuit opens, the status pill turns coral and the stream moves to Modal within one beat while the error counter stays at zero.
-      Kubernetes recovers through an amber half-open ramp and traffic returns.
+      Modal's circuit opens too, its pill turns coral and the stream moves to RunPod; the error counter still reads zero and the failover counter reads two.
+      Modal recovers through an amber half-open ramp and traffic climbs back to it, then Kubernetes recovers the same way and traffic returns to priority 1.
+      With reduced motion the picture holds the frame where Kubernetes and Modal are both down and RunPod serves every request.
     </desc>
 
     <defs>
@@ -45,7 +47,8 @@
     <text class="t1 c-ok counter" x="89" y="248.5">0 errors</text>
     <rect class="hf-counter muted t2" x="146" y="236" width="84" height="24" rx="12" />
     <text class="t2 counter ph-a" x="188" y="248.5">failovers 0</text>
-    <text class="t2 counter ph-bcd" x="188" y="248.5">failovers 1</text>
+    <text class="t2 counter ph-b" x="188" y="248.5">failovers 1</text>
+    <text class="t2 counter ph-efgh" x="188" y="248.5">failovers 2</text>
 
     <line class="hf-lane" x1="230" y1="205" x2="364" y2="205" />
     <line class="hf-beam" x1="416" y1="205" x2="470" y2="205" />
@@ -63,12 +66,12 @@
       </g>
       <rect class="hf-pill" x="290" y="-9" width="72" height="18" rx="9" />
       <text class="t2 pill-text c-ok" x="326" y="0.5">serving</text>
-      <g class="ph-b">
+      <g class="ph-bef">
         <rect class="hf-pill-mask" x="290" y="-9" width="72" height="18" rx="9" />
         <rect class="hf-pill pill-down" x="290" y="-9" width="72" height="18" rx="9" />
         <text class="t2 pill-text c-down" x="326" y="0.5">down</text>
       </g>
-      <g class="ph-c">
+      <g class="ph-g">
         <rect class="hf-pill-mask" x="290" y="-9" width="72" height="18" rx="9" />
         <rect class="hf-pill pill-warn" x="290" y="-9" width="72" height="18" rx="9" />
         <text class="t2 pill-text c-warn" x="326" y="0.5">recovering</text>
@@ -86,13 +89,23 @@
       <circle class="hf-dock" cx="80" cy="0" r="4" />
       <text class="t1 name" x="175" y="-3">Modal</text>
       <text class="t2 spec" x="175" y="11">1 x A10G</text>
-      <g class="hf-breaker" transform="translate(224 0)">
+      <g class="hf-breaker breaker2" transform="translate(224 0)">
         <circle cx="0" cy="0" r="2.5" />
         <circle cx="16" cy="0" r="2.5" />
-        <rect class="hf-arm" x="0" y="-1.25" width="14" height="2.5" />
+        <rect class="hf-arm arm2" x="0" y="-1.25" width="14" height="2.5" />
       </g>
       <rect class="hf-pill" x="290" y="-9" width="72" height="18" rx="9" />
       <text class="t2 pill-text c-ok" x="326" y="0.5">serving</text>
+      <g class="ph-e">
+        <rect class="hf-pill-mask" x="290" y="-9" width="72" height="18" rx="9" />
+        <rect class="hf-pill pill-down" x="290" y="-9" width="72" height="18" rx="9" />
+        <text class="t2 pill-text c-down" x="326" y="0.5">down</text>
+      </g>
+      <g class="ph-f">
+        <rect class="hf-pill-mask" x="290" y="-9" width="72" height="18" rx="9" />
+        <rect class="hf-pill pill-warn" x="290" y="-9" width="72" height="18" rx="9" />
+        <text class="t2 pill-text c-warn" x="326" y="0.5">recovering</text>
+      </g>
       <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
         <g class="hf-health health2">
           <g class="hf-scroll"><use href="#hf-wave" /></g>
@@ -114,7 +127,7 @@
       <rect class="hf-pill" x="290" y="-9" width="72" height="18" rx="9" />
       <text class="t2 pill-text c-ok" x="326" y="0.5">serving</text>
       <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
-        <g class="hf-health">
+        <g class="hf-health health3">
           <g class="hf-scroll"><use href="#hf-wave" /></g>
         </g>
       </g>
@@ -137,8 +150,10 @@
 
     <text class="t2 caption ph-a" x="40" y="392">All hulls serving. Requests flow to priority 1.</text>
     <text class="t2 caption ph-b" x="40" y="392">Kubernetes circuit opens. Next request lands on Modal. Callers see zero errors.</text>
-    <text class="t2 caption ph-c" x="40" y="392">Half-open: admit 1 request, then 5%, 25%, 100%.</text>
-    <text class="t2 caption ph-d" x="40" y="392">Recovered. Traffic returns to priority 1.</text>
+    <text class="t2 caption ph-e" x="40" y="392">Modal circuit opens too. Requests land on RunPod. Still zero errors.</text>
+    <text class="t2 caption ph-f" x="40" y="392">Modal half-open: admit 1 request, then 5%, 25%, 100%.</text>
+    <text class="t2 caption ph-g" x="40" y="392">Modal recovered. Traffic climbs to priority 2. Kubernetes half-open.</text>
+    <text class="t2 caption ph-h" x="40" y="392">Recovered. Traffic returns to priority 1.</text>
   </svg>
 </figure>
 
@@ -304,11 +319,11 @@
     opacity: 0;
   }
 
-  .ph-a, .ph-c, .ph-d, .ph-ad {
+  .ph-a, .ph-b, .ph-f, .ph-g, .ph-h {
     opacity: 0;
   }
 
-  .ph-b, .ph-bcd {
+  .ph-e, .ph-bef, .ph-efgh {
     opacity: 1;
   }
 
@@ -327,30 +342,34 @@
     stroke: var(--mh-warn);
   }
 
-  .breaker1 {
+  .breaker1,
+  .breaker2 {
     fill: var(--mh-down);
   }
 
-  .arm1 {
+  .arm1,
+  .arm2 {
     transform: rotate(-40deg);
   }
 
-  .health1 {
+  .health1,
+  .health2 {
     transform: scaleY(0.08);
   }
 
-  .health1 use {
+  .health1 use,
+  .health2 use {
     stroke: var(--mh-down);
   }
 
-  .health2 {
+  .health3 {
     transform: scaleY(1.35);
   }
 
   .p1 { transform: translate(290px, 205px); }
   .p2 { transform: translate(360px, 205px); }
-  .p3 { transform: translate(443px, 205px); }
-  .p4 { transform: translate(504px, 205px); }
+  .p3 { transform: translate(470px, 262px); }
+  .p4 { transform: translate(512px, 310px); }
 
   @media (max-width: 40rem) {
     .t2 { display: none; }
@@ -365,32 +384,40 @@
     }
 
     .hf-pkt {
-      animation: hf-pkt 12s linear infinite;
+      animation: hf-pkt 18s linear infinite;
     }
 
-    .p2 { animation-delay: -11.6s; }
-    .p3 { animation-delay: -11.2s; }
-    .p4 { animation-delay: -10.8s; }
+    .p2 { animation-delay: -17.7s; }
+    .p3 { animation-delay: -17.4s; }
+    .p4 { animation-delay: -17.1s; }
 
     .hf-probe {
-      animation: hf-probe 12s linear infinite;
+      animation: hf-probe 18s linear infinite;
     }
 
-    .q2 { animation-delay: -11s; }
-    .q3 { animation-delay: -10.2s; }
+    .q2 { animation-delay: -17.2s; }
+    .q3 { animation-delay: -16.4s; }
 
-    .breaker1 { animation: hf-breaker1 12s linear infinite; }
-    .arm1 { animation: hf-arm1 12s ease-out infinite; }
-    .health1 { animation: hf-health1 12s linear infinite; }
-    .health1 use { animation: hf-stroke1 12s linear infinite; }
-    .health2 { animation: hf-health2 12s ease-in-out infinite; }
+    .breaker1 { animation: hf-breaker1 18s linear infinite; }
+    .arm1 { animation: hf-arm1 18s ease-out infinite; }
+    .health1 { animation: hf-health1 18s linear infinite; }
+    .health1 use { animation: hf-stroke1 18s linear infinite; }
 
-    .ph-a { animation: hf-ph-a 12s steps(1, end) infinite; }
-    .ph-b { animation: hf-ph-b 12s steps(1, end) infinite; }
-    .ph-c { animation: hf-ph-c 12s steps(1, end) infinite; }
-    .ph-d { animation: hf-ph-d 12s steps(1, end) infinite; }
-    .ph-ad { animation: hf-ph-ad 12s steps(1, end) infinite; }
-    .ph-bcd { animation: hf-ph-bcd 12s steps(1, end) infinite; }
+    .breaker2 { animation: hf-breaker2 18s linear infinite; }
+    .arm2 { animation: hf-arm2 18s ease-out infinite; }
+    .health2 { animation: hf-health2 18s linear infinite; }
+    .health2 use { animation: hf-stroke2 18s linear infinite; }
+
+    .health3 { animation: hf-health3 18s ease-in-out infinite; }
+
+    .ph-a { animation: hf-ph-a 18s steps(1, end) infinite; }
+    .ph-b { animation: hf-ph-b 18s steps(1, end) infinite; }
+    .ph-e { animation: hf-ph-e 18s steps(1, end) infinite; }
+    .ph-f { animation: hf-ph-f 18s steps(1, end) infinite; }
+    .ph-g { animation: hf-ph-g 18s steps(1, end) infinite; }
+    .ph-h { animation: hf-ph-h 18s steps(1, end) infinite; }
+    .ph-bef { animation: hf-ph-bef 18s steps(1, end) infinite; }
+    .ph-efgh { animation: hf-ph-efgh 18s steps(1, end) infinite; }
   }
 
   @keyframes hf-scroll {
@@ -400,113 +427,184 @@
 
   @keyframes hf-pkt {
     0% { transform: translate(236px, 205px); opacity: 0; }
-    0.4% { opacity: 1; }
-    4.5% { transform: translate(470px, 205px); }
-    6.5% { transform: translate(470px, 100px); }
-    7.5% { transform: translate(520px, 100px); opacity: 1; }
-    7.9% { transform: translate(520px, 100px); opacity: 0; }
-    16.7% { transform: translate(236px, 205px); opacity: 0; }
-    17.1% { opacity: 1; }
-    21.2% { transform: translate(470px, 205px); }
-    23.2% { transform: translate(470px, 100px); }
-    24.2% { transform: translate(520px, 100px); opacity: 1; }
-    24.6% { transform: translate(520px, 100px); opacity: 0; }
-    40.8% { transform: translate(236px, 205px); opacity: 0; }
-    41.2% { opacity: 1; }
-    46.3% { transform: translate(470px, 205px); }
-    48.3% { transform: translate(520px, 205px); opacity: 1; }
-    48.7% { transform: translate(520px, 205px); opacity: 0; }
-    55% { transform: translate(236px, 205px); opacity: 0; }
-    55.4% { opacity: 1; }
-    60.5% { transform: translate(470px, 205px); }
-    62.5% { transform: translate(520px, 205px); opacity: 1; }
-    62.9% { transform: translate(520px, 205px); opacity: 0; }
-    70% { transform: translate(236px, 205px); opacity: 0; }
-    70.4% { opacity: 1; }
-    75.5% { transform: translate(470px, 205px); }
-    77.5% { transform: translate(520px, 205px); opacity: 1; }
-    77.9% { transform: translate(520px, 205px); opacity: 0; }
-    83.3% { transform: translate(236px, 205px); opacity: 0; }
-    83.7% { opacity: 1; }
-    87.8% { transform: translate(470px, 205px); }
-    89.8% { transform: translate(470px, 100px); }
-    90.8% { transform: translate(520px, 100px); opacity: 1; }
-    91.2% { transform: translate(520px, 100px); opacity: 0; }
+    0.28% { opacity: 1; }
+    2.78% { transform: translate(470px, 205px); }
+    3.89% { transform: translate(470px, 100px); }
+    4.44% { transform: translate(520px, 100px); opacity: 1; }
+    4.72% { transform: translate(520px, 100px); opacity: 0; }
+    10% { transform: translate(236px, 205px); opacity: 0; }
+    10.28% { opacity: 1; }
+    12.78% { transform: translate(470px, 205px); }
+    13.89% { transform: translate(470px, 100px); }
+    14.44% { transform: translate(520px, 100px); opacity: 1; }
+    14.72% { transform: translate(520px, 100px); opacity: 0; }
+    23.33% { transform: translate(236px, 205px); opacity: 0; }
+    23.61% { opacity: 1; }
+    26.11% { transform: translate(470px, 205px); }
+    27.78% { transform: translate(520px, 205px); opacity: 1; }
+    28.06% { transform: translate(520px, 205px); opacity: 0; }
+    28.89% { transform: translate(236px, 205px); opacity: 0; }
+    29.17% { opacity: 1; }
+    31.67% { transform: translate(470px, 205px); }
+    33.33% { transform: translate(520px, 205px); opacity: 1; }
+    33.61% { transform: translate(520px, 205px); opacity: 0; }
+    40% { transform: translate(236px, 205px); opacity: 0; }
+    40.28% { opacity: 1; }
+    42.78% { transform: translate(470px, 205px); }
+    43.89% { transform: translate(470px, 310px); }
+    44.44% { transform: translate(520px, 310px); opacity: 1; }
+    44.72% { transform: translate(520px, 310px); opacity: 0; }
+    46.11% { transform: translate(236px, 205px); opacity: 0; }
+    46.39% { opacity: 1; }
+    48.89% { transform: translate(470px, 205px); }
+    50% { transform: translate(470px, 310px); }
+    50.56% { transform: translate(520px, 310px); opacity: 1; }
+    50.83% { transform: translate(520px, 310px); opacity: 0; }
+    56.67% { transform: translate(236px, 205px); opacity: 0; }
+    56.94% { opacity: 1; }
+    59.44% { transform: translate(470px, 205px); }
+    60.56% { transform: translate(470px, 310px); }
+    61.11% { transform: translate(520px, 310px); opacity: 1; }
+    61.39% { transform: translate(520px, 310px); opacity: 0; }
+    70.56% { transform: translate(236px, 205px); opacity: 0; }
+    70.83% { opacity: 1; }
+    73.33% { transform: translate(470px, 205px); }
+    75% { transform: translate(520px, 205px); opacity: 1; }
+    75.28% { transform: translate(520px, 205px); opacity: 0; }
+    84.44% { transform: translate(236px, 205px); opacity: 0; }
+    84.72% { opacity: 1; }
+    87.22% { transform: translate(470px, 205px); }
+    88.33% { transform: translate(470px, 100px); }
+    88.89% { transform: translate(520px, 100px); opacity: 1; }
+    89.17% { transform: translate(520px, 100px); opacity: 0; }
+    90% { transform: translate(236px, 205px); opacity: 0; }
+    90.28% { opacity: 1; }
+    92.78% { transform: translate(470px, 205px); }
+    93.89% { transform: translate(470px, 100px); }
+    94.44% { transform: translate(520px, 100px); opacity: 1; }
+    94.72% { transform: translate(520px, 100px); opacity: 0; }
     100% { transform: translate(236px, 205px); opacity: 0; }
   }
 
   @keyframes hf-probe {
-    0%, 63.2% { transform: translate(470px, 205px); opacity: 0; }
-    63.4% { opacity: 1; }
-    65.4% { transform: translate(470px, 100px); }
-    66.4% { transform: translate(520px, 100px); opacity: 1; }
-    66.8%, 100% { transform: translate(520px, 100px); opacity: 0; }
+    0%, 57.22% { transform: translate(470px, 205px); opacity: 0; }
+    57.5% { opacity: 1; }
+    59.17% { transform: translate(520px, 205px); opacity: 1; }
+    59.44% { transform: translate(520px, 205px); opacity: 0; }
+    71.11% { transform: translate(470px, 205px); opacity: 0; }
+    71.39% { opacity: 1; }
+    72.5% { transform: translate(470px, 100px); }
+    73.06% { transform: translate(520px, 100px); opacity: 1; }
+    73.33%, 100% { transform: translate(520px, 100px); opacity: 0; }
   }
 
   @keyframes hf-breaker1 {
-    0%, 36.4% { fill: var(--mh-ok); }
-    36.5%, 62.4% { fill: var(--mh-down); }
-    62.5%, 82.4% { fill: var(--mh-warn); }
-    82.5%, 100% { fill: var(--mh-ok); }
+    0%, 22.1% { fill: var(--mh-ok); }
+    22.2%, 69.3% { fill: var(--mh-down); }
+    69.4%, 83.2% { fill: var(--mh-warn); }
+    83.3%, 100% { fill: var(--mh-ok); }
   }
 
   @keyframes hf-arm1 {
-    0%, 36.3% { transform: rotate(0deg); }
-    36.8%, 62.4% { transform: rotate(-40deg); }
-    62.9%, 82.2% { transform: rotate(-18deg); }
-    82.7%, 100% { transform: rotate(0deg); }
+    0%, 22.1% { transform: rotate(0deg); }
+    22.6%, 69.3% { transform: rotate(-40deg); }
+    69.9%, 83.1% { transform: rotate(-18deg); }
+    83.6%, 100% { transform: rotate(0deg); }
   }
 
   @keyframes hf-health1 {
-    0%, 36.2% { transform: scaleY(1); }
-    36.6%, 62.4% { transform: scaleY(0.08); }
-    62.5% { transform: scaleY(0.15); }
-    82.4%, 100% { transform: scaleY(1); }
+    0%, 22% { transform: scaleY(1); }
+    22.5%, 69.3% { transform: scaleY(0.08); }
+    69.4% { transform: scaleY(0.15); }
+    83.3%, 100% { transform: scaleY(1); }
   }
 
   @keyframes hf-stroke1 {
-    0%, 36.4% { stroke: var(--mh-ok); }
-    36.5%, 62.4% { stroke: var(--mh-down); }
-    62.5%, 82.4% { stroke: var(--mh-warn); }
-    82.5%, 100% { stroke: var(--mh-ok); }
+    0%, 22.1% { stroke: var(--mh-ok); }
+    22.2%, 69.3% { stroke: var(--mh-down); }
+    69.4%, 83.2% { stroke: var(--mh-warn); }
+    83.3%, 100% { stroke: var(--mh-ok); }
+  }
+
+  @keyframes hf-breaker2 {
+    0%, 38.8% { fill: var(--mh-ok); }
+    38.9%, 55.5% { fill: var(--mh-down); }
+    55.6%, 69.3% { fill: var(--mh-warn); }
+    69.4%, 100% { fill: var(--mh-ok); }
+  }
+
+  @keyframes hf-arm2 {
+    0%, 38.8% { transform: rotate(0deg); }
+    39.3%, 55.5% { transform: rotate(-40deg); }
+    56.1%, 69.3% { transform: rotate(-18deg); }
+    69.8%, 100% { transform: rotate(0deg); }
   }
 
   @keyframes hf-health2 {
-    0%, 36.4% { transform: scaleY(1); }
-    38%, 80% { transform: scaleY(1.35); }
-    84%, 100% { transform: scaleY(1); }
+    0%, 22.2% { transform: scaleY(1); }
+    23.5%, 38.7% { transform: scaleY(1.35); }
+    39.3%, 55.5% { transform: scaleY(0.08); }
+    55.6% { transform: scaleY(0.15); }
+    69.4% { transform: scaleY(1); }
+    70.5%, 83.3% { transform: scaleY(1.25); }
+    85%, 100% { transform: scaleY(1); }
+  }
+
+  @keyframes hf-stroke2 {
+    0%, 38.8% { stroke: var(--mh-ok); }
+    38.9%, 55.5% { stroke: var(--mh-down); }
+    55.6%, 69.3% { stroke: var(--mh-warn); }
+    69.4%, 100% { stroke: var(--mh-ok); }
+  }
+
+  @keyframes hf-health3 {
+    0%, 38.9% { transform: scaleY(1); }
+    40.5%, 69.4% { transform: scaleY(1.35); }
+    71%, 100% { transform: scaleY(1); }
   }
 
   @keyframes hf-ph-a {
     0% { opacity: 1; }
-    36.5%, 100% { opacity: 0; }
+    22.2%, 100% { opacity: 0; }
   }
 
   @keyframes hf-ph-b {
     0% { opacity: 0; }
-    36.5% { opacity: 1; }
-    62.5%, 100% { opacity: 0; }
+    22.2% { opacity: 1; }
+    38.9%, 100% { opacity: 0; }
   }
 
-  @keyframes hf-ph-c {
+  @keyframes hf-ph-e {
     0% { opacity: 0; }
-    62.5% { opacity: 1; }
-    82.5%, 100% { opacity: 0; }
+    38.9% { opacity: 1; }
+    55.6%, 100% { opacity: 0; }
   }
 
-  @keyframes hf-ph-d {
+  @keyframes hf-ph-f {
     0% { opacity: 0; }
-    82.5%, 100% { opacity: 1; }
+    55.6% { opacity: 1; }
+    69.4%, 100% { opacity: 0; }
   }
 
-  @keyframes hf-ph-ad {
-    0% { opacity: 1; }
-    36.5% { opacity: 0; }
-    82.5%, 100% { opacity: 1; }
-  }
-
-  @keyframes hf-ph-bcd {
+  @keyframes hf-ph-g {
     0% { opacity: 0; }
-    36.5%, 100% { opacity: 1; }
+    69.4% { opacity: 1; }
+    83.3%, 100% { opacity: 0; }
+  }
+
+  @keyframes hf-ph-h {
+    0% { opacity: 0; }
+    83.3%, 100% { opacity: 1; }
+  }
+
+  @keyframes hf-ph-bef {
+    0% { opacity: 0; }
+    22.2% { opacity: 1; }
+    69.4%, 100% { opacity: 0; }
+  }
+
+  @keyframes hf-ph-efgh {
+    0% { opacity: 0; }
+    38.9%, 100% { opacity: 1; }
   }
 </style>
