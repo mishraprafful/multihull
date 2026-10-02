@@ -29,7 +29,7 @@
   "healthcheck": {
     "test": [
       "CMD-SHELL",
-      "curl -fsS http://localhost:8000/health || wget -qO- http://localhost:8000/health || exit 1"
+      "curl -fsS http://localhost:8000/health || wget -qO- http://localhost:8000/health || python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)\" || exit 1"
     ],
     "interval": 10000000000,
     "timeout": 2000000000,

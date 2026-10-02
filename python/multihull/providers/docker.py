@@ -47,11 +47,23 @@ def container_name(desired: Target) -> str:
     return f"{desired.resource_name}-{desired.provider}"
 
 
+def health_probe_command(url: str) -> str:
+    python_probe = f"import urllib.request; urllib.request.urlopen('{url}', timeout=2)"
+    return " || ".join(
+        [
+            f"curl -fsS {url}",
+            f"wget -qO- {url}",
+            f'python3 -c "{python_probe}"',
+            "exit 1",
+        ]
+    )
+
+
 def healthcheck(desired: Target) -> dict[str, Any]:
     container = desired.service.container
     url = f"http://localhost:{container.port}{container.health.path}"
     return {
-        "test": ["CMD-SHELL", f"curl -fsS {url} || wget -qO- {url} || exit 1"],
+        "test": ["CMD-SHELL", health_probe_command(url)],
         "interval": HEALTH_INTERVAL_SECONDS * NANOSECONDS,
         "timeout": int(HEALTH_TIMEOUT_SECONDS) * NANOSECONDS,
         "retries": HEALTH_RETRIES,

@@ -101,7 +101,14 @@ def test_run_kwargs_shape(mock_docker_spec: ServiceSpec) -> None:
     assert kwargs["labels"][OWNER_LABEL] == "multihull"
     assert kwargs["restart_policy"] == {"Name": "unless-stopped"}
     assert kwargs["healthcheck"]["start_period"] == 2 * 1_000_000_000
-    assert "/health" in kwargs["healthcheck"]["test"][1]
+    probe = kwargs["healthcheck"]["test"][1]
+    assert "/health" in probe
+    assert probe.split(" || ")[:3] == [
+        "curl -fsS http://localhost:8000/health",
+        "wget -qO- http://localhost:8000/health",
+        'python3 -c "import urllib.request; '
+        "urllib.request.urlopen('http://localhost:8000/health', timeout=2)\"",
+    ]
     assert "network" not in kwargs and kwargs["command"] is None
 
 
