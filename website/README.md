@@ -21,6 +21,12 @@ gh secret set CLOUDFLARE_API_TOKEN      # prompts, value not echoed
 gh secret set CLOUDFLARE_ACCOUNT_ID
 ```
 
+When a pull request closes, merged or not, the workflow deletes every preview deployment for its branch and updates the comment. Production is never touched. To clean up a branch by hand, run the Docs workflow with the `cleanup_branch` input:
+
+```sh
+gh workflow run docs.yml -f cleanup_branch=<branch>
+```
+
 The API token needs the account permission "Cloudflare Pages: Edit". Cloudflare's Git integration is not used, because the build needs `uv` and Python.
 
 Custom domain: attach it to the `multihull` project in the Cloudflare dashboard, then set `SITE_URL` to it in the workflow's `env`. Without `SITE_URL`, `astro.config.mjs` uses `https://multihull.pages.dev`.
