@@ -9,18 +9,12 @@ on:
       - 'python/**'
       - '.github/workflows/docs.yml'
   pull_request:
-    types: [opened, synchronize, reopened, closed]
     paths:
       - 'website/**'
       - 'docs/**'
       - 'python/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
-    inputs:
-      cleanup_branch:
-        description: Delete all preview deployments for this branch instead of deploying
-        required: false
-        default: ''
 
 permissions:
   contents: read
@@ -33,7 +27,6 @@ concurrency:
 
 jobs:
   pages:
-    if: github.event.action != 'closed' && inputs.cleanup_branch == ''
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
@@ -96,56 +89,3 @@ jobs:
 
             - Deployment: ${{ steps.deploy.outputs.deployment-url }}
             - Branch alias: ${{ steps.deploy.outputs.pages-deployment-alias-url || 'none' }}
-
-  cleanup-previews:
-    if: (github.event_name == 'pull_request' && github.event.action == 'closed') || inputs.cleanup_branch != ''
-    runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
-      PAGES_PROJECT: multihull
-      PREVIEW_BRANCH: ${{ inputs.cleanup_branch || github.head_ref }}
-    steps:
-      - name: Skip cleanup without Cloudflare secrets
-        if: env.CLOUDFLARE_CONFIGURED != 'true'
-        run: echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID not set; skipped preview cleanup."
-
-      - name: Delete preview deployments for branch
-        id: cleanup
-        if: env.CLOUDFLARE_CONFIGURED == 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          if [ -z "$PREVIEW_BRANCH" ] || [ "$PREVIEW_BRANCH" = "main" ]; then
-            echo "::error::Refusing to clean up branch '$PREVIEW_BRANCH'"
-            exit 1
-          fi
-          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/deployments"
-          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          ids=()
-          page=1
-          while :; do
-            body=$(curl -fsS "${auth[@]}" "$api?env=preview&per_page=25&page=$page")
-            mapfile -t batch < <(jq -r --arg b "$PREVIEW_BRANCH" \
-              '.result[] | select(.environment == "preview" and .deployment_trigger.metadata.branch == $b) | .id' <<<"$body")
-            ids+=("${batch[@]}")
-            total_pages=$(jq -r '.result_info.total_pages // 1' <<<"$body")
-            [ "$(jq '.result | length' <<<"$body")" -eq 0 ] && break
-            [ "$page" -ge "$total_pages" ] && break
-            page=$((page + 1))
-          done
-          echo "Found ${#ids[@]} preview deployment(s) for $PREVIEW_BRANCH"
-          for id in "${ids[@]}"; do
-            curl -fsS -X DELETE "${auth[@]}" "$api/$id?force=true" >/dev/null
-            echo "Deleted $id"
-          done
-          echo "deleted=${#ids[@]}" >> "$GITHUB_OUTPUT"
-
-      - name: Update preview comment
-        if: env.CLOUDFLARE_CONFIGURED == 'true' && github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: docs-preview
-          message: |
-            Docs preview removed after this PR was closed (${{ steps.cleanup.outputs.deleted }} deployment(s) deleted).

@@ -1,0 +1,77 @@
+name: Docs preview sweep
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      older_than_hours:
+        description: Delete preview deployments older than this many hours
+        required: false
+        default: '24'
+      dry_run:
+        description: List what would be deleted without deleting
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-preview-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+      PAGES_PROJECT: multihull
+      OLDER_THAN_HOURS: ${{ inputs.older_than_hours || '24' }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+    steps:
+      - name: Skip sweep without Cloudflare secrets
+        if: env.CLOUDFLARE_CONFIGURED != 'true'
+        run: echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID not set; skipped preview sweep."
+
+      - name: Delete preview deployments older than threshold
+        if: env.CLOUDFLARE_CONFIGURED == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          case "$OLDER_THAN_HOURS" in ''|*[!0-9]*) echo "::error::older_than_hours must be a whole number"; exit 1;; esac
+          cutoff=$(date -u -d "-${OLDER_THAN_HOURS} hours" +%Y-%m-%dT%H:%M:%SZ)
+          echo "Deleting preview deployments created before $cutoff (dry_run=$DRY_RUN)"
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT/deployments"
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          page=1
+          scanned=0
+          stale=()
+          while :; do
+            body=$(curl -fsS "${auth[@]}" "$api?env=preview&per_page=25&page=$page")
+            count=$(jq '.result | length' <<<"$body")
+            [ "$count" -eq 0 ] && break
+            scanned=$((scanned + count))
+            mapfile -t batch < <(jq -r --arg c "$cutoff" \
+              '.result[] | select(.environment == "preview" and .created_on < $c) | "\(.id) \(.created_on) \(.deployment_trigger.metadata.branch // "-")"' <<<"$body")
+            stale+=("${batch[@]}")
+            total_pages=$(jq -r '.result_info.total_pages // 1' <<<"$body")
+            [ "$page" -ge "$total_pages" ] && break
+            page=$((page + 1))
+          done
+          echo "Scanned $scanned preview deployment(s); ${#stale[@]} older than ${OLDER_THAN_HOURS}h"
+          deleted=0
+          for line in "${stale[@]}"; do
+            [ -z "$line" ] && continue
+            id=${line%% *}
+            echo "stale: $line"
+            if [ "$DRY_RUN" != "true" ]; then
+              curl -fsS -X DELETE "${auth[@]}" "$api/$id?force=true" >/dev/null
+              deleted=$((deleted + 1))
+            fi
+          done
+          echo "Deleted $deleted deployment(s)"
+          echo "::notice::Preview sweep: scanned $scanned, stale ${#stale[@]}, deleted $deleted"
