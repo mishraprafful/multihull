@@ -88,3 +88,40 @@ async fn saturated_route_queues_then_returns_429_with_retry_after() {
     let later = get(&proxy, "/v1/x", &[]).await;
     assert_eq!(later.status, 200);
 }
+
+#[tokio::test]
+async fn admitted_requests_are_serialised_by_the_adaptive_limit() {
+    let slow = MockUpstream::start(
+        MockUpstreamConfig::default().with_ttft_delay(Duration::from_millis(100)),
+    )
+    .await
+    .unwrap();
+    let mut a = endpoint("a", "p1", slow.url(), 1);
+    a.max_concurrency = 1;
+    let config = ProxyConfig {
+        admission: AdmissionQueue {
+            max_wait: Duration::from_secs(5),
+            bound: 16,
+        },
+        ..ProxyConfig::default()
+    };
+    let proxy = start_proxy_configured(single_route(vec![a.clone()]), config).await;
+    let proxy = std::sync::Arc::new(proxy);
+
+    let started = std::time::Instant::now();
+    let mut tasks = Vec::new();
+    for _ in 0..6 {
+        let proxy = proxy.clone();
+        tasks.push(tokio::spawn(async move { get(&proxy, "/v1/x", &[]).await }));
+    }
+    for task in tasks {
+        assert_eq!(task.await.unwrap().status, 200);
+    }
+    assert_eq!(slow.request_count(), 6);
+    assert!(
+        started.elapsed() >= Duration::from_millis(550),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(proxy.state.runtime.status(&a).unwrap().outstanding, 0);
+}

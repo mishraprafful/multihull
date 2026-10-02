@@ -23,6 +23,8 @@ use crate::sticky::{
     mint_session_id, rehomed_header, session_cookie, StickyPlan, REHOMED_HEADER, SESSION_HEADER,
 };
 
+const RESERVATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(5);
+
 pub async fn handle(
     state: Arc<ProxyState>,
     request: Request<Incoming>,
@@ -79,18 +81,6 @@ async fn proxy(
     let preset = preset_for(&route);
     state.runtime.record_request(&route.id);
 
-    let admitted = state
-        .runtime
-        .admission
-        .wait_for_slot(&route.id, || !state.runtime.route_saturated(&route))
-        .await;
-    let waited = match admitted {
-        Ok(waited) => waited,
-        Err(_) => state.runtime.admission.config().max_wait,
-    };
-    state.runtime.record_queue_wait(&route, waited);
-    admitted.map_err(|_| (ProxyError::QueueOverflow, 0))?;
-
     let mut rng = ThreadRng;
     let mut session = resolve_session(&state, &route, &parts.headers, &body, peer.ip())
         .map_err(|error| (error, 0))?;
@@ -102,8 +92,20 @@ async fn proxy(
     let mut last_error = ProxyError::NoHealthyUpstream;
     let mut fallback: Option<(UpstreamResponse, Endpoint, OutstandingGuard)> = None;
 
-    loop {
-        let endpoint = preferred
+    let queued_at = Instant::now();
+    let max_wait = state.runtime.admission.config().max_wait;
+    let mut reserved = loop {
+        let admitted = state
+            .runtime
+            .admission
+            .wait_for_slot_until(&route.id, queued_at + max_wait, || {
+                !state.runtime.route_saturated(&route)
+            })
+            .await;
+        if admitted.is_err() {
+            break None;
+        }
+        let picked = preferred
             .take()
             .and_then(|id| take_preferred(&state, &route, &id, &mut rng))
             .or_else(|| {
@@ -116,7 +118,34 @@ async fn proxy(
                     &mut rng,
                 )
             });
-        let Some(endpoint) = endpoint else {
+        if picked.is_some() || !state.runtime.route_has_routable(&route) {
+            break picked;
+        }
+        if Instant::now() >= queued_at + max_wait {
+            break None;
+        }
+        tokio::time::sleep(RESERVATION_RETRY_DELAY).await;
+    };
+    state
+        .runtime
+        .record_queue_wait(&route, queued_at.elapsed().min(max_wait));
+    if reserved.is_none() && state.runtime.route_saturated(&route) {
+        finish_session(&state, &route, session.take(), None);
+        return Err((ProxyError::QueueOverflow, 0));
+    }
+
+    loop {
+        let picked = reserved.take().or_else(|| {
+            pick_endpoint(
+                &state,
+                &route,
+                &excluded,
+                &excluded_providers,
+                preset,
+                &mut rng,
+            )
+        });
+        let Some((endpoint, guard)) = picked else {
             return match fallback.take() {
                 Some((response, endpoint, guard)) => {
                     let extra = finish_session(&state, &route, session.take(), Some(&endpoint));
@@ -126,16 +155,11 @@ async fn proxy(
                 }
                 None => {
                     finish_session(&state, &route, session.take(), None);
-                    if attempts == 0 && state.runtime.route_saturated(&route) {
-                        return Err((ProxyError::QueueOverflow, 0));
-                    }
                     Err((last_error, attempts))
                 }
             };
         };
         attempts += 1;
-        let runtime = state.runtime.endpoint(&endpoint);
-        let guard = OutstandingGuard::acquire(runtime.clone());
         let remaining = deadline.saturating_duration_since(Instant::now());
         let first_byte = state.config.timeouts.first_byte.min(remaining);
         let attempt = send(
@@ -423,22 +447,24 @@ fn record_sticky(outcome: StickyOutcome) {
     .increment(1);
 }
 
+type Reservation = (Endpoint, OutstandingGuard);
+
 fn take_preferred(
     state: &ProxyState,
     route: &Route,
     id: &str,
     rng: &mut ThreadRng,
-) -> Option<Endpoint> {
+) -> Option<Reservation> {
     let endpoint = route.endpoints.iter().find(|e| e.id == id)?;
     let now = state.runtime.now();
     if !state.runtime.endpoint_healthy(endpoint, now) {
         return None;
     }
-    state
-        .runtime
-        .endpoint(endpoint)
-        .admit(now, rng)
-        .then(|| endpoint.clone())
+    let runtime = state.runtime.endpoint(endpoint);
+    if !runtime.admit(now, rng) {
+        return None;
+    }
+    runtime.try_reserve().map(|guard| (endpoint.clone(), guard))
 }
 
 fn authorize(route: &Route, headers: &http::HeaderMap) -> Result<(), (ProxyError, u32)> {
@@ -476,7 +502,7 @@ fn pick_endpoint(
     excluded_providers: &HashSet<String>,
     preset: Preset,
     rng: &mut ThreadRng,
-) -> Option<Endpoint> {
+) -> Option<Reservation> {
     let eligible: Vec<&Endpoint> = route
         .endpoints
         .iter()
@@ -532,8 +558,16 @@ fn pick_endpoint(
         let id = chosen?;
         let endpoint = routable.iter().find(|e| e.id == id)?;
         let runtime = state.runtime.endpoint(endpoint);
-        if panic_mode || runtime.admit(now, rng) {
-            return Some(Endpoint::clone(endpoint));
+        if panic_mode {
+            return Some((
+                Endpoint::clone(endpoint),
+                OutstandingGuard::acquire(runtime),
+            ));
+        }
+        if runtime.admit(now, rng) {
+            if let Some(guard) = runtime.try_reserve() {
+                return Some((Endpoint::clone(endpoint), guard));
+            }
         }
         locally_excluded.insert(id);
     }

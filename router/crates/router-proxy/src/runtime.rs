@@ -61,6 +61,18 @@ impl EndpointRuntime {
         lock(&self.limiter).has_headroom(self.outstanding())
     }
 
+    pub fn try_reserve(self: &Arc<Self>) -> Option<OutstandingGuard> {
+        let limiter = lock(&self.limiter);
+        if !limiter.has_headroom(self.outstanding()) {
+            return None;
+        }
+        self.outstanding.fetch_add(1, Ordering::Relaxed);
+        drop(limiter);
+        Some(OutstandingGuard {
+            endpoint: self.clone(),
+        })
+    }
+
     pub fn admit(&self, now: Duration, rng: &mut impl Rng) -> bool {
         lock(&self.circuit).admit(now, rng)
     }
@@ -198,6 +210,14 @@ impl Runtime {
             }
         }
         candidates > 0
+    }
+
+    pub fn route_has_routable(&self, route: &Route) -> bool {
+        let now = self.now();
+        route
+            .endpoints
+            .iter()
+            .any(|e| e.accepts_traffic() && !self.endpoint_open(e, now))
     }
 
     pub fn route_outstanding(&self, route: &Route) -> u32 {
@@ -658,6 +678,19 @@ mod tests {
         };
         runtime.retain_snapshot(&snapshot);
         assert_eq!(runtime.active_sessions(), 1);
+    }
+
+    #[test]
+    fn reservations_stop_at_the_adaptive_limit() {
+        let runtime = Runtime::default();
+        let rt = runtime.endpoint(&endpoint("a"));
+        let limit = rt.limit() as usize;
+        let guards: Vec<OutstandingGuard> = (0..limit).filter_map(|_| rt.try_reserve()).collect();
+        assert_eq!(guards.len(), limit);
+        assert!(rt.try_reserve().is_none());
+        assert!(!rt.has_headroom());
+        drop(guards);
+        assert!(rt.try_reserve().is_some());
     }
 
     #[test]
