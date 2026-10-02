@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 import openai
@@ -124,9 +126,82 @@ class RouterClient:
                 outcome.first_token_at = time.monotonic()
                 outcome.done = True
         except Exception as exc:
-            outcome.error = f"{exc.__class__.__name__}: {exc}"
+            outcome.error = describe_exception(exc)
         outcome.finished_at = time.monotonic()
         return outcome
+
+
+def describe_exception(exc: Exception) -> str:
+    text = f"{exc.__class__.__name__}: {exc}"
+    body = getattr(exc, "body", None)
+    return f"{text} body={json.dumps(body)}" if body is not None else text
+
+
+@dataclass
+class RawStream:
+    status: int
+    headers: dict[str, str]
+    frames: list[str]
+    error: str | None = None
+
+    @property
+    def provider(self) -> str | None:
+        return self.headers.get("x-hull-provider")
+
+    @property
+    def attempts(self) -> int | None:
+        attempts = self.headers.get("x-hull-attempts")
+        return int(attempts) if attempts and attempts.isdigit() else None
+
+    def payloads(self) -> list[dict[str, Any]]:
+        return [json.loads(frame) for frame in self.frames if frame != "[DONE]"]
+
+    def completion_chunks(self) -> list[dict[str, Any]]:
+        return [payload for payload in self.payloads() if "error" not in payload]
+
+    def errors(self) -> list[dict[str, Any]]:
+        return [payload["error"] for payload in self.payloads() if "error" in payload]
+
+
+def parse_sse_frames(text: str) -> list[str]:
+    frames: list[str] = []
+    for block in text.split("\n\n"):
+        data_lines = [line[5:].lstrip() for line in block.splitlines() if line.startswith("data:")]
+        if data_lines:
+            frames.append("\n".join(data_lines))
+    return frames
+
+
+def stream_raw(
+    base_url: str,
+    index: int = 0,
+    idempotency_key: str | None = None,
+    max_tokens: int = 8,
+    timeout: float = 120.0,
+) -> RawStream:
+    headers = {"Host": ROUTE_HOST, "Authorization": "Bearer e2e-no-auth"}
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
+    body = {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": f"request {index}"}],
+        "stream": True,
+        "max_tokens": max_tokens,
+    }
+    text = ""
+    error: str | None = None
+    with (
+        httpx.Client(timeout=httpx.Timeout(timeout)) as http,
+        http.stream("POST", f"{base_url}/v1/chat/completions", json=body, headers=headers) as resp,
+    ):
+        status = resp.status_code
+        response_headers = {key.lower(): value for key, value in resp.headers.items()}
+        try:
+            for chunk in resp.iter_text():
+                text += chunk
+        except httpx.HTTPError as exc:
+            error = f"{exc.__class__.__name__}: {exc}"
+    return RawStream(status, response_headers, parse_sse_frames(text), error)
 
 
 def record_headers(outcome: Outcome, headers: httpx.Headers) -> None:
