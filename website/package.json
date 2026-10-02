@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "prebuild": "node scripts/sync-design-docs.mjs",
+    "prebuild": "node scripts/sync-design-docs.mjs && node scripts/generate-reference.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
