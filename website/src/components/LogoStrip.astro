@@ -1,0 +1,95 @@
+---
+const marks = import.meta.glob('../assets/logo-explorations/*.svg', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+const entries = Object.entries(marks)
+  .map(([path, svg]) => ({ id: path.match(/mark-(\d+)\.svg$/)?.[1] ?? '', svg }))
+  .filter((e) => e.id)
+  .sort((a, b) => a.id.localeCompare(b.id));
+---
+
+<div class="mh-strip not-content" id="favicon-row">
+  {
+    entries.map((e) => (
+      <a class="mh-strip-item" href={`#mark-${e.id}`}>
+        <span class="mh-strip-big" set:html={e.svg} />
+        <span class="mh-strip-tiles">
+          <span class="mh-strip-tile" data-tile="dark" set:html={e.svg} />
+          <span class="mh-strip-tile" data-tile="light" set:html={e.svg} />
+        </span>
+        <span class="mh-strip-id">{e.id}</span>
+      </a>
+    ))
+  }
+</div>
+
+<style>
+  .mh-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding: 1.25rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: var(--mh-radius);
+    background: var(--mh-surface);
+    margin-block: 1rem 1.5rem;
+  }
+
+  .mh-strip-item {
+    display: grid;
+    justify-items: center;
+    gap: 0.75rem;
+    flex: 1 1 6rem;
+    text-decoration: none;
+    color: var(--sl-color-text);
+  }
+
+  .mh-strip-big,
+  .mh-strip-big :global(svg) {
+    display: block;
+    width: 64px;
+    height: 64px;
+  }
+
+  .mh-strip-tiles {
+    display: inline-flex;
+    gap: 0.4rem;
+  }
+
+  .mh-strip-tile {
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+  }
+
+  .mh-strip-tile :global(svg) {
+    display: block;
+    width: 16px;
+    height: 16px;
+  }
+
+  .mh-strip-tile[data-tile='dark'] {
+    background: var(--mh-navy);
+    color: var(--mh-teal);
+    border-color: #1c3042;
+  }
+
+  .mh-strip-tile[data-tile='light'] {
+    background: #faf7f0;
+    color: #158f83;
+    border-color: #e0d5bd;
+  }
+
+  .mh-strip-id {
+    font-family: var(--sl-font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    color: var(--sl-color-gray-3);
+  }
+</style>

@@ -1,0 +1,252 @@
+---
+interface Props {
+  n: number;
+  name: string;
+  rationale: string;
+  risk: string;
+}
+
+const { n, name, rationale, risk } = Astro.props;
+const marks = import.meta.glob('../assets/logo-explorations/*.svg', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+const id = String(n).padStart(2, '0');
+const svg = marks[`../assets/logo-explorations/mark-${id}.svg`];
+if (!svg) throw new Error(`missing logo-explorations/mark-${id}.svg`);
+
+const sizes = [16, 32, 64];
+const panels = [
+  { key: 'dark', label: 'Dark' },
+  { key: 'light', label: 'Light' },
+];
+---
+
+<section class="mh-logo not-content" id={`mark-${id}`} aria-label={`${id} ${name}`}>
+  {
+    panels.map((p) => (
+      <div class="mh-logo-panel" data-panel={p.key}>
+        <span class="mh-logo-panel-label">{p.label}</span>
+        <div class="mh-logo-large" set:html={svg} />
+        <div class="mh-logo-tests">
+          <div class="mh-logo-sizes">
+            {sizes.map((s) => (
+              <figure>
+                <span class="mh-logo-mark" style={`--s:${s}px`} set:html={svg} />
+                <figcaption>{s}</figcaption>
+              </figure>
+            ))}
+            <figure>
+              <span class="mh-logo-tab">
+                <span class="mh-logo-mark is-accent" style="--s:16px" set:html={svg} />
+                <span>Multihull</span>
+              </span>
+              <figcaption>favicon</figcaption>
+            </figure>
+          </div>
+          <div class="mh-logo-lockups">
+            <div class="mh-logo-lockup w600">
+              <span class="mh-logo-mark" style="--s:28px" set:html={svg} />
+              <span>Multihull</span>
+            </div>
+            <div class="mh-logo-lockup w400">
+              <span class="mh-logo-mark" style="--s:28px" set:html={svg} />
+              <span>Multihull</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    ))
+  }
+  <dl class="mh-logo-notes">
+    <div>
+      <dt>Rationale</dt>
+      <dd>{rationale}</dd>
+    </div>
+    <div>
+      <dt>Risk</dt>
+      <dd>{risk}</dd>
+    </div>
+    <div>
+      <dt>File</dt>
+      <dd><code>website/src/assets/logo-explorations/mark-{id}.svg</code></dd>
+    </div>
+  </dl>
+</section>
+
+<style>
+  .mh-logo {
+    display: grid;
+    gap: 0.75rem;
+    margin-block: 1rem 2.5rem;
+  }
+
+  .mh-logo-panel {
+    position: relative;
+    display: grid;
+    grid-template-columns: 256px minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: center;
+    padding: 1.5rem;
+    border-radius: var(--mh-radius);
+    background: var(--p-bg);
+    color: var(--p-fg);
+    border: 1px solid var(--p-line);
+  }
+
+  .mh-logo-panel[data-panel='dark'] {
+    --p-bg: var(--mh-navy);
+    --p-fg: var(--mh-foam);
+    --p-accent: var(--mh-teal);
+    --p-muted: #8495a3;
+    --p-tab: #142a3e;
+    --p-line: #1c3042;
+  }
+
+  .mh-logo-panel[data-panel='light'] {
+    --p-bg: #faf7f0;
+    --p-fg: #10212f;
+    --p-accent: #158f83;
+    --p-muted: #647685;
+    --p-tab: #f1ead9;
+    --p-line: #e0d5bd;
+  }
+
+  .mh-logo-panel-label {
+    position: absolute;
+    top: 0.75rem;
+    right: 1rem;
+    font-family: var(--sl-font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--p-muted);
+  }
+
+  .mh-logo-large,
+  .mh-logo-large :global(svg) {
+    width: 256px;
+    height: 256px;
+    max-width: 100%;
+    display: block;
+  }
+
+  .mh-logo-tests {
+    display: grid;
+    gap: 1.5rem;
+    min-width: 0;
+  }
+
+  .mh-logo-sizes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 1.5rem;
+  }
+
+  .mh-logo-sizes figure {
+    display: grid;
+    justify-items: center;
+    gap: 0.5rem;
+    margin: 0;
+  }
+
+  .mh-logo-sizes figcaption {
+    font-family: var(--sl-font-mono);
+    font-size: 0.7rem;
+    color: var(--p-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mh-logo-mark,
+  .mh-logo-mark :global(svg) {
+    display: block;
+    width: var(--s);
+    height: var(--s);
+  }
+
+  .mh-logo-mark.is-accent {
+    color: var(--p-accent);
+  }
+
+  .mh-logo-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.9rem 0.4rem 0.7rem;
+    border-radius: 0.5rem 0.5rem 0 0;
+    background: var(--p-tab);
+    border: 1px solid var(--p-line);
+    border-bottom: 0;
+    font-family: var(--sl-font);
+    font-size: 0.75rem;
+    color: var(--p-fg);
+  }
+
+  .mh-logo-lockups {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 2.5rem;
+  }
+
+  .mh-logo-lockup {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--sl-font);
+    font-size: 1.5rem;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+
+  .mh-logo-lockup.w600 {
+    font-weight: 600;
+  }
+
+  .mh-logo-lockup.w400 {
+    font-weight: 400;
+  }
+
+  .mh-logo-notes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1rem 2rem;
+    margin: 0.25rem 0 0;
+    font-size: var(--sl-text-sm);
+  }
+
+  .mh-logo-notes div {
+    min-width: 0;
+  }
+
+  .mh-logo-notes dt {
+    font-family: var(--sl-font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+    margin-bottom: 0.25rem;
+  }
+
+  .mh-logo-notes dd {
+    margin: 0;
+    color: var(--sl-color-gray-1);
+    line-height: 1.5;
+  }
+
+  .mh-logo-notes code {
+    font-size: 0.8em;
+  }
+
+  @media (max-width: 720px) {
+    .mh-logo-panel {
+      grid-template-columns: 1fr;
+      justify-items: center;
+    }
+
+    .mh-logo-tests {
+      justify-items: center;
+    }
+  }
+</style>

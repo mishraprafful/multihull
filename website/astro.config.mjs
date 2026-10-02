@@ -72,7 +72,10 @@ export default defineConfig({
         },
         {
           label: 'Design',
-          items: [{ label: 'Architecture plan', slug: 'docs/design/architecture' }],
+          items: [
+            { label: 'Architecture plan', slug: 'docs/design/architecture' },
+            { label: 'Logo explorations', slug: 'docs/design/logo-explorations' },
+          ],
         },
       ],
     }),

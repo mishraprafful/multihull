@@ -1,0 +1,69 @@
+---
+title: Logo explorations
+description: Five candidate marks for Multihull, rendered at every size and in both themes for review.
+tableOfContents: { maxHeadingLevel: 2 }
+---
+
+import LogoStrip from '../../../../components/LogoStrip.astro';
+import LogoCandidate from '../../../../components/LogoCandidate.astro';
+
+Five directions for the Multihull mark. Each is one SVG on a 64 by 64 grid, drawn with `currentColor` only, so one file serves dark, light, favicon and print.
+
+## How to give feedback
+
+Name the direction by number, say what to change (weight, proportion, what it should read as), and whether the result should replace that candidate or become a new one. Revisions keep their number; new ideas are added as 06 onward. The live mark and favicon stay as they are until a direction is picked.
+
+<LogoStrip />
+
+| # | Direction | Reads as | Built from |
+|---|---|---|---|
+| 01 | Refined hulls | Trimaran from above, three lanes | Strokes and beams |
+| 02 | Silhouette | A boat under way | Filled hulls |
+| 03 | Hulls on a wave | Bow view, health trace | Uprights on a wave |
+| 04 | Monogram | The letter M | M with a hull stem |
+| 05 | Router | One in, three out, one on standby | Fork, dotted lane |
+
+## 01 Refined hulls
+
+<LogoCandidate
+  n={1}
+  name="Refined hulls"
+  rationale="Keeps the current idea of three hull lines and two crossbeams, but gives the main hull more weight and the amas and beams less, so the eye reads a trimaran rather than a grid. Beams sit at the optical centre and the amas stop short of the main hull's ends, which tightens the silhouette at 16 px."
+  risk="Three verticals crossed by two horizontals still read as a hash or window at a glance, and the mark depends on the wordmark for meaning."
+/>
+
+## 02 Silhouette
+
+<LogoCandidate
+  n={2}
+  name="Silhouette"
+  rationale="A trimaran from above reduced to filled shapes: a long main hull with a pointed bow, two shorter amas and two akas. The solid fill survives any size and the bow gives the mark a direction, which fits a product about requests moving forward."
+  risk="At small sizes the pointed hulls can read as a rocket or an aircraft, and filled silhouettes sit heavier next to a light wordmark."
+/>
+
+## 03 Hulls on a wave
+
+<LogoCandidate
+  n={3}
+  name="Hulls on a wave"
+  rationale="The boat seen head on: three hulls standing in the water, with the water drawn as the same wave form the site already uses for health sparklines. It is the only direction that puts the Open water theme into the mark itself and pairs naturally with status pills and the hero."
+  risk="Three uprights over a wave can read as a comb, a crown or a bar chart, and the wave blurs to a line at 16 px."
+/>
+
+## 04 Monogram
+
+<LogoCandidate
+  n={4}
+  name="Monogram"
+  rationale="An M whose three uprights are the hulls and whose diagonals are the beams, with the centre stroke carried down to the baseline like the main hull. It reads as a letter first, which gives the name an anchor in app grids and social avatars where no wordmark fits."
+  risk="M monograms are crowded territory, so it needs a trademark check, and the inverted V can read as a download arrow at 16 px."
+/>
+
+## 05 Router
+
+<LogoCandidate
+  n={5}
+  name="Router"
+  rationale="The promise drawn literally: one line in, three lanes out, with the third lane dotted to show a warm fallback that is ready but idle. It explains the product without any nautical knowledge and echoes the router box in the hero."
+  risk="Fork glyphs are common in developer tools (branching, sharing, routing), and the dotted lane merges into a line at 16 px."
+/>
