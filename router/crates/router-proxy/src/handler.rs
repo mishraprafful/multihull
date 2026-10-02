@@ -14,7 +14,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::attempt::{response_headers, send};
+use crate::attempt::{response_headers, send, UpstreamResponse};
 use crate::body::{ProxyBody, TimedBody};
 use crate::error::ProxyError;
 use crate::runtime::{OutstandingGuard, ThreadRng};
@@ -100,7 +100,7 @@ async fn proxy(
     let mut excluded_providers: HashSet<String> = HashSet::new();
     let mut attempts: u32 = 0;
     let mut last_error = ProxyError::NoHealthyUpstream;
-    let mut fallback: Option<(Response<Incoming>, Endpoint, OutstandingGuard)> = None;
+    let mut fallback: Option<(UpstreamResponse, Endpoint, OutstandingGuard)> = None;
 
     loop {
         let endpoint = preferred
@@ -542,7 +542,7 @@ fn rng_index(rng: &mut ThreadRng, len: usize) -> usize {
 }
 
 fn forward(
-    response: Response<Incoming>,
+    upstream: UpstreamResponse,
     state: &ProxyState,
     endpoint: &Endpoint,
     attempts: u32,
@@ -550,8 +550,18 @@ fn forward(
     guard: OutstandingGuard,
     extra: Vec<(HeaderName, HeaderValue)>,
 ) -> Response<ProxyBody> {
+    let UpstreamResponse {
+        response,
+        first_frame,
+    } = upstream;
     let (parts, body) = response.into_parts();
-    let timed = TimedBody::new(body, state.config.timeouts.idle, deadline, guard);
+    let timed = TimedBody::new(
+        body,
+        first_frame,
+        state.config.timeouts.idle,
+        deadline,
+        guard,
+    );
     let mut builder = Response::builder()
         .status(parts.status)
         .version(parts.version);

@@ -187,6 +187,59 @@ async fn streams_sse_chunks_through() {
 }
 
 #[tokio::test]
+async fn slow_first_sse_chunk_fails_over_before_any_byte_reaches_the_client() {
+    let slow = MockUpstream::start(
+        MockUpstreamConfig::default()
+            .with_sse_chunks(vec!["slow".into()])
+            .with_sse_first_chunk_delay(Duration::from_secs(5)),
+    )
+    .await
+    .unwrap();
+    let fast = MockUpstream::start(
+        MockUpstreamConfig::default().with_sse_chunks(vec!["fast-one".into(), "fast-two".into()]),
+    )
+    .await
+    .unwrap();
+    let config = ProxyConfig {
+        timeouts: router_proxy::PhaseTimeouts {
+            first_byte: Duration::from_millis(300),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let proxy = common::start_proxy_configured(
+        common::single_route(vec![
+            endpoint("slow", "p1", slow.url(), 1),
+            endpoint("fast", "p2", fast.url(), 2),
+        ]),
+        config,
+    )
+    .await;
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    let request = Request::post(format!("http://{}/v1/chat/completions", proxy.addr))
+        .body(Full::new(Bytes::from_static(b"{\"stream\":true}")))
+        .unwrap();
+    let started = std::time::Instant::now();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers().get("x-hull-endpoint").unwrap(), "fast");
+    assert_eq!(response.headers().get("x-hull-attempts").unwrap(), "2");
+    let body = tokio::time::timeout(Duration::from_secs(5), response.into_body().collect())
+        .await
+        .unwrap()
+        .unwrap()
+        .to_bytes();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.starts_with("data: fast-one\n\n"), "{text}");
+    assert!(text.contains("data: fast-two\n\n"));
+    assert!(!text.contains("slow"));
+    assert!(text.ends_with("data: [DONE]\n\n"));
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert_eq!(slow.request_count(), 1);
+    assert_eq!(fast.request_count(), 1);
+}
+
+#[tokio::test]
 async fn missing_route_empty_route_and_dead_upstream_map_to_404_503_502() {
     let proxy = start_proxy_with(Snapshot::default()).await;
     let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();

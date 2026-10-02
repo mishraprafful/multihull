@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, Uri};
-use http_body_util::Full;
-use hyper::body::Incoming;
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Frame, Incoming};
 use router_core::outcome::AttemptError;
 use router_core::snapshot::Endpoint;
 use router_tls::TlsError;
@@ -17,15 +17,34 @@ pub fn build_client(
     router_tls::https_client(connect_timeout, upstream_ca)
 }
 
+pub struct UpstreamResponse {
+    pub response: Response<Incoming>,
+    pub first_frame: Option<Frame<Bytes>>,
+}
+
+impl UpstreamResponse {
+    pub fn status(&self) -> u16 {
+        self.response.status().as_u16()
+    }
+}
+
 pub struct AttemptOutcome {
-    pub response: Option<Response<Incoming>>,
+    pub response: Option<UpstreamResponse>,
     pub error: Option<AttemptError>,
     pub ttft: Duration,
 }
 
 impl AttemptOutcome {
     pub fn status(&self) -> Option<u16> {
-        self.response.as_ref().map(|r| r.status().as_u16())
+        self.response.as_ref().map(UpstreamResponse::status)
+    }
+
+    fn failed(error: AttemptError, started: Instant) -> Self {
+        Self {
+            response: None,
+            error: Some(error),
+            ttft: started.elapsed(),
+        }
     }
 }
 
@@ -83,15 +102,10 @@ pub async fn send(
     first_byte_timeout: Duration,
 ) -> AttemptOutcome {
     let started = Instant::now();
+    let deadline = tokio::time::Instant::now() + first_byte_timeout;
     let uri = match upstream_uri(endpoint, path_and_query) {
         Ok(uri) => uri,
-        Err(_) => {
-            return AttemptOutcome {
-                response: None,
-                error: Some(AttemptError::Connect),
-                ttft: started.elapsed(),
-            }
-        }
+        Err(_) => return AttemptOutcome::failed(AttemptError::Connect, started),
     };
     let mut builder = Request::builder().method(method).uri(&uri);
     if let Some(map) = builder.headers_mut() {
@@ -112,34 +126,29 @@ pub async fn send(
     }
     let request = match builder.body(Full::new(body)) {
         Ok(request) => request,
-        Err(_) => {
-            return AttemptOutcome {
-                response: None,
-                error: Some(AttemptError::Connect),
-                ttft: started.elapsed(),
-            }
-        }
+        Err(_) => return AttemptOutcome::failed(AttemptError::Connect, started),
     };
-    match tokio::time::timeout(first_byte_timeout, client.request(request)).await {
-        Ok(Ok(response)) => AttemptOutcome {
-            response: Some(response),
-            error: None,
-            ttft: started.elapsed(),
-        },
-        Ok(Err(error)) => AttemptOutcome {
-            response: None,
-            error: Some(if error.is_connect() {
-                AttemptError::Connect
-            } else {
-                AttemptError::Reset
-            }),
-            ttft: started.elapsed(),
-        },
-        Err(_) => AttemptOutcome {
-            response: None,
-            error: Some(AttemptError::FirstByteTimeout),
-            ttft: started.elapsed(),
-        },
+    let mut response = match tokio::time::timeout_at(deadline, client.request(request)).await {
+        Ok(Ok(response)) => response,
+        Ok(Err(error)) if error.is_connect() => {
+            return AttemptOutcome::failed(AttemptError::Connect, started)
+        }
+        Ok(Err(_)) => return AttemptOutcome::failed(AttemptError::Reset, started),
+        Err(_) => return AttemptOutcome::failed(AttemptError::FirstByteTimeout, started),
+    };
+    let first_frame = match tokio::time::timeout_at(deadline, response.body_mut().frame()).await {
+        Ok(Some(Ok(frame))) => Some(frame),
+        Ok(None) => None,
+        Ok(Some(Err(_))) => return AttemptOutcome::failed(AttemptError::Reset, started),
+        Err(_) => return AttemptOutcome::failed(AttemptError::FirstByteTimeout, started),
+    };
+    AttemptOutcome {
+        response: Some(UpstreamResponse {
+            response,
+            first_frame,
+        }),
+        error: None,
+        ttft: started.elapsed(),
     }
 }
 

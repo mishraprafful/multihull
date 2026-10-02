@@ -22,6 +22,7 @@ pub struct MockUpstreamConfig {
     pub body: Bytes,
     pub sse_chunks: Vec<String>,
     pub sse_chunk_interval: Duration,
+    pub sse_first_chunk_delay: Duration,
     pub drop_connection: bool,
     pub etag: Option<String>,
 }
@@ -34,6 +35,7 @@ impl Default for MockUpstreamConfig {
             body: Bytes::from_static(b"{\"ok\":true}"),
             sse_chunks: Vec::new(),
             sse_chunk_interval: Duration::from_millis(5),
+            sse_first_chunk_delay: Duration::ZERO,
             drop_connection: false,
             etag: None,
         }
@@ -58,6 +60,11 @@ impl MockUpstreamConfig {
 
     pub fn with_sse_chunks(mut self, chunks: Vec<String>) -> Self {
         self.sse_chunks = chunks;
+        self
+    }
+
+    pub fn with_sse_first_chunk_delay(mut self, delay: Duration) -> Self {
+        self.sse_first_chunk_delay = delay;
         self
     }
 
@@ -226,8 +233,10 @@ async fn respond(
     }
     let (tx, rx) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(16);
     let interval = config.sse_chunk_interval;
+    let first_chunk_delay = config.sse_first_chunk_delay;
     let chunks = config.sse_chunks.clone();
     tokio::spawn(async move {
+        tokio::time::sleep(first_chunk_delay).await;
         for chunk in chunks {
             let frame = Frame::data(Bytes::from(format!("data: {chunk}\n\n")));
             if tx.send(Ok(frame)).await.is_err() {
