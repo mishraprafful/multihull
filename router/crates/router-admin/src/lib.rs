@@ -48,6 +48,7 @@ pub fn router(state: AdminState) -> Router {
         .route("/metrics", get(metrics))
         .route("/debug/endpoints", get(debug_endpoints))
         .route("/debug/sessions", get(debug_sessions))
+        .route("/debug/config", get(debug_config))
         .with_state(state)
 }
 
@@ -202,6 +203,17 @@ pub fn sessions_view(proxy: Option<&ProxyState>) -> SessionsView {
 
 async fn debug_sessions(State(state): State<AdminState>) -> Json<SessionsView> {
     Json(sessions_view(state.proxy.as_deref()))
+}
+
+async fn debug_config(State(state): State<AdminState>) -> Response {
+    match state.proxy.as_deref() {
+        Some(proxy) => Json(&proxy.config).into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": {"type": "proxy_not_attached"}})),
+        )
+            .into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -407,6 +419,36 @@ mod tests {
         );
         assert!(parsed["sessions"][0]["age_seconds"].as_f64().unwrap() < 5.0);
         assert!(!body.contains("session-1"));
+    }
+
+    #[tokio::test]
+    async fn debug_config_renders_the_proxy_tuning_as_seconds() {
+        let (status, _) = get_body("/debug/config").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+
+        let snapshot = Arc::new(ArcSwap::from_pointee(Snapshot::default()));
+        let mut config = router_proxy::ProxyConfig::default();
+        config.circuit.consecutive_failures = 7;
+        config.probe.interval = std::time::Duration::from_millis(1500);
+        let proxy = ProxyState::new(config, snapshot.clone());
+        let response = router(AdminState::new(snapshot).with_proxy(proxy))
+            .oneshot(
+                Request::builder()
+                    .uri("/debug/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["circuit"]["consecutive_failures"], 7);
+        assert_eq!(parsed["probe"]["interval"], 1.5);
+        assert_eq!(parsed["timeouts"]["connect"], 2.0);
+        assert_eq!(parsed["admission"]["bound"], 1024);
+        assert_eq!(parsed["retry"]["min_retries_per_second"], 10);
+        assert!(parsed["pressure"]["queue_wait_fraction"].is_number());
     }
 
     #[tokio::test]

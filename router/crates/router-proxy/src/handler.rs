@@ -3,7 +3,7 @@ use http::{header, HeaderValue, Method, Request, Response, Version};
 use http_body_util::{BodyExt, Limited};
 use hyper::body::Incoming;
 use router_auth::ApiKey;
-use router_core::circuit::{apply_panic_threshold, PANIC_THRESHOLD};
+use router_core::circuit::apply_panic_threshold;
 use router_core::outcome::{classify, Outcome};
 use router_core::retry::{decide, RetryContext, RetryDecision};
 use router_core::score::{select, Candidate, Preset};
@@ -531,10 +531,14 @@ fn pick_endpoint(
     }
     let now = state.runtime.now();
     let circuit_open = |e: &&Endpoint| state.runtime.endpoint_circuit_open(e, now);
-    let routable: Vec<&Endpoint> = apply_panic_threshold(&eligible, circuit_open, PANIC_THRESHOLD)
-        .into_iter()
-        .copied()
-        .collect();
+    let routable: Vec<&Endpoint> = apply_panic_threshold(
+        &eligible,
+        circuit_open,
+        state.config.circuit.panic_threshold,
+    )
+    .into_iter()
+    .copied()
+    .collect();
     let panic_mode = routable.len() == eligible.len() && eligible.iter().any(circuit_open);
     let provider_closed: Vec<&Endpoint> = routable
         .iter()

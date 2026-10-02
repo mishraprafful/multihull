@@ -1,6 +1,46 @@
 use crate::outcome::{AttemptError, Outcome};
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::Duration;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RetryConfig {
+    pub budget_ratio: f64,
+    #[serde(with = "crate::serde_secs")]
+    pub budget_window: Duration,
+    pub min_retries_per_second: u32,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            budget_ratio: 0.2,
+            budget_window: Duration::from_secs(10),
+            min_retries_per_second: 10,
+        }
+    }
+}
+
+impl RetryConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&self.budget_ratio) {
+            return Err("retry.budget_ratio must be in [0, 1]".into());
+        }
+        if self.budget_window < Duration::from_secs(1) {
+            return Err("retry.budget_window must be at least 1 second".into());
+        }
+        Ok(())
+    }
+
+    pub fn budget(&self) -> RetryBudget {
+        RetryBudget::new(
+            self.budget_ratio,
+            self.budget_window,
+            self.min_retries_per_second,
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Bucket {
@@ -19,7 +59,7 @@ pub struct RetryBudget {
 
 impl Default for RetryBudget {
     fn default() -> Self {
-        Self::new(0.2, Duration::from_secs(10), 10)
+        RetryConfig::default().budget()
     }
 }
 
@@ -205,6 +245,33 @@ mod tests {
         }
         assert!(!budget.try_acquire(now()));
         assert_eq!(budget.remaining(now()), 0);
+    }
+
+    #[test]
+    fn retry_config_builds_the_budget_and_validates() {
+        assert!(RetryConfig::default().validate().is_ok());
+        let config = RetryConfig {
+            budget_ratio: 0.5,
+            budget_window: Duration::from_secs(4),
+            min_retries_per_second: 0,
+        };
+        let mut budget = config.budget();
+        for _ in 0..10 {
+            budget.record_request(now());
+        }
+        assert_eq!(budget.remaining(now()), 5);
+        let ratio = RetryConfig {
+            budget_ratio: 1.5,
+            ..RetryConfig::default()
+        };
+        assert!(ratio.validate().unwrap_err().contains("budget_ratio"));
+        let window = RetryConfig {
+            budget_window: Duration::from_millis(10),
+            ..RetryConfig::default()
+        };
+        assert!(window.validate().unwrap_err().contains("budget_window"));
+        let parsed: RetryConfig = serde_json::from_str(r#"{"budget_window":30}"#).unwrap();
+        assert_eq!(parsed.budget_window, Duration::from_secs(30));
     }
 
     #[test]

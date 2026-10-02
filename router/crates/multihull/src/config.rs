@@ -1,5 +1,9 @@
 use anyhow::Context;
+use router_core::circuit::CircuitConfig;
+use router_core::limit::AdmissionQueue;
+use router_core::pressure::PressureConfig;
 use router_core::probe::ProbeConfig;
+use router_core::retry::RetryConfig;
 use router_proxy::PhaseTimeouts;
 use serde::Deserialize;
 use std::net::SocketAddr;
@@ -28,7 +32,15 @@ pub struct Config {
     #[serde(default)]
     pub log: LogConfig,
     #[serde(default)]
+    pub circuit: CircuitConfig,
+    #[serde(default)]
+    pub admission: AdmissionQueue,
+    #[serde(default)]
+    pub pressure: PressureConfig,
+    #[serde(default)]
     pub probe: ProbeConfig,
+    #[serde(default)]
+    pub retry: RetryConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -95,9 +107,9 @@ impl Config {
     }
 
     fn validate(&self) -> anyhow::Result<()> {
-        self.probe
+        self.proxy_config()
             .validate()
-            .map_err(|message| anyhow::anyhow!("[probe]: {message}"))
+            .map_err(|message| anyhow::anyhow!("invalid tuning: {message}"))
     }
 
     pub fn proxy_config(&self) -> router_proxy::ProxyConfig {
@@ -107,10 +119,11 @@ impl Config {
             max_buffered_body_bytes: self.max_buffered_body_bytes,
             region: self.region.clone(),
             upstream_ca: self.upstream_ca.clone(),
-            circuit: router_core::circuit::CircuitConfig::default(),
-            admission: router_core::limit::AdmissionQueue::default(),
-            pressure: router_core::pressure::PressureConfig::default(),
+            circuit: self.circuit.clone(),
+            admission: self.admission.clone(),
+            pressure: self.pressure.clone(),
             probe: self.probe.clone(),
+            retry: self.retry.clone(),
         }
     }
 }
@@ -132,6 +145,42 @@ mod tests {
         assert_eq!(config.log.format, LogFormat::Json);
         assert!(config.tls.is_some());
         assert!(config.upstream_ca.is_none());
+        assert_eq!(config.proxy_config(), documented_defaults());
+    }
+
+    fn documented_defaults() -> router_proxy::ProxyConfig {
+        router_proxy::ProxyConfig {
+            listen: default_listen(),
+            region: Some("eu".to_string()),
+            ..router_proxy::ProxyConfig::default()
+        }
+    }
+
+    #[test]
+    fn tuning_tables_override_defaults_and_are_validated() {
+        let text = "[snapshot]\nsource = \"x\"\n\n[circuit]\nconsecutive_failures = 3\nbase_backoff = 1.5\n\n[admission]\nmax_wait = 2\nbound = 64\n\n[pressure]\nsustained = 1\nstale_after = 4\n\n[retry]\nbudget_ratio = 0.1\nbudget_window = 20\n";
+        let config = Config::parse(text).unwrap();
+        let proxy = config.proxy_config();
+        assert_eq!(proxy.circuit.consecutive_failures, 3);
+        assert_eq!(proxy.circuit.base_backoff, Duration::from_millis(1500));
+        assert_eq!(proxy.circuit.error_ratio, 0.5);
+        assert_eq!(proxy.admission.max_wait, Duration::from_secs(2));
+        assert_eq!(proxy.admission.bound, 64);
+        assert_eq!(proxy.pressure.sustained, Duration::from_secs(1));
+        assert_eq!(proxy.pressure.stale_after, Duration::from_secs(4));
+        assert_eq!(proxy.retry.budget_ratio, 0.1);
+        assert_eq!(proxy.retry.budget_window, Duration::from_secs(20));
+        assert_eq!(proxy.retry.min_retries_per_second, 10);
+
+        let error = Config::parse("[snapshot]\nsource = \"x\"\n[circuit]\nerror_ratio = 0\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("circuit.error_ratio"), "{error}");
+        let error = Config::parse("[snapshot]\nsource = \"x\"\n[admission]\nbound = 0\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("admission.bound"), "{error}");
+        assert!(Config::parse("[snapshot]\nsource = \"x\"\n[circuit]\nbogus = 1\n").is_err());
     }
 
     #[test]
@@ -170,7 +219,7 @@ mod tests {
         let error = Config::parse("[snapshot]\nsource = \"x\"\n[probe]\ninterval = 0\n")
             .unwrap_err()
             .to_string();
-        assert!(error.contains("[probe]: probe.interval"), "{error}");
+        assert!(error.contains("probe.interval"), "{error}");
     }
 
     #[test]

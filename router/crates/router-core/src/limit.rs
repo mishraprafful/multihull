@@ -105,8 +105,9 @@ fn ewma(previous: Option<f64>, sample: f64, window: u32) -> f64 {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AdmissionQueue {
+    #[serde(with = "crate::serde_secs")]
     pub max_wait: Duration,
     pub bound: usize,
 }
@@ -117,6 +118,18 @@ impl Default for AdmissionQueue {
             max_wait: Duration::from_secs(5),
             bound: 1024,
         }
+    }
+}
+
+impl AdmissionQueue {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_wait.is_zero() {
+            return Err("admission.max_wait must be positive".into());
+        }
+        if self.bound == 0 {
+            return Err("admission.bound must be at least 1".into());
+        }
+        Ok(())
     }
 }
 
@@ -195,5 +208,22 @@ mod tests {
         let queue = AdmissionQueue::default();
         assert_eq!(queue.max_wait, Duration::from_secs(5));
         assert!(queue.bound > 0);
+        assert!(queue.validate().is_ok());
+    }
+
+    #[test]
+    fn admission_queue_rejects_zero_wait_and_bound() {
+        let zero_wait = AdmissionQueue {
+            max_wait: Duration::ZERO,
+            ..AdmissionQueue::default()
+        };
+        assert!(zero_wait.validate().unwrap_err().contains("max_wait"));
+        let zero_bound = AdmissionQueue {
+            bound: 0,
+            ..AdmissionQueue::default()
+        };
+        assert!(zero_bound.validate().unwrap_err().contains("bound"));
+        let parsed: AdmissionQueue = serde_json::from_str(r#"{"max_wait":2.5}"#).unwrap();
+        assert_eq!(parsed.max_wait, Duration::from_millis(2500));
     }
 }

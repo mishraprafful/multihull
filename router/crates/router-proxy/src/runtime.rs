@@ -4,7 +4,7 @@ use router_core::limit::{AdmissionQueue, Gradient2, Gradient2Config};
 use router_core::outcome::Outcome;
 use router_core::pressure::{PressureConfig, PressureDetector};
 use router_core::probe::{ProbeConfig, ProbeOutcome, ProbeState, ProbeTracker, ProbeTransition};
-use router_core::retry::RetryBudget;
+use router_core::retry::{RetryBudget, RetryConfig};
 use router_core::rng::Rng;
 use router_core::score::EndpointStateView;
 use router_core::snapshot::{Degraded, Endpoint, EndpointId, Route, Snapshot, Sticky};
@@ -200,6 +200,7 @@ pub struct Runtime {
     released: Arc<Notify>,
     circuit_config: CircuitConfig,
     probe_config: ProbeConfig,
+    retry_config: RetryConfig,
     started: Instant,
 }
 
@@ -210,6 +211,7 @@ impl Default for Runtime {
             AdmissionQueue::default(),
             PressureConfig::default(),
             ProbeConfig::default(),
+            RetryConfig::default(),
         )
     }
 }
@@ -220,6 +222,7 @@ impl Runtime {
         admission: AdmissionQueue,
         pressure: PressureConfig,
         probe_config: ProbeConfig,
+        retry_config: RetryConfig,
     ) -> Self {
         let released = Arc::new(Notify::new());
         Self {
@@ -232,8 +235,13 @@ impl Runtime {
             released,
             circuit_config,
             probe_config,
+            retry_config,
             started: Instant::now(),
         }
+    }
+
+    pub fn circuit_config(&self) -> &CircuitConfig {
+        &self.circuit_config
     }
 
     pub fn now(&self) -> Duration {
@@ -401,7 +409,10 @@ impl Runtime {
             .collect();
         match self.providers.get(provider) {
             Some(circuit) => lock(circuit.value()).is_open(states.iter()),
-            None => ProviderCircuit::default().is_open(states.iter()),
+            None => self
+                .circuit_config
+                .provider_circuit()
+                .is_open(states.iter()),
         }
     }
 
@@ -459,7 +470,7 @@ impl Runtime {
     ) -> dashmap::mapref::one::Ref<'_, String, Mutex<ProviderCircuit>> {
         self.providers
             .entry(provider.to_string())
-            .or_insert_with(|| Mutex::new(ProviderCircuit::default()))
+            .or_insert_with(|| Mutex::new(self.circuit_config.provider_circuit()))
             .downgrade()
     }
 
@@ -573,7 +584,7 @@ impl Runtime {
     ) -> dashmap::mapref::one::Ref<'_, String, Mutex<RetryBudget>> {
         self.budgets
             .entry(route_id.to_string())
-            .or_insert_with(|| Mutex::new(RetryBudget::default()))
+            .or_insert_with(|| Mutex::new(self.retry_config.budget()))
             .downgrade()
     }
 

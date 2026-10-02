@@ -5,17 +5,23 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CircuitConfig {
     pub consecutive_failures: u32,
     pub error_ratio: f64,
+    #[serde(with = "crate::serde_secs")]
     pub ratio_window: Duration,
     pub min_samples: u32,
+    #[serde(with = "crate::serde_secs")]
     pub base_backoff: Duration,
+    #[serde(with = "crate::serde_secs")]
     pub max_backoff: Duration,
     pub jitter_fraction: f64,
+    #[serde(with = "crate::serde_secs")]
     pub half_open_ramp: Duration,
     pub probe_successes_to_close: u32,
+    pub provider_open_ratio: f64,
+    pub panic_threshold: f64,
 }
 
 impl Default for CircuitConfig {
@@ -30,11 +36,57 @@ impl Default for CircuitConfig {
             jitter_fraction: 0.25,
             half_open_ramp: Duration::from_secs(30),
             probe_successes_to_close: 3,
+            provider_open_ratio: 0.5,
+            panic_threshold: PANIC_THRESHOLD,
         }
     }
 }
 
 impl CircuitConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.consecutive_failures == 0 {
+            return Err("circuit.consecutive_failures must be at least 1".into());
+        }
+        if !(self.error_ratio > 0.0 && self.error_ratio <= 1.0) {
+            return Err("circuit.error_ratio must be in (0, 1]".into());
+        }
+        if self.ratio_window < Duration::from_secs(1) {
+            return Err("circuit.ratio_window must be at least 1 second".into());
+        }
+        if self.min_samples == 0 {
+            return Err("circuit.min_samples must be at least 1".into());
+        }
+        if self.base_backoff.is_zero() {
+            return Err("circuit.base_backoff must be positive".into());
+        }
+        if self.max_backoff < self.base_backoff {
+            return Err("circuit.max_backoff must be at least circuit.base_backoff".into());
+        }
+        if !(0.0..=1.0).contains(&self.jitter_fraction) {
+            return Err("circuit.jitter_fraction must be in [0, 1]".into());
+        }
+        if self.half_open_ramp.is_zero() {
+            return Err("circuit.half_open_ramp must be positive".into());
+        }
+        if self.probe_successes_to_close == 0 {
+            return Err("circuit.probe_successes_to_close must be at least 1".into());
+        }
+        if !(self.provider_open_ratio > 0.0 && self.provider_open_ratio <= 1.0) {
+            return Err("circuit.provider_open_ratio must be in (0, 1]".into());
+        }
+        if !(0.0..1.0).contains(&self.panic_threshold) {
+            return Err("circuit.panic_threshold must be in [0, 1)".into());
+        }
+        Ok(())
+    }
+
+    pub fn provider_circuit(&self) -> ProviderCircuit {
+        ProviderCircuit {
+            open_ratio_threshold: self.provider_open_ratio,
+            auth_failure: false,
+        }
+    }
+
     pub fn backoff(&self, backoff_n: u32, rng: &mut impl Rng) -> Duration {
         let exponent = backoff_n.min(30);
         let scaled = self.base_backoff.saturating_mul(1u32 << exponent);
@@ -624,6 +676,67 @@ mod tests {
         let mut seeded = SeededRng::new(3);
         let jittered = config.backoff(0, &mut seeded);
         assert!(jittered >= secs(5) && jittered <= Duration::from_millis(6250));
+    }
+
+    #[test]
+    fn config_validation_names_the_offending_key() {
+        assert!(CircuitConfig::default().validate().is_ok());
+        let cases = [
+            (
+                CircuitConfig {
+                    consecutive_failures: 0,
+                    ..CircuitConfig::default()
+                },
+                "consecutive_failures",
+            ),
+            (
+                CircuitConfig {
+                    error_ratio: 1.5,
+                    ..CircuitConfig::default()
+                },
+                "error_ratio",
+            ),
+            (
+                CircuitConfig {
+                    max_backoff: secs(1),
+                    ..CircuitConfig::default()
+                },
+                "max_backoff",
+            ),
+            (
+                CircuitConfig {
+                    panic_threshold: 1.0,
+                    ..CircuitConfig::default()
+                },
+                "panic_threshold",
+            ),
+            (
+                CircuitConfig {
+                    provider_open_ratio: 0.0,
+                    ..CircuitConfig::default()
+                },
+                "provider_open_ratio",
+            ),
+        ];
+        for (config, key) in cases {
+            let error = config.validate().unwrap_err();
+            assert!(error.contains(key), "{error}");
+        }
+        assert_eq!(
+            CircuitConfig::default().provider_circuit(),
+            ProviderCircuit::default()
+        );
+    }
+
+    #[test]
+    fn config_serializes_durations_as_seconds() {
+        let json = serde_json::to_string(&CircuitConfig::default()).unwrap();
+        assert!(json.contains("\"ratio_window\":10.0"), "{json}");
+        let parsed: CircuitConfig =
+            serde_json::from_str(r#"{"base_backoff":1,"max_backoff":2.5}"#).unwrap();
+        assert_eq!(parsed.base_backoff, secs(1));
+        assert_eq!(parsed.max_backoff, millis(2500));
+        assert_eq!(parsed.consecutive_failures, 5);
     }
 
     #[test]
