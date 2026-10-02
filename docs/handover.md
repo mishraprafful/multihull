@@ -10,13 +10,15 @@ Rules for entries
 
 ## Current state
 
-- Merged to `main`: architecture plan (PR 1), name placeholders (PR 2), v0.1 scaffold (PR 3), CI and generated reference docs (PR 5), Python deploy, destroy, logs, controller and SDK (PR 6), router sticky routing, provider circuits, adaptive concurrency, TLS and HTTP snapshot source (PR 7).
+- Merged to `main`: architecture plan (PR 1), name placeholders (PR 2), v0.1 scaffold (PR 3), CI and generated reference docs (PR 5), Python deploy, destroy, logs, controller and SDK (PR 6), router sticky routing, provider circuits, adaptive concurrency, TLS and HTTP snapshot source (PR 7), handover (PR 8), Cloudflare Pages docs deploy (PR 16).
+- Docs are live at https://multihull.pages.dev, deployed by `.github/workflows/docs.yml` on pushes to `main`. PRs touching `website/`, `docs/`, `python/` or the workflow get a preview deployment and one sticky comment with the URL. PR 17 (open) deletes a PR's preview deployments when it closes.
+- Cloudflare secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are repository secrets. The `website` environment was removed because environment secrets cannot reach PR runs.
 - CI runs on every PR with path-filtered jobs for python, router, website and chart. Release workflow exists; publishing is gated by the `release` environment and the `PUBLISH_ENABLED` repository variable.
 - Test counts at merge: Python 81, Rust 151.
 - PR 4 was closed unmerged: its commits carried `Claude-Session` trailers. PR 5 is the same tree with clean messages.
 - Not yet exercised against any real provider. Modal log access uses private SDK internals.
 - Name placeholders `multihull` 0.0.1 not yet published to PyPI or crates.io; needs the owner's tokens.
-- GitHub repo `mishraprafful/multihull` is private.
+- GitHub repo `mishraprafful/multihull` is private. `multihull.dev` is not owned; all URLs use `multihull.pages.dev`.
 
 ## Decisions log
 
@@ -29,6 +31,8 @@ Rules for entries
 | 2026-10-01 | Terraform-style state: spec in git, refs in a state backend | Needed once CRDs were ruled out; tag-based rediscovery covers a lost state file |
 | 2026-10-01 | Principle: reliability over cost | Owner's call; defaults buy redundancy, cost features are opt-in |
 | 2026-10-01 | Sticky routing added (rendezvous hashing, rehome on unhealthy) | Owner request; KV-cache reuse and stateful sessions |
+| 2026-10-02 | Docs on Cloudflare Pages, deployed from GitHub Actions with wrangler, not Cloudflare's Git integration | The build needs uv and Python for generated reference pages; Actions already has them |
+| 2026-10-02 | Cloudflare secrets at repository level, not in an environment | Environment secrets limited to `main` never reach PR preview runs |
 | 2026-10-01 | Name: Multihull, CLI `hull` | Outrigger was taken on PyPI; Multihull free on PyPI, crates.io and GitHub |
 
 ## Open questions
@@ -48,6 +52,10 @@ Rules for entries
 7. Owner publishes the 0.0.1 placeholders.
 
 ## Session log
+
+### 2026-10-02 (later)
+- Set up Cloudflare Pages via an agent (PR 16, merged). First preview URLs showed a TLS error for a few minutes while Cloudflare issued the certificate; resolved on its own.
+- Opened PR 17: cleanup of preview deployments on PR close, manual `cleanup_branch` input. Pointed the JSON Schema `$id` at pages.dev.
 
 ### 2026-10-02
 - Merged PR 5, then merged `main` into PRs 6 and 7 with merge commits (no rebase, no force push) so CI ran on them. Both green; merged 6 and 7.
