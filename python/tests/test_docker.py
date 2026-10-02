@@ -232,17 +232,40 @@ def test_status_ready(mock_docker_spec: ServiceSpec) -> None:
     assert (observed.ready_replicas, observed.desired_replicas) == (1, 1)
 
 
-def test_status_not_ready_when_health_fails(mock_docker_spec: ServiceSpec) -> None:
-    provider, _ = provider_with(transport=health_transport(503))
+def test_status_pending_while_health_fails_during_start_period(
+    mock_docker_spec: ServiceSpec,
+) -> None:
+    provider, fake = provider_with(transport=health_transport(503))
     ref = provider.apply(docker_target(mock_docker_spec, "docker-a"), None)
     observed = provider.status(ref)
     assert observed.phase == "Pending" and observed.ready_replicas == 0
     assert "503" in observed.message
+    fake.containers.get(ref.ids["container"]).health = "starting"
+    assert provider.status(ref).phase == "Pending"
 
     unreachable, _ = provider_with(transport=failing_transport())
     ref = unreachable.apply(docker_target(mock_docker_spec, "docker-b"), None)
     observed = unreachable.status(ref)
     assert observed.phase == "Pending" and "ConnectError" in observed.message
+
+
+def test_status_failed_when_health_fails_after_start_period(
+    mock_docker_spec: ServiceSpec,
+) -> None:
+    provider, fake = provider_with(transport=health_transport(503))
+    ref = provider.apply(docker_target(mock_docker_spec, "docker-a"), None)
+    container = fake.containers.get(ref.ids["container"])
+    for docker_health in ("healthy", "unhealthy"):
+        container.health = docker_health
+        observed = provider.status(ref)
+        assert observed.phase == "Failed" and observed.ready_replicas == 0
+        assert "503" in observed.message
+
+    unreachable, fake = provider_with(transport=failing_transport())
+    ref = unreachable.apply(docker_target(mock_docker_spec, "docker-b"), None)
+    fake.containers.get(ref.ids["container"]).health = "healthy"
+    observed = unreachable.status(ref)
+    assert observed.phase == "Failed" and "ConnectError" in observed.message
 
 
 def test_status_exited_and_missing(mock_docker_spec: ServiceSpec) -> None:

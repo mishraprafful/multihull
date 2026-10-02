@@ -36,6 +36,7 @@ STOP_TIMEOUT_SECONDS = 10
 NANOSECONDS = 1_000_000_000
 RUNNING_STATES = frozenset({"running"})
 STARTING_STATES = frozenset({"created", "restarting", "paused"})
+DOCKER_HEALTH_STARTING = "starting"
 
 
 def docker_block(desired: Target) -> DockerBlock:
@@ -125,6 +126,11 @@ def exposed_container_port(attrs: dict[str, Any]) -> int | None:
     for key in list(bindings) + list(exposed):
         return int(key.split("/")[0])
     return None
+
+
+def probe_failure_phase(state: dict[str, Any]) -> str:
+    docker_health = (state.get("Health") or {}).get("Status") or DOCKER_HEALTH_STARTING
+    return "Pending" if docker_health == DOCKER_HEALTH_STARTING else "Failed"
 
 
 def ref_from_container(
@@ -247,10 +253,11 @@ class DockerProvider:
         try:
             response = self.http.get(url)
         except httpx.HTTPError as exc:
-            return Observed("Pending", 0, 1, f"health probe failed: {exc.__class__.__name__}")
+            phase = probe_failure_phase(state)
+            return Observed(phase, 0, 1, f"health probe failed: {exc.__class__.__name__}")
         if response.is_success:
             return Observed("Ready", 1, 1, f"health {response.status_code}")
-        return Observed("Pending", 0, 1, f"health returned {response.status_code}")
+        return Observed(probe_failure_phase(state), 0, 1, f"health returned {response.status_code}")
 
     def scale(self, ref: Ref, min: int, max: int) -> None:
         if min != 1 or max != 1:
