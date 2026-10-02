@@ -224,6 +224,55 @@ def test_rediscover_by_labels(mock_docker_spec: ServiceSpec) -> None:
     assert stopped is not None and stopped.ids["host_port"] == "18002"
 
 
+def test_rediscover_scoped_to_the_provider_name(mock_docker_spec: ServiceSpec) -> None:
+    fake = FakeDockerClient()
+    http = httpx.Client(transport=health_transport())
+    scoped = {
+        name: DockerProvider(client=fake, http_client=http, provider_name=name)
+        for name in ("docker-a", "docker-b", "docker-c")
+    }
+    applied = {
+        name: provider.apply(docker_target(mock_docker_spec, name), None)
+        for name, provider in scoped.items()
+    }
+    for name, provider in scoped.items():
+        found = provider.rediscover("mock-three")
+        assert found == applied[name]
+        assert found is not None and found.provider == name
+    assert DockerProvider(client=fake, provider_name="docker-z").rediscover("mock-three") is None
+
+
+def test_engine_rediscover_rebuilds_state_for_a_no_op_plan(
+    mock_docker_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    fake = FakeDockerClient()
+    http = httpx.Client(transport=health_transport())
+    providers = {
+        t.provider: DockerProvider(client=fake, http_client=http, provider_name=t.provider)
+        for t in mock_docker_spec.targets
+    }
+    state = LocalState(tmp_path / "state.db")
+    engine.apply(mock_docker_spec, state, dry_run=False, providers=providers)
+    before = {r.provider: r for r in state.list(mock_docker_spec.name)}
+    for record in before.values():
+        state.delete(mock_docker_spec.name, record.provider)
+    assert state.list(mock_docker_spec.name) == []
+
+    results = engine.rediscover(mock_docker_spec, state, providers)
+    assert [(r.provider, r.message) for r in results] == [
+        ("docker-a", "rediscovered"),
+        ("docker-b", "rediscovered"),
+        ("docker-c", "rediscovered"),
+    ]
+    after = {r.provider: r for r in state.list(mock_docker_spec.name)}
+    assert {name: r.ref for name, r in after.items()} == {name: r.ref for name, r in before.items()}
+    assert {name: r.spec_hash for name, r in after.items()} == {
+        name: r.spec_hash for name, r in before.items()
+    }
+    assert {p.change for p in engine.plan(mock_docker_spec, state, providers)} == {"unchanged"}
+    assert engine.rediscover(mock_docker_spec, state, providers) == []
+
+
 def test_status_ready(mock_docker_spec: ServiceSpec) -> None:
     provider, _ = provider_with()
     ref = provider.apply(docker_target(mock_docker_spec, "docker-a"), None)

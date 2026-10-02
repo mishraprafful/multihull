@@ -30,6 +30,7 @@ class FakeProvider:
         self.scaled: list[tuple[str, int, int]] = []
         self.log_calls: list[timedelta] = []
         self.status_calls = 0
+        self.rediscovered: Ref | None = None
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         return Plan(
@@ -70,4 +71,4 @@ class FakeProvider:
         return CredHealth(True)
 
     def rediscover(self, service: str) -> Ref | None:
-        return None
+        return self.rediscovered

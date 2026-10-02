@@ -173,10 +173,12 @@ class DockerProvider:
         client: Any | None = None,
         http_client: httpx.Client | None = None,
         client_factory: Callable[[], Any] | None = None,
+        provider_name: str | None = None,
     ) -> None:
         self._client = client
         self._http = http_client
         self._client_factory = client_factory
+        self.provider_name = provider_name
 
     @property
     def client(self) -> Any:
@@ -290,9 +292,10 @@ class DockerProvider:
         return CredHealth(ok=True, message=f"docker daemon {version} reachable", identity=version)
 
     def rediscover(self, service: str) -> Ref | None:
-        containers = self.client.containers.list(
-            all=True, filters={"label": [f"{SERVICE_LABEL}={service}", f"{OWNER_LABEL}={OWNER}"]}
-        )
+        selectors = [f"{SERVICE_LABEL}={service}", f"{OWNER_LABEL}={OWNER}"]
+        if self.provider_name:
+            selectors.append(f"{PROVIDER_LABEL}={self.provider_name}")
+        containers = self.client.containers.list(all=True, filters={"label": selectors})
         if not containers:
             return None
         container = containers[0]

@@ -14,6 +14,7 @@ from multihull.providers.base import Ref
 from multihull.state import LocalState, StateRecord
 from tests.conftest import FIXTURES
 from tests.fake_docker import FakeDockerClient
+from tests.fakes import FakeProvider
 
 runner = CliRunner()
 
@@ -93,6 +94,22 @@ def test_status_reads_state(tmp_path: Path) -> None:
     result = runner.invoke(app, ["status", str(path), "--state", str(state_path)])
     assert result.exit_code == 0, result.output
     assert "gke-prod" in result.output and "Ready" in result.output
+
+
+def test_status_rebuilds_missing_state_via_rediscover(
+    tmp_path: Path, fake_registry: dict[str, FakeProvider]
+) -> None:
+    path = copy_fixture(tmp_path)
+    state_path = tmp_path / "state.db"
+    fake = fake_registry["kubernetes"]
+    fake.rediscovered = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "inference"})
+    result = runner.invoke(app, ["status", str(path), "--state", str(state_path)])
+    assert result.exit_code == 0, result.output
+    assert "rebuilt state from rediscover: gke-prod" in result.output
+    assert "gke-prod" in result.output and "Ready" in result.output
+    records = {r.provider: r for r in LocalState(state_path).list("llama-8b")}
+    assert set(records) == {"gke-prod"}
+    assert records["gke-prod"].spec_hash and records["gke-prod"].last_status == "Ready"
 
 
 def test_snapshot_command(tmp_path: Path, monkeypatch) -> None:
