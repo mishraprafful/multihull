@@ -126,6 +126,9 @@ async fn proxy(
                 }
                 None => {
                     finish_session(&state, &route, session.take(), None);
+                    if attempts == 0 && state.runtime.route_saturated(&route) {
+                        return Err((ProxyError::QueueOverflow, 0));
+                    }
                     Err((last_error, attempts))
                 }
             };
