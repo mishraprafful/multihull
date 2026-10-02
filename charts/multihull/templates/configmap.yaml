@@ -6,33 +6,40 @@ metadata:
     {{- include "multihull.labels" . | nindent 4 }}
 data:
   router.toml: |
+    listen = "0.0.0.0:{{ .Values.router.listen }}"
+    admin_listen = "0.0.0.0:{{ .Values.router.admin }}"
     {{- with .Values.router.region }}
     region = {{ . | quote }}
-    {{ end }}
-    [listener]
-    addr = "0.0.0.0:{{ .Values.router.listen }}"
-
-    [admin]
-    addr = "0.0.0.0:{{ .Values.router.admin }}"
+    {{- end }}
 
     [snapshot]
-    source = {{ .Values.router.snapshot.type | quote }}
     {{- if eq .Values.router.snapshot.type "file" }}
-    path = {{ .Values.router.snapshot.value | quote }}
+    source = {{ printf "file://%s" .Values.router.snapshot.value | quote }}
     {{- else if eq .Values.router.snapshot.type "http" }}
-    url = {{ .Values.router.snapshot.value | quote }}
+    source = {{ .Values.router.snapshot.value | quote }}
     {{- else if eq .Values.router.snapshot.type "grpc" }}
     {{- if and .Values.controller.enabled (not .Values.router.snapshot.value) }}
-    addr = {{ printf "%s-controller:%v" (include "multihull.fullname" .) .Values.controller.grpcPort | quote }}
+    source = {{ printf "grpc://%s-controller:%v" (include "multihull.fullname" .) .Values.controller.grpcPort | quote }}
     {{- else }}
-    addr = {{ .Values.router.snapshot.value | quote }}
+    source = {{ printf "grpc://%s" .Values.router.snapshot.value | quote }}
     {{- end }}
+    {{- else }}
+    {{- fail (printf "router.snapshot.type must be file, http or grpc, got %q" .Values.router.snapshot.type) }}
     {{- end }}
     {{- if .Values.router.tls.secretName }}
 
     [tls]
     cert = "/etc/multihull/tls/tls.crt"
     key = "/etc/multihull/tls/tls.key"
+    {{- end }}
+    {{- range $table := list "timeouts" "circuit" "admission" "pressure" "probe" "retry" }}
+    {{- with index $.Values.router.tuning $table }}
+
+    [{{ $table }}]
+    {{- range $key, $value := . }}
+    {{ $key }} = {{ $value }}
+    {{- end }}
+    {{- end }}
     {{- end }}
     {{- with .Values.router.extraConfig }}
 
