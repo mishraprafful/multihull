@@ -13,24 +13,29 @@ struct Bucket {
 pub struct RetryBudget {
     pub ratio: f64,
     pub window: Duration,
-    pub min_retries: u32,
+    pub min_retries_per_second: u32,
     buckets: VecDeque<Bucket>,
 }
 
 impl Default for RetryBudget {
     fn default() -> Self {
-        Self::new(0.2, Duration::from_secs(10), 3)
+        Self::new(0.2, Duration::from_secs(10), 10)
     }
 }
 
 impl RetryBudget {
-    pub fn new(ratio: f64, window: Duration, min_retries: u32) -> Self {
+    pub fn new(ratio: f64, window: Duration, min_retries_per_second: u32) -> Self {
         Self {
             ratio,
             window,
-            min_retries,
+            min_retries_per_second,
             buckets: VecDeque::new(),
         }
+    }
+
+    fn floor(&self) -> u32 {
+        self.min_retries_per_second
+            .saturating_mul(self.window.as_secs().max(1) as u32)
     }
 
     pub fn record_request(&mut self, now: Duration) {
@@ -40,8 +45,10 @@ impl RetryBudget {
     pub fn remaining(&mut self, now: Duration) -> u32 {
         self.prune(now);
         let (requests, retries) = self.totals();
-        let allowed = ((f64::from(requests) * self.ratio).floor() as u32).max(self.min_retries);
-        allowed.saturating_sub(retries)
+        let proportional = (f64::from(requests) * self.ratio).floor() as u32;
+        proportional
+            .saturating_add(self.floor())
+            .saturating_sub(retries)
     }
 
     pub fn try_acquire(&mut self, now: Duration) -> bool {
@@ -186,18 +193,30 @@ mod tests {
     }
 
     #[test]
-    fn budget_is_twenty_percent_with_a_floor() {
+    fn budget_is_twenty_percent_plus_ten_retries_per_second() {
         let mut budget = RetryBudget::default();
-        assert_eq!(budget.remaining(now()), 3);
+        assert_eq!(budget.remaining(now()), 100);
         for _ in 0..100 {
             budget.record_request(now());
         }
-        assert_eq!(budget.remaining(now()), 20);
-        for _ in 0..20 {
+        assert_eq!(budget.remaining(now()), 120);
+        for _ in 0..120 {
             assert!(budget.try_acquire(now()));
         }
         assert!(!budget.try_acquire(now()));
         assert_eq!(budget.remaining(now()), 0);
+    }
+
+    #[test]
+    fn low_volume_burst_fits_in_the_per_second_floor() {
+        let mut budget = RetryBudget::default();
+        for _ in 0..10 {
+            budget.record_request(now());
+        }
+        for _ in 0..13 {
+            assert!(budget.try_acquire(now()));
+        }
+        assert_eq!(budget.remaining(now()), 89);
     }
 
     #[test]
@@ -206,8 +225,8 @@ mod tests {
         for _ in 0..100 {
             budget.record_request(Duration::from_secs(0));
         }
-        assert_eq!(budget.remaining(Duration::from_secs(9)), 20);
-        assert_eq!(budget.remaining(Duration::from_secs(10)), 3);
+        assert_eq!(budget.remaining(Duration::from_secs(9)), 120);
+        assert_eq!(budget.remaining(Duration::from_secs(10)), 100);
     }
 
     #[test]
@@ -329,12 +348,18 @@ mod tests {
             decide(Outcome::Capacity, None, &exhausted, &mut budget, now()),
             RetryDecision::Stop(StopReason::MaxRetries)
         );
-        for _ in 0..3 {
-            assert!(budget.try_acquire(now()));
-        }
+        let mut exhausted = RetryBudget::new(0.2, Duration::from_secs(10), 0);
         assert_eq!(
-            decide(Outcome::Capacity, None, &ctx(), &mut budget, now()),
+            decide(Outcome::Capacity, None, &ctx(), &mut exhausted, now()),
             RetryDecision::Stop(StopReason::BudgetExhausted)
         );
+        exhausted.record_request(now());
+        for _ in 0..5 {
+            exhausted.record_request(now());
+        }
+        assert!(matches!(
+            decide(Outcome::Capacity, None, &ctx(), &mut exhausted, now()),
+            RetryDecision::Retry { .. }
+        ));
     }
 }
