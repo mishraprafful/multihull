@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,9 @@ import yaml
 
 from multihull import spec as specmod
 from multihull.providers.base import Target
+from multihull.providers.registry import PROVIDERS
 from multihull.spec import ServiceSpec
+from tests.fakes import PROVIDER_TYPES, FakeProvider
 
 FIXTURES = Path(__file__).parent / "fixtures"
 GOLDEN = Path(__file__).parent / "golden"
@@ -32,6 +35,22 @@ def target_for(llama_spec: ServiceSpec):
         return Target(llama_spec, llama_spec.target(provider))
 
     return build
+
+
+@pytest.fixture
+def fake_registry(monkeypatch: pytest.MonkeyPatch) -> dict[str, FakeProvider]:
+    fakes = {provider_type: FakeProvider() for provider_type in PROVIDER_TYPES}
+
+    def factory_for(fake: FakeProvider) -> Callable[..., FakeProvider]:
+        def factory(**kwargs: Any) -> FakeProvider:
+            fake.kwargs = kwargs
+            return fake
+
+        return factory
+
+    for provider_type, fake in fakes.items():
+        monkeypatch.setitem(PROVIDERS, provider_type, factory_for(fake))
+    return fakes
 
 
 def assert_golden(name: str, actual: Any) -> None:
