@@ -67,7 +67,7 @@ def test_deploy_happy_path(llama_spec: ServiceSpec, tmp_path: Path) -> None:
     snapshot = json.loads(snapshot_out.read_text())
     endpoints = snapshot["routes"][0]["endpoints"]
     assert [e["provider"] for e in endpoints] == ["gke-prod", "modal-main", "runpod-eu"]
-    assert {e["health"] for e in endpoints} == {"healthy"}
+    assert {e["health"] for e in endpoints} == {"ready"}
 
 
 def test_deploy_partial_failure_keeps_healthy_targets(

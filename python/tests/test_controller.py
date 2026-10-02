@@ -53,7 +53,7 @@ def test_reconcile_tick_updates_state_and_versions(llama_spec: ServiceSpec, tmp_
         assert {r.last_status for r in state.list(llama_spec.name)} == {"Ready"}
         written = json.loads((tmp_path / "snapshot.json").read_text())
         assert written["version"] == 2
-        assert {e["health"] for e in written["routes"][0]["endpoints"]} == {"healthy"}
+        assert {e["health"] for e in written["routes"][0]["endpoints"]} == {"ready"}
 
         assert await controller.reconcile_once() is False
         assert controller.version == 2
