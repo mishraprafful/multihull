@@ -4,6 +4,7 @@ from typing import Any
 
 from multihull.providers.base import Provider
 from multihull.providers.baseten import BasetenProvider
+from multihull.providers.docker import DockerProvider
 from multihull.providers.kubernetes import KubernetesProvider
 from multihull.providers.modal import ModalProvider
 from multihull.providers.replicate import ReplicateProvider
@@ -15,6 +16,7 @@ PROVIDERS: dict[str, type] = {
     RunpodProvider.type: RunpodProvider,
     BasetenProvider.type: BasetenProvider,
     ReplicateProvider.type: ReplicateProvider,
+    DockerProvider.type: DockerProvider,
 }
 
 

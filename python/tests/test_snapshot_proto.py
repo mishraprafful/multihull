@@ -54,6 +54,7 @@ def test_dict_and_proto_snapshot_share_fields(
         "runpod",
         "baseten",
         "replicate",
+        "docker",
     }
 
     message = discovery.snapshot_to_proto(snapshot)

@@ -20,6 +20,7 @@ READY_TIMEOUTS: dict[str, timedelta] = {
     "runpod": timedelta(minutes=15),
     "baseten": timedelta(minutes=20),
     "replicate": timedelta(minutes=20),
+    "docker": timedelta(minutes=2),
 }
 FALLBACK_TIMEOUT = timedelta(minutes=15)
 TERMINAL_PHASES = {"Ready", "Failed"}
