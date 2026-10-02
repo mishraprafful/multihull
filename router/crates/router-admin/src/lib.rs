@@ -4,6 +4,7 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use router_core::probe::{ProbeOutcome, ProbeState};
 use router_core::snapshot::Health;
 use router_core::sticky::truncate_hash;
 use router_core::Snapshot;
@@ -47,6 +48,7 @@ pub fn router(state: AdminState) -> Router {
         .route("/metrics", get(metrics))
         .route("/debug/endpoints", get(debug_endpoints))
         .route("/debug/sessions", get(debug_sessions))
+        .route("/debug/config", get(debug_config))
         .with_state(state)
 }
 
@@ -81,6 +83,16 @@ async fn metrics(State(state): State<AdminState>) -> Response {
 }
 
 #[derive(Serialize)]
+pub struct ProbeView {
+    pub state: ProbeState,
+    pub consecutive_failures: u32,
+    pub consecutive_successes: u32,
+    pub last_outcome: Option<ProbeOutcome>,
+    pub last_status: Option<u16>,
+    pub probes: u64,
+}
+
+#[derive(Serialize)]
 pub struct EndpointView {
     pub route: String,
     pub id: String,
@@ -97,6 +109,8 @@ pub struct EndpointView {
     pub outstanding: Option<u32>,
     pub concurrency_limit: Option<u32>,
     pub ewma_ttft_seconds: Option<f64>,
+    pub health_path: String,
+    pub probe: Option<ProbeView>,
 }
 
 #[derive(Serialize)]
@@ -128,6 +142,15 @@ pub fn endpoints_view(snapshot: &Snapshot, proxy: Option<&ProxyState>) -> Endpoi
                     outstanding: status.as_ref().map(|s| s.outstanding),
                     concurrency_limit: status.as_ref().map(|s| s.concurrency_limit),
                     ewma_ttft_seconds: status.as_ref().and_then(|s| s.ewma_ttft_secs),
+                    health_path: endpoint.health_path().to_string(),
+                    probe: status.as_ref().map(|s| ProbeView {
+                        state: s.probe.state,
+                        consecutive_failures: s.probe.consecutive_failures,
+                        consecutive_successes: s.probe.consecutive_successes,
+                        last_outcome: s.probe.last_outcome,
+                        last_status: s.probe.last_status,
+                        probes: s.probe.probes,
+                    }),
                 }
             })
             .collect(),
@@ -180,6 +203,17 @@ pub fn sessions_view(proxy: Option<&ProxyState>) -> SessionsView {
 
 async fn debug_sessions(State(state): State<AdminState>) -> Json<SessionsView> {
     Json(sessions_view(state.proxy.as_deref()))
+}
+
+async fn debug_config(State(state): State<AdminState>) -> Response {
+    match state.proxy.as_deref() {
+        Some(proxy) => Json(&proxy.config).into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": {"type": "proxy_not_attached"}})),
+        )
+            .into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -283,6 +317,8 @@ mod tests {
         assert_eq!(parsed["endpoints"].as_array().unwrap().len(), 2);
         assert_eq!(parsed["endpoints"][1]["health"], "degraded");
         assert_eq!(parsed["endpoints"][0]["provider"], "gke-prod");
+        assert_eq!(parsed["endpoints"][0]["health_path"], "/health");
+        assert!(parsed["endpoints"][0]["probe"].is_null());
     }
 
     #[tokio::test]
@@ -299,6 +335,11 @@ mod tests {
         let modal = loaded.find_endpoint("modal").unwrap();
         let mut rng = router_core::rng::ZeroRng;
         proxy.runtime.endpoint(modal);
+        for _ in 0..3 {
+            proxy
+                .runtime
+                .record_probe(modal, ProbeOutcome::Failure, Some(503));
+        }
         for _ in 0..5 {
             proxy.runtime.record_attempt(
                 gke,
@@ -322,8 +363,13 @@ mod tests {
         assert_eq!(parsed["endpoints"][0]["circuit"], "open");
         assert_eq!(parsed["endpoints"][0]["provider_circuit_open"], true);
         assert_eq!(parsed["endpoints"][0]["outstanding"], 0);
-        assert_eq!(parsed["endpoints"][1]["circuit"], "closed");
-        assert_eq!(parsed["endpoints"][1]["provider_circuit_open"], false);
+        assert_eq!(parsed["endpoints"][1]["circuit"], "open");
+        assert_eq!(parsed["endpoints"][1]["provider_circuit_open"], true);
+        assert_eq!(parsed["endpoints"][1]["probe"]["state"], "down");
+        assert_eq!(parsed["endpoints"][1]["probe"]["consecutive_failures"], 3);
+        assert_eq!(parsed["endpoints"][1]["probe"]["last_outcome"], "failure");
+        assert_eq!(parsed["endpoints"][1]["probe"]["last_status"], 503);
+        assert_eq!(parsed["endpoints"][0]["probe"]["state"], "unknown");
         assert!(
             parsed["endpoints"][1]["concurrency_limit"]
                 .as_u64()
@@ -373,6 +419,36 @@ mod tests {
         );
         assert!(parsed["sessions"][0]["age_seconds"].as_f64().unwrap() < 5.0);
         assert!(!body.contains("session-1"));
+    }
+
+    #[tokio::test]
+    async fn debug_config_renders_the_proxy_tuning_as_seconds() {
+        let (status, _) = get_body("/debug/config").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+
+        let snapshot = Arc::new(ArcSwap::from_pointee(Snapshot::default()));
+        let mut config = router_proxy::ProxyConfig::default();
+        config.circuit.consecutive_failures = 7;
+        config.probe.interval = std::time::Duration::from_millis(1500);
+        let proxy = ProxyState::new(config, snapshot.clone());
+        let response = router(AdminState::new(snapshot).with_proxy(proxy))
+            .oneshot(
+                Request::builder()
+                    .uri("/debug/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["circuit"]["consecutive_failures"], 7);
+        assert_eq!(parsed["probe"]["interval"], 1.5);
+        assert_eq!(parsed["timeouts"]["connect"], 2.0);
+        assert_eq!(parsed["admission"]["bound"], 1024);
+        assert_eq!(parsed["retry"]["min_retries_per_second"], 10);
+        assert!(parsed["pressure"]["queue_wait_fraction"].is_number());
     }
 
     #[tokio::test]

@@ -89,6 +89,7 @@ def test_dict_and_proto_snapshot_share_fields(
         assert proto_entry.weight == entry["weight"]
         assert proto_entry.max_concurrency == entry["max_concurrency"]
         assert dict(proto_entry.inject_headers) == entry["inject_headers"]
+        assert proto_entry.health_path == entry["health_path"] == "/health"
 
     as_dict = MessageToDict(message, preserving_proto_field_name=True)
     assert as_dict["version"] == "42"

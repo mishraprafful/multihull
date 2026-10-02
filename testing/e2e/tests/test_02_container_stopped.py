@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 
 from e2e.client import Outcome, RouterClient, fresh_keys, load, server_errors
-from e2e.harness import Deployment, Router
+from e2e.harness import Deployment, Router, probe_ejection_budget
 from e2e.waiting import wait_until
 
 STOP_AFTER = 10
@@ -31,7 +31,9 @@ def test_stopped_primary_fails_over_without_client_errors(
     )
     assert stopped_at, "primary was never stopped"
     wait_until(
-        lambda: router.endpoint("primary")["circuit"] == "open", 5, message="primary circuit open"
+        lambda: router.endpoint("primary")["circuit"] == "open",
+        max(5.0, probe_ejection_budget()) + 1,
+        message="primary circuit open",
     )
 
     assert server_errors(outcomes) == []

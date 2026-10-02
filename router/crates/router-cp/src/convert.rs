@@ -148,6 +148,7 @@ impl From<proto::Endpoint> for core::Endpoint {
             ready_replicas: value.ready_replicas,
             max_concurrency: value.max_concurrency,
             inject_headers: value.inject_headers.into_iter().collect::<BTreeMap<_, _>>(),
+            health_path: value.health_path,
         }
     }
 }
@@ -166,6 +167,7 @@ impl From<core::Endpoint> for proto::Endpoint {
             ready_replicas: value.ready_replicas,
             max_concurrency: value.max_concurrency,
             inject_headers: value.inject_headers.into_iter().collect(),
+            health_path: value.health_path,
         }
     }
 }
@@ -312,6 +314,7 @@ mod tests {
                         "Modal-Key".to_string(),
                         "from-env".to_string(),
                     )]),
+                    health_path: "/healthz".into(),
                 }],
             }],
         }

@@ -6,7 +6,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +28,13 @@ CONTROLLER_SNAPSHOT_PATH = Path("snapshot.json")
 SPEC_NAME = "multihull.yaml"
 STICKY_SPEC_NAME = "multihull-sticky.yaml"
 READY_HEALTH = {"ready"}
+DEGRADED_COOLDOWN = "5s"
+DEGRADED_COOLDOWN_SECONDS = 5.0
+DEFAULT_PROBE: dict[str, float] = {"interval": 5, "timeout": 2, "jitter_fraction": 0.2}
+
+
+def probe_ejection_budget(probe: Mapping[str, float] = DEFAULT_PROBE) -> float:
+    return 3 * probe["interval"] * (1 + probe["jitter_fraction"]) + probe["timeout"]
 
 
 def free_port() -> int:
@@ -252,7 +259,12 @@ class Controller(Process):
     def snapshot_path(self) -> Path:
         return self.workdir / CONTROLLER_SNAPSHOT_PATH
 
-    def start(self, spec_path: Path | None = None, interval: str = "2s") -> None:
+    def start(
+        self,
+        spec_path: Path | None = None,
+        interval: str = "2s",
+        degraded_cooldown: str = DEGRADED_COOLDOWN,
+    ) -> None:
         if spec_path is not None:
             self.spec_path = spec_path
         if self.snapshot_path.exists():
@@ -270,6 +282,8 @@ class Controller(Process):
                 str(self.snapshot_path),
                 "--interval",
                 interval,
+                "--degraded-cooldown",
+                degraded_cooldown,
                 *state_args(self.workdir),
             ]
         )
@@ -300,6 +314,26 @@ class Controller(Process):
         return [line for line in self.log_text().splitlines() if needle in line]
 
 
+TomlValue = bool | int | float | str
+
+
+def toml_literal(value: TomlValue) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return json.dumps(value)
+    return repr(value)
+
+
+def toml_tables(tables: Mapping[str, Mapping[str, TomlValue]]) -> str:
+    lines: list[str] = []
+    for name, entries in tables.items():
+        lines.append(f"[{name}]")
+        lines.extend(f"{key} = {toml_literal(value)}" for key, value in entries.items())
+        lines.append("")
+    return "\n".join(lines)
+
+
 def write_router_config(
     path: Path,
     listen_port: int,
@@ -307,7 +341,15 @@ def write_router_config(
     source: str,
     first_byte_seconds: int = 3,
     log_filter: str = "info",
+    tuning: Mapping[str, Mapping[str, TomlValue]] | None = None,
 ) -> Path:
+    overrides = {name: dict(entries) for name, entries in (tuning or {}).items()}
+    tables: dict[str, dict[str, TomlValue]] = {
+        "snapshot": {"source": source},
+        "timeouts": {"first_byte": first_byte_seconds, **overrides.pop("timeouts", {})},
+        "log": {"format": "json", "filter": log_filter},
+        **overrides,
+    }
     path.write_text(
         "\n".join(
             [
@@ -315,16 +357,7 @@ def write_router_config(
                 f'admin_listen = "127.0.0.1:{admin_port}"',
                 f'node_id = "e2e-router-{listen_port}"',
                 "",
-                "[snapshot]",
-                f'source = "{source}"',
-                "",
-                "[timeouts]",
-                f"first_byte = {first_byte_seconds}",
-                "",
-                "[log]",
-                'format = "json"',
-                f'filter = "{log_filter}"',
-                "",
+                toml_tables(tables),
             ]
         )
     )
@@ -332,11 +365,19 @@ def write_router_config(
 
 
 class Router(Process):
-    def __init__(self, binary: Path, config_path: Path, log_path: Path, source: str) -> None:
+    def __init__(
+        self,
+        binary: Path,
+        config_path: Path,
+        log_path: Path,
+        source: str,
+        tuning: Mapping[str, Mapping[str, TomlValue]] | None = None,
+    ) -> None:
         super().__init__("router", log_path)
         self.binary = binary
         self.config_path = config_path
         self.source = source
+        self.tuning = dict(tuning or {})
         self.listen_port = free_port()
         self.admin_port = free_port()
         self.http = httpx.Client(timeout=5.0)
@@ -350,7 +391,9 @@ class Router(Process):
         return f"http://127.0.0.1:{self.admin_port}"
 
     def start(self) -> None:
-        write_router_config(self.config_path, self.listen_port, self.admin_port, self.source)
+        write_router_config(
+            self.config_path, self.listen_port, self.admin_port, self.source, tuning=self.tuning
+        )
         self.spawn([str(self.binary), "--config", str(self.config_path)])
 
     def healthz(self) -> bool:
@@ -372,6 +415,11 @@ class Router(Process):
 
     def sessions(self) -> dict[str, Any]:
         response = self.http.get(f"{self.admin_url}/debug/sessions")
+        response.raise_for_status()
+        return response.json()
+
+    def config(self) -> dict[str, Any]:
+        response = self.http.get(f"{self.admin_url}/debug/config")
         response.raise_for_status()
         return response.json()
 

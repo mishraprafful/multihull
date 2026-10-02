@@ -8,6 +8,7 @@ pub const RETRY_BUDGET_REMAINING: &str = "router_retry_budget_remaining";
 pub const OUTPUT_TOKENS_TOTAL: &str = "router_output_tokens_total";
 pub const STICKY_REQUESTS_TOTAL: &str = "router_sticky_requests_total";
 pub const STICKY_SESSIONS_ACTIVE: &str = "router_sticky_sessions_active";
+pub const PROBE_TOTAL: &str = "router_probe_total";
 
 pub const ALL: &[&str] = &[
     REQUESTS_TOTAL,
@@ -20,6 +21,7 @@ pub const ALL: &[&str] = &[
     OUTPUT_TOKENS_TOTAL,
     STICKY_REQUESTS_TOTAL,
     STICKY_SESSIONS_ACTIVE,
+    PROBE_TOTAL,
 ];
 
 pub mod labels {
@@ -61,6 +63,7 @@ pub fn describe_all() {
         STICKY_SESSIONS_ACTIVE,
         "Pinned sticky sessions held in memory"
     );
+    metrics::describe_counter!(PROBE_TOTAL, "Active health probes by endpoint and outcome");
 }
 
 #[cfg(test)]

@@ -28,6 +28,9 @@ DEFAULT_BASE_PORT = 18100
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "router_source(kind): snapshot source for the router")
+    config.addinivalue_line(
+        "markers", "router_tuning(**tables): extra router.toml tables for the router fixture"
+    )
 
 
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -136,8 +139,13 @@ def router(
     controller: Controller,
     tmp_path: Path,
 ) -> Iterator[Router]:
+    marker = request.node.get_closest_marker("router_tuning")
     process = Router(
-        router_binary, tmp_path / "router.toml", tmp_path / "router.log", router_source
+        router_binary,
+        tmp_path / "router.toml",
+        tmp_path / "router.log",
+        router_source,
+        tuning=marker.kwargs if marker else None,
     )
     process.start()
     try:

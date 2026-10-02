@@ -2,9 +2,11 @@ pub mod circuit;
 pub mod limit;
 pub mod outcome;
 pub mod pressure;
+pub mod probe;
 pub mod retry;
 pub mod rng;
 pub mod score;
+pub mod serde_secs;
 pub mod snapshot;
 pub mod sticky;
 

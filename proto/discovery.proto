@@ -125,6 +125,7 @@ message Endpoint {
   uint32 ready_replicas = 9;
   uint32 max_concurrency = 10;
   map<string, string> inject_headers = 11;
+  string health_path = 12;
 }
 
 enum EndpointType {

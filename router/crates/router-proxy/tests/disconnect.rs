@@ -1,0 +1,132 @@
+mod common;
+
+use bytes::Bytes;
+use common::{endpoint, start_proxy};
+use http_body_util::{BodyExt, Empty};
+use hyper::body::Frame;
+use hyper::Request;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
+use router_proxy::body::{ERROR_HEADER, ERROR_REASON_HEADER, UPSTREAM_DISCONNECTED};
+use router_testkit::{MockUpstream, MockUpstreamConfig};
+use std::time::Duration;
+
+fn chunks() -> Vec<String> {
+    (1..=5)
+        .map(|n| format!("{{\"id\":\"c\",\"n\":{n}}}"))
+        .collect()
+}
+
+async fn collect_frames(body: hyper::body::Incoming) -> (String, Option<http::HeaderMap>) {
+    let mut body = body;
+    let mut text = String::new();
+    let mut trailers = None;
+    while let Some(frame) = tokio::time::timeout(Duration::from_secs(5), body.frame())
+        .await
+        .expect("frame within timeout")
+    {
+        let frame: Frame<Bytes> = frame.expect("body ends cleanly");
+        if frame.is_data() {
+            text.push_str(&String::from_utf8_lossy(&frame.into_data().unwrap()));
+        } else if frame.is_trailers() {
+            trailers = Some(frame.into_trailers().unwrap());
+        }
+    }
+    (text, trailers)
+}
+
+#[tokio::test]
+async fn sse_disconnect_mid_stream_ends_with_a_terminal_event_and_done() {
+    let upstream = MockUpstream::start(
+        MockUpstreamConfig::default()
+            .with_sse_chunks(chunks())
+            .dropping_sse_after(2),
+    )
+    .await
+    .unwrap();
+    let target = endpoint("a", "modal", upstream.url(), 1);
+    let proxy = start_proxy(vec![target.clone()]).await;
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    let request = Request::get(proxy.url("/v1/chat/completions"))
+        .body(Empty::new())
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers().get("x-hull-provider").unwrap(), "modal");
+
+    let (text, trailers) = collect_frames(response.into_body()).await;
+    assert!(trailers.is_none());
+    let frames: Vec<&str> = text
+        .split("\n\n")
+        .filter(|frame| !frame.is_empty())
+        .collect();
+    assert_eq!(frames.len(), 4, "{text}");
+    assert_eq!(frames[0], "data: {\"id\":\"c\",\"n\":1}");
+    assert_eq!(frames[1], "data: {\"id\":\"c\",\"n\":2}");
+    let terminal: serde_json::Value =
+        serde_json::from_str(frames[2].strip_prefix("data: ").unwrap()).unwrap();
+    assert_eq!(terminal["error"]["type"], UPSTREAM_DISCONNECTED);
+    assert_eq!(terminal["error"]["retryable"], true);
+    assert_eq!(terminal["error"]["provider"], "modal");
+    assert_eq!(terminal["error"]["reason"], "disconnect");
+    assert_eq!(frames[3], "data: [DONE]");
+    assert!(!text.contains("\"n\":3"));
+    assert_eq!(upstream.request_count(), 1);
+    assert_eq!(
+        proxy.state.runtime.status(&target).unwrap().circuit,
+        "closed"
+    );
+}
+
+#[tokio::test]
+async fn http2_binary_disconnect_ends_with_an_error_trailer() {
+    let upstream = MockUpstream::start(
+        MockUpstreamConfig::default()
+            .with_sse_chunks(chunks())
+            .dropping_sse_after(1)
+            .with_stream_content_type("application/octet-stream"),
+    )
+    .await
+    .unwrap();
+    let proxy = start_proxy(vec![endpoint("a", "runpod", upstream.url(), 1)]).await;
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new())
+        .http2_only(true)
+        .build_http();
+    let request = Request::get(proxy.url("/v1/stream"))
+        .body(Empty::new())
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.version(), http::Version::HTTP_2);
+    assert_eq!(response.status(), 200);
+    let (text, trailers) = collect_frames(response.into_body()).await;
+    assert_eq!(text, "data: {\"id\":\"c\",\"n\":1}\n\n");
+    let trailers = trailers.expect("error trailer");
+    assert_eq!(trailers.get(ERROR_HEADER).unwrap(), UPSTREAM_DISCONNECTED);
+    assert_eq!(trailers.get(ERROR_REASON_HEADER).unwrap(), "disconnect");
+}
+
+#[tokio::test]
+async fn http1_binary_disconnect_still_closes_the_connection() {
+    let upstream = MockUpstream::start(
+        MockUpstreamConfig::default()
+            .with_sse_chunks(chunks())
+            .dropping_sse_after(1)
+            .with_stream_content_type("application/octet-stream"),
+    )
+    .await
+    .unwrap();
+    let proxy = start_proxy(vec![endpoint("a", "runpod", upstream.url(), 1)]).await;
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    let request = Request::get(proxy.url("/v1/stream"))
+        .body(Empty::new())
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let collected = tokio::time::timeout(Duration::from_secs(5), response.into_body().collect())
+        .await
+        .unwrap();
+    assert!(
+        collected.is_err(),
+        "http/1 non-sse streams are cut, not decorated"
+    );
+}

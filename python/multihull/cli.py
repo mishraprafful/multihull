@@ -17,7 +17,12 @@ from multihull import deploy as deploymod
 from multihull import discovery, engine
 from multihull import logs as logsmod
 from multihull import spec as specmod
-from multihull.controller import DEFAULT_GRPC_LISTEN, DEFAULT_INTERVAL, Controller
+from multihull.controller import (
+    DEFAULT_DEGRADED_COOLDOWN,
+    DEFAULT_GRPC_LISTEN,
+    DEFAULT_INTERVAL,
+    Controller,
+)
 from multihull.durations import format_duration, parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
 from multihull.state import LocalState
@@ -414,6 +419,13 @@ def controller(
     ] = DEFAULT_GRPC_LISTEN,
     snapshot_out: SnapshotOutOpt = deploymod.DEFAULT_SNAPSHOT_PATH,
     state_path: StateOpt = DEFAULT_STATE,
+    degraded_cooldown: Annotated[
+        str,
+        typer.Option(
+            "--degraded-cooldown",
+            help="Quiet time after the last Degraded signal before one scale-back step, e.g. 10m",
+        ),
+    ] = format_duration(DEFAULT_DEGRADED_COOLDOWN),
     log_level: Annotated[str, typer.Option(help="Python log level")] = "INFO",
 ) -> None:
     logging.basicConfig(
@@ -426,6 +438,7 @@ def controller(
         providers_for(service, live=True),
         snapshot_out=snapshot_out,
         interval=duration_or_exit(interval, "--interval"),
+        degraded_cooldown=duration_or_exit(degraded_cooldown, "--degraded-cooldown"),
     )
     try:
         asyncio.run(daemon.run(grpc_listen))

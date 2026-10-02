@@ -11,12 +11,74 @@ source = "file://./snapshot.json"
 cert = "/etc/multihull/tls/tls.crt"
 key = "/etc/multihull/tls/tls.key"
 
+[log]
+format = "json"
+filter = "info,router_proxy=debug"
+
+# Every duration below is in seconds (floats allowed). Each table is optional;
+# the values shown are the defaults. Unknown keys are rejected on load.
+
 [timeouts]
+# Phase timeouts per upstream attempt.
 connect = 2
 first_byte = 30
 idle = 60
 total = 600
 
-[log]
-format = "json"
-filter = "info,router_proxy=debug"
+[circuit]
+# Consecutive Transient or Fatal outcomes that open an endpoint circuit.
+consecutive_failures = 5
+# Or: error ratio above this over ratio_window once min_samples were seen.
+error_ratio = 0.5
+ratio_window = 10
+min_samples = 20
+# Open duration is base_backoff * 2^n capped at max_backoff, plus up to
+# jitter_fraction of that value.
+base_backoff = 5
+max_backoff = 300
+jitter_fraction = 0.25
+# Half-open admission ramps 1 request, 5 percent, 25 percent, 100 percent across this window.
+half_open_ramp = 30
+# Successes in half-open that close the circuit again.
+probe_successes_to_close = 3
+# A provider circuit opens when this share of its endpoint circuits is open.
+provider_open_ratio = 0.5
+# Panic threshold: with more than this share of endpoints open, route to all of them.
+panic_threshold = 0.5
+
+[admission]
+# Longest a request waits for a free slot before 429 with Retry-After.
+max_wait = 5
+# Waiting requests per route before new arrivals get 429 immediately.
+bound = 1024
+
+[pressure]
+# Queue waits above max_wait * queue_wait_fraction count as pressure.
+queue_wait_fraction = 0.5
+# Pressure sustained for this long sends one Degraded(QueueDepth) to the controller.
+sustained = 2
+# Pressure forgotten after this long without samples.
+stale_after = 10
+# TTFT p95 above baseline * factor over ttft_window samples sends Degraded(TtftP95).
+ttft_degrade_factor = 2.0
+ttft_window = 50
+ttft_baseline_smoothing = 0.2
+
+[probe]
+# Active health probe per endpoint: GET <endpoint url><health_path from the snapshot, default /health>.
+enabled = true
+# Seconds between probe rounds; each round is jittered by +-jitter_fraction.
+interval = 5
+timeout = 2
+jitter_fraction = 0.2
+# Consecutive failures that eject the endpoint (open its circuit) and consecutive
+# successes that restore it. RunPod 204 (warming) and 429 count as neither.
+failure_threshold = 3
+success_threshold = 3
+
+[retry]
+# Retries allowed per route: budget_ratio of the requests seen in budget_window,
+# plus min_retries_per_second * budget_window as a floor for low traffic.
+budget_ratio = 0.2
+budget_window = 10
+min_retries_per_second = 10

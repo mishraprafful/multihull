@@ -67,8 +67,10 @@ def test_snapshot_shape(
         "ready_replicas",
         "max_concurrency",
         "inject_headers",
+        "health_path",
     }
     assert first["id"] == "llama-8b/gke-prod"
+    assert first["health_path"] == "/health"
     assert first["health"] == "healthy" and first["ready_replicas"] == 2
     assert first["max_concurrency"] == 32 and first["priority"] == 1
     assert endpoints[1]["region"] == "eu"

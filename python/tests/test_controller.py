@@ -23,8 +23,24 @@ def seed_state(spec: ServiceSpec, state: LocalState, status: str = "Pending") ->
         state.put(StateRecord(spec.name, target.provider, ref.to_json(), None, "h", status))
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> float:
+        self.now += seconds
+        return self.now
+
+
 def make_controller(
-    spec: ServiceSpec, tmp_path: Path, providers: dict[str, FakeProvider]
+    spec: ServiceSpec,
+    tmp_path: Path,
+    providers: dict[str, FakeProvider],
+    clock: FakeClock | None = None,
+    cooldown: timedelta = timedelta(minutes=10),
 ) -> tuple[Controller, LocalState]:
     state = LocalState(tmp_path / "state.db")
     seed_state(spec, state)
@@ -34,8 +50,16 @@ def make_controller(
         providers,
         snapshot_out=tmp_path / "snapshot.json",
         interval=timedelta(seconds=60),
+        degraded_cooldown=cooldown,
+        clock=clock or FakeClock(),
     )
     return controller, state
+
+
+class RefusingProvider(FakeProvider):
+    def scale(self, ref: Ref, min: int, max: int) -> None:
+        self.scaled.append((ref.provider, min, max))
+        raise ValueError("exactly one container")
 
 
 def test_reconcile_tick_updates_state_and_versions(llama_spec: ServiceSpec, tmp_path: Path) -> None:
@@ -84,6 +108,112 @@ def test_degraded_scales_healthy_targets_up_to_max(llama_spec: ServiceSpec, tmp_
 
         unknown = pb.Degraded(service="other", provider="gke-prod")
         assert await controller.handle_degraded(unknown) == []
+
+    asyncio.run(scenario())
+
+
+def test_scale_back_steps_down_once_per_cooldown_after_degraded_clears(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    clock = FakeClock()
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    controller, _ = make_controller(
+        llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=60)
+    )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        signal = pb.Degraded(service="llama-8b", provider="gke-prod")
+        await controller.handle_degraded(signal)
+        clock.advance(30)
+        await controller.handle_degraded(signal)
+        assert controller.min_replicas == {"gke-prod": 2, "modal-main": 3, "runpod-eu": 3}
+        assert controller.pre_degraded_min == {"modal-main": 1, "runpod-eu": 1}
+
+        clock.advance(59)
+        assert await controller.scale_back_once() == []
+        clock.advance(1)
+        first = await controller.scale_back_once()
+        assert {(a.provider, a.previous_min, a.new_min) for a in first} == {
+            ("modal-main", 3, 2),
+            ("runpod-eu", 3, 2),
+        }
+        assert providers["modal-main"].scaled[-1] == ("modal-main", 2, 8)
+        assert await controller.scale_back_once() == []
+
+        clock.advance(30)
+        await controller.handle_degraded(signal)
+        assert controller.min_replicas["modal-main"] == 3
+        clock.advance(59)
+        assert await controller.scale_back_once() == []
+        clock.advance(1)
+        assert len(await controller.scale_back_once()) == 2
+        clock.advance(60)
+        last = await controller.scale_back_once()
+        assert {(a.provider, a.new_min) for a in last} == {("modal-main", 1), ("runpod-eu", 1)}
+        assert controller.pre_degraded_min == {}
+        assert controller.min_replicas == {"gke-prod": 2, "modal-main": 1, "runpod-eu": 1}
+        clock.advance(600)
+        assert await controller.scale_back_once() == []
+        assert len(controller.scale_back_actions) == 6
+
+    asyncio.run(scenario())
+
+
+def test_scale_back_keeps_the_warm_provider_floor(llama_raw: dict, tmp_path: Path) -> None:
+    llama_raw["reliability"]["fallbackScaleToZero"] = True
+    llama_raw["reliability"]["minWarmProviders"] = 3
+    llama_raw["targets"][2]["replicas"] = {"min": 0, "max": 2}
+    spec = ServiceSpec.model_validate(llama_raw)
+    clock = FakeClock()
+    providers = {
+        "gke-prod": FakeProvider(),
+        "modal-main": FakeProvider(),
+        "runpod-eu": FakeProvider(phases=["Pending"]),
+    }
+    controller, _ = make_controller(
+        spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=10)
+    )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        await controller.handle_degraded(pb.Degraded(service="llama-8b", provider="modal-main"))
+        assert controller.min_replicas == {"gke-prod": 3, "modal-main": 1, "runpod-eu": 1}
+        clock.advance(10)
+        actions = await controller.scale_back_once()
+        assert [(a.provider, a.new_min) for a in actions] == [("gke-prod", 2)]
+        assert controller.min_replicas["runpod-eu"] == 1
+        assert controller.pre_degraded_min == {}
+        assert providers["runpod-eu"].scaled == [("runpod-eu", 1, 2)]
+
+    asyncio.run(scenario())
+
+
+def test_refused_scale_still_records_intent_and_scales_back(
+    llama_spec: ServiceSpec, tmp_path: Path, caplog
+) -> None:
+    clock = FakeClock()
+    providers = {t.provider: RefusingProvider() for t in llama_spec.targets}
+    controller, _ = make_controller(
+        llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=5)
+    )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        with caplog.at_level("INFO", logger="multihull.controller"):
+            await controller.handle_degraded(pb.Degraded(service="llama-8b", provider=""))
+            assert controller.min_replicas == {"gke-prod": 3, "modal-main": 2, "runpod-eu": 2}
+            clock.advance(5)
+            actions = await controller.scale_back_once()
+        assert {(a.provider, a.new_min) for a in actions} == {
+            ("gke-prod", 2),
+            ("modal-main", 1),
+            ("runpod-eu", 1),
+        }
+        assert controller.pre_degraded_min == {}
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(m.startswith("scale gke-prod to min=3 failed") for m in messages)
+        assert any(m.startswith("scale back gke-prod to min=2 failed") for m in messages)
 
     asyncio.run(scenario())
 

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Mapping
+import time
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -22,8 +23,10 @@ log = logging.getLogger("multihull.controller")
 
 DEFAULT_INTERVAL = timedelta(seconds=30)
 DEFAULT_HEALTH_INTERVAL = timedelta(minutes=5)
+DEFAULT_DEGRADED_COOLDOWN = timedelta(minutes=10)
 DEFAULT_GRPC_LISTEN = "0.0.0.0:7700"
 SCALABLE_PHASES = {"Ready"}
+SCALE_BACK_TICKS_PER_COOLDOWN = 10
 
 
 @dataclass
@@ -51,6 +54,8 @@ class Controller:
         snapshot_out: str | Path | None = DEFAULT_SNAPSHOT_PATH,
         interval: timedelta = DEFAULT_INTERVAL,
         health_interval: timedelta = DEFAULT_HEALTH_INTERVAL,
+        degraded_cooldown: timedelta = DEFAULT_DEGRADED_COOLDOWN,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.spec = spec
         self.state = state
@@ -58,15 +63,21 @@ class Controller:
         self.snapshot_out = Path(snapshot_out) if snapshot_out else None
         self.interval = interval
         self.health_interval = health_interval
+        self.degraded_cooldown = degraded_cooldown
+        self.clock = clock
         self.version = 0
         self.snapshot: dict[str, Any] | None = None
         self.observed: dict[str, Observed] = {}
         self.min_replicas: dict[str, int] = {
             t.provider: spec.effective_replicas(t).min for t in spec.targets
         }
+        self.pre_degraded_min: dict[str, int] = {}
+        self.last_degraded_at: float | None = None
+        self.last_scale_back_at: float | None = None
         self.subscribers: set[asyncio.Queue[pb.Snapshot | None]] = set()
         self.acked_versions: dict[str, int] = {}
         self.scale_actions: list[ScaleAction] = []
+        self.scale_back_actions: list[ScaleAction] = []
 
     def reconcile_sync(self) -> bool:
         results = engine.refresh(self.spec.name, self.state, self.providers)
@@ -158,6 +169,7 @@ class Controller:
             log.warning("degraded signal for unknown service %s ignored", service)
             return []
         log.warning("degraded %s/%s: %s", service, provider, reason)
+        self.last_degraded_at = self.clock()
         records = {r.provider: r for r in self.state.list(service)}
         floor = 0 if self.spec.reliability.fallbackScaleToZero else 1
         actions: list[ScaleAction] = []
@@ -177,25 +189,26 @@ class Controller:
             new_min = max(floor, min(current + 1, replicas.max))
             if new_min == current:
                 continue
+            self.pre_degraded_min.setdefault(target.provider, current)
             try:
                 self.providers[target.provider].scale(
                     Ref.from_json(record.ref), new_min, replicas.max
                 )
             except Exception as exc:
                 log.error("scale %s to min=%d failed: %s", target.provider, new_min, exc)
-                continue
+            else:
+                log.info(
+                    "scaled %s min replicas %d -> %d (max %d) after degraded %s",
+                    target.provider,
+                    current,
+                    new_min,
+                    replicas.max,
+                    provider,
+                )
             self.min_replicas[target.provider] = new_min
             action = ScaleAction(target.provider, current, new_min, replicas.max)
             actions.append(action)
             self.scale_actions.append(action)
-            log.info(
-                "scaled %s min replicas %d -> %d (max %d) after degraded %s",
-                target.provider,
-                current,
-                new_min,
-                replicas.max,
-                provider,
-            )
         return actions
 
     async def handle_degraded(self, message: pb.Degraded) -> list[ScaleAction]:
@@ -203,6 +216,75 @@ class Controller:
         return await asyncio.to_thread(
             self.handle_degraded_sync, message.service, message.provider, reason
         )
+
+    def warm_targets(self) -> int:
+        return sum(1 for minimum in self.min_replicas.values() if minimum >= 1)
+
+    def scale_back_due(self, now: float) -> bool:
+        if not self.pre_degraded_min or self.last_degraded_at is None:
+            return False
+        cooldown = self.degraded_cooldown.total_seconds()
+        last_step = self.last_scale_back_at
+        quiet_since = (
+            self.last_degraded_at if last_step is None else max(last_step, self.last_degraded_at)
+        )
+        return now - quiet_since >= cooldown
+
+    def scale_back_sync(self, now: float | None = None) -> list[ScaleAction]:
+        now = self.clock() if now is None else now
+        if not self.scale_back_due(now):
+            return []
+        records = {r.provider: r for r in self.state.list(self.spec.name)}
+        actions: list[ScaleAction] = []
+        for target in self.spec.targets:
+            remembered = self.pre_degraded_min.get(target.provider)
+            if remembered is None:
+                continue
+            replicas = self.spec.effective_replicas(target)
+            floor = max(remembered, replicas.min)
+            current = self.min_replicas[target.provider]
+            if current <= floor:
+                del self.pre_degraded_min[target.provider]
+                continue
+            new_min = current - 1
+            if new_min < 1 and self.warm_targets() - 1 < self.spec.reliability.minWarmProviders:
+                log.info(
+                    "keeping %s at min=%d: reliability.minWarmProviders is %d",
+                    target.provider,
+                    current,
+                    self.spec.reliability.minWarmProviders,
+                )
+                del self.pre_degraded_min[target.provider]
+                continue
+            record = records.get(target.provider)
+            if record is None:
+                continue
+            try:
+                self.providers[target.provider].scale(
+                    Ref.from_json(record.ref), new_min, replicas.max
+                )
+            except Exception as exc:
+                log.error("scale back %s to min=%d failed: %s", target.provider, new_min, exc)
+            else:
+                log.info(
+                    "scaled back %s min replicas %d -> %d (max %d): no degraded for %s",
+                    target.provider,
+                    current,
+                    new_min,
+                    replicas.max,
+                    self.degraded_cooldown,
+                )
+            self.min_replicas[target.provider] = new_min
+            if new_min <= floor:
+                del self.pre_degraded_min[target.provider]
+            action = ScaleAction(target.provider, current, new_min, replicas.max)
+            actions.append(action)
+            self.scale_back_actions.append(action)
+        self.last_scale_back_at = now
+        return actions
+
+    async def scale_back_once(self) -> list[ScaleAction]:
+        return await asyncio.to_thread(self.scale_back_sync)
 
     async def reconcile_loop(self) -> None:
         while True:
@@ -220,6 +302,17 @@ class Controller:
                 log.exception("health check failed")
             await asyncio.sleep(self.health_interval.total_seconds())
 
+    def scale_back_tick(self) -> float:
+        return max(1.0, self.degraded_cooldown.total_seconds() / SCALE_BACK_TICKS_PER_COOLDOWN)
+
+    async def scale_back_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.scale_back_tick())
+            try:
+                await self.scale_back_once()
+            except Exception:
+                log.exception("scale back failed")
+
     async def serve(self, listen: str) -> tuple[grpc.aio.Server, int]:
         server = grpc.aio.server()
         pb_grpc.add_DiscoveryServicer_to_server(DiscoveryServicer(self), server)
@@ -233,6 +326,7 @@ class Controller:
         loops = [
             asyncio.create_task(self.reconcile_loop()),
             asyncio.create_task(self.health_loop()),
+            asyncio.create_task(self.scale_back_loop()),
         ]
         try:
             await server.wait_for_termination()

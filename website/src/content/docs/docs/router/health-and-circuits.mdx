@@ -21,7 +21,19 @@ Capacity outcomes feed the limiter and admission queue, never the circuit. A col
 
 ## Probes
 
-Active probes every 5 s with jitter, provider-specific (RunPod 204 means warming). An optional 60 s warm check (`max_tokens=1`) yields `Degraded`, not `Down`. Passive: ring of the last 100 outcomes plus 10 s buckets.
+The router probes every endpoint's health path (`container.health.path` from the spec, carried in the snapshot, default `/health`) every `probe.interval` (5 s, 20 percent jitter) with `probe.timeout` (2 s). 2xx is a success; 5xx, 4xx, connect failures and timeouts are failures; RunPod 204 (warming) and 429 count as neither. Probe outcomes feed the endpoint circuit, which stays the only selection gate: each failure counts as `Transient`, the third consecutive failure opens the circuit (`router_failovers_total{reason="probe"}` increments) and later failures re-open it whenever traffic or the half-open ramp closed it, so a probe-down endpoint only sees the half-open trickle between probe rounds. Successes count as half-open probe successes, and three consecutive successes close the circuit outright. Probe state is on `/debug/endpoints` and `router_probe_total{endpoint,outcome}`. The optional warm check (`max_tokens=1`) is not implemented yet. Passive: ring of the last 100 outcomes plus 10 s buckets.
+
+## Mid-stream failures
+
+Once the first byte of a response has reached the client, the router never retries. If the upstream drops an SSE stream (route protocol `sse` or `Content-Type: text/event-stream`) the router appends one final event
+
+```
+data: {"error":{"type":"upstream_disconnected","retryable":true,"provider":"<name>","reason":"disconnect"}}
+
+data: [DONE]
+```
+
+and ends the response cleanly, so SDKs can retry with the same `Idempotency-Key`. HTTP/2 non-SSE streams end with an `x-hull-error: upstream_disconnected` trailer; HTTP/1 non-SSE streams are closed. Each case counts as `router_requests_total{outcome="upstream_disconnected"}` and feeds the endpoint circuit as `Transient`.
 
 ## Circuit per endpoint
 
@@ -45,4 +57,8 @@ If more than 50% of all endpoints are open, the router routes to all of them rat
 
 ## Cold-start masking
 
-Gradient2 adaptive concurrency per endpoint on time-to-first-token. A bounded per-service admission queue waits up to 5 s, then returns 429 with `Retry-After`. Sustained pressure lowers the spillover threshold and sends a pre-warm signal to the controller, which raises warm replicas on healthy targets.
+Gradient2 adaptive concurrency per endpoint on time-to-first-token. A bounded per-service admission queue waits up to 5 s, then returns 429 with `Retry-After`. Sustained pressure lowers the spillover threshold and sends a pre-warm signal to the controller, which raises warm replicas on healthy targets by one per `Degraded`. Once no `Degraded` has arrived for `--degraded-cooldown` (default 10 m) the controller lowers that floor one step per cooldown until the pre-degraded minimum is back, never below the spec minimum and never below `reliability.minWarmProviders` warm targets.
+
+## Tuning
+
+Every threshold above is a `router.toml` table: `[timeouts]`, `[circuit]`, `[admission]`, `[pressure]`, `[probe]` and `[retry]`, documented with their defaults in `router/router.example.toml` and mirrored under `router.tuning` in the Helm chart. Durations are seconds, unknown keys and out-of-range values are rejected on start, and `/debug/config` on the admin listener shows the effective values.

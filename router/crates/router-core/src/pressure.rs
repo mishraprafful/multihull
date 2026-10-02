@@ -4,14 +4,40 @@ use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct PressureConfig {
     pub queue_wait_fraction: f64,
+    #[serde(with = "crate::serde_secs")]
     pub sustained: Duration,
+    #[serde(with = "crate::serde_secs")]
     pub stale_after: Duration,
     pub ttft_degrade_factor: f64,
     pub ttft_window: usize,
     pub ttft_baseline_smoothing: f64,
+}
+
+impl PressureConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(self.queue_wait_fraction > 0.0 && self.queue_wait_fraction <= 1.0) {
+            return Err("pressure.queue_wait_fraction must be in (0, 1]".into());
+        }
+        if self.sustained.is_zero() {
+            return Err("pressure.sustained must be positive".into());
+        }
+        if self.stale_after <= self.sustained {
+            return Err("pressure.stale_after must exceed pressure.sustained".into());
+        }
+        if self.ttft_degrade_factor <= 1.0 {
+            return Err("pressure.ttft_degrade_factor must exceed 1".into());
+        }
+        if self.ttft_window < 2 {
+            return Err("pressure.ttft_window must be at least 2".into());
+        }
+        if !(self.ttft_baseline_smoothing > 0.0 && self.ttft_baseline_smoothing <= 1.0) {
+            return Err("pressure.ttft_baseline_smoothing must be in (0, 1]".into());
+        }
+        Ok(())
+    }
 }
 
 impl Default for PressureConfig {
@@ -227,6 +253,31 @@ mod tests {
         assert_eq!(reported[0].provider, "modal");
         assert_eq!(reported[0].reason, DegradedReason::TtftP95);
         assert_eq!(reported[0].observed_concurrency, 6);
+    }
+
+    #[test]
+    fn config_validation_names_the_offending_key() {
+        assert!(PressureConfig::default().validate().is_ok());
+        let stale = PressureConfig {
+            stale_after: secs(1),
+            ..PressureConfig::default()
+        };
+        assert!(stale.validate().unwrap_err().contains("stale_after"));
+        let factor = PressureConfig {
+            ttft_degrade_factor: 1.0,
+            ..PressureConfig::default()
+        };
+        assert!(factor
+            .validate()
+            .unwrap_err()
+            .contains("ttft_degrade_factor"));
+        let window = PressureConfig {
+            ttft_window: 1,
+            ..PressureConfig::default()
+        };
+        assert!(window.validate().unwrap_err().contains("ttft_window"));
+        let parsed: PressureConfig = serde_json::from_str(r#"{"sustained":0.5}"#).unwrap();
+        assert_eq!(parsed.sustained, millis(500));
     }
 
     #[test]

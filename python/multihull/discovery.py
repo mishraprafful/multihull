@@ -130,6 +130,7 @@ def endpoint_entry(
         "ready_replicas": observed.ready_replicas if observed else 0,
         "max_concurrency": spec.scaling.concurrency or 0,
         "inject_headers": dict(endpoint.inject_headers),
+        "health_path": spec.container.health.path,
     }
 
 
@@ -201,6 +202,7 @@ def router_endpoint(endpoint: pb.Endpoint) -> dict[str, Any]:
         "ready_replicas": endpoint.ready_replicas,
         "max_concurrency": endpoint.max_concurrency,
         "inject_headers": dict(endpoint.inject_headers),
+        "health_path": endpoint.health_path,
     }
 
 
@@ -261,6 +263,7 @@ def endpoint_to_proto(entry: dict[str, Any]) -> pb.Endpoint:
         ready_replicas=entry["ready_replicas"],
         max_concurrency=entry["max_concurrency"],
         inject_headers=dict(entry["inject_headers"]),
+        health_path=entry.get("health_path", ""),
     )
 
 
