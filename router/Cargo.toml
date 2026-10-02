@@ -51,7 +51,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"]
 metrics = "0.24"
 thiserror = "2"
 anyhow = "1"
-rand = "0.9"
+rand = "0.10"
 notify = "8"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
 clap = { version = "4", features = ["derive"] }
