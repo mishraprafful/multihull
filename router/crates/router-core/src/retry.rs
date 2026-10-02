@@ -126,6 +126,7 @@ pub struct RetryContext {
     pub bytes_committed: bool,
     pub body_buffered: bool,
     pub idempotent: bool,
+    pub server_error: bool,
     pub retries_used: u32,
     pub max_retries: u32,
 }
@@ -146,7 +147,8 @@ pub fn decide(
     if !ctx.body_buffered {
         return RetryDecision::Stop(StopReason::BodyNotBuffered);
     }
-    if !outcome.is_retryable_before_first_byte() {
+    let retryable_server_error = outcome == Outcome::Fatal && ctx.server_error;
+    if !(outcome.is_retryable_before_first_byte() || retryable_server_error) {
         return RetryDecision::Stop(StopReason::NotRetryable);
     }
     let connect_failure = matches!(error, Some(AttemptError::Connect));
@@ -173,6 +175,7 @@ mod tests {
             bytes_committed: false,
             body_buffered: true,
             idempotent: false,
+            server_error: false,
             retries_used: 0,
             max_retries: 2,
         }
@@ -250,6 +253,35 @@ mod tests {
             decide(Outcome::Transient, None, &idempotent, &mut budget, now()),
             RetryDecision::Retry { .. }
         ));
+    }
+
+    #[test]
+    fn fatal_server_error_retries_only_when_idempotent() {
+        let mut budget = RetryBudget::default();
+        let server_error = RetryContext {
+            server_error: true,
+            ..ctx()
+        };
+        assert_eq!(
+            decide(Outcome::Fatal, None, &server_error, &mut budget, now()),
+            RetryDecision::Stop(StopReason::NotIdempotent)
+        );
+        let idempotent = RetryContext {
+            idempotent: true,
+            ..server_error
+        };
+        assert!(matches!(
+            decide(Outcome::Fatal, None, &idempotent, &mut budget, now()),
+            RetryDecision::Retry { .. }
+        ));
+        let client_error = RetryContext {
+            idempotent: true,
+            ..ctx()
+        };
+        assert_eq!(
+            decide(Outcome::Fatal, None, &client_error, &mut budget, now()),
+            RetryDecision::Stop(StopReason::NotRetryable)
+        );
     }
 
     #[test]

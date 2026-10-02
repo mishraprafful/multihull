@@ -165,7 +165,8 @@ async fn proxy(
         )
         .increment(1);
 
-        if outcome == Outcome::Success || outcome == Outcome::Fatal {
+        let server_error = matches!(attempt.status(), Some(500..=599));
+        if outcome == Outcome::Success || (outcome == Outcome::Fatal && !server_error) {
             let response = attempt
                 .response
                 .expect("status present for success or fatal");
@@ -179,6 +180,7 @@ async fn proxy(
             bytes_committed: false,
             body_buffered: true,
             idempotent,
+            server_error,
             retries_used: attempts.saturating_sub(1),
             max_retries: route.failover.max_retries,
         };

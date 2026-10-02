@@ -102,6 +102,60 @@ async fn capacity_status_retries_and_non_idempotent_transient_does_not() {
 }
 
 #[tokio::test]
+async fn server_error_with_body_retries_only_for_idempotent_requests() {
+    let broken = MockUpstream::start(
+        MockUpstreamConfig::default()
+            .with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+            .with_body("{\"error\":{\"type\":\"internal\"}}"),
+    )
+    .await
+    .unwrap();
+    let healthy = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let proxy = start_proxy(vec![
+        endpoint("broken", "p1", broken.url(), 1),
+        endpoint("healthy", "p2", healthy.url(), 2),
+    ])
+    .await;
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+
+    let request = Request::post(format!("http://{}/v1/x", proxy.addr))
+        .body(Full::new(Bytes::from_static(b"{}")))
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 500);
+    assert_eq!(response.headers().get("x-hull-endpoint").unwrap(), "broken");
+    assert_eq!(response.headers().get("x-hull-attempts").unwrap(), "1");
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&body[..], b"{\"error\":{\"type\":\"internal\"}}");
+
+    let request = Request::post(format!("http://{}/v1/x", proxy.addr))
+        .header("idempotency-key", "req-1")
+        .body(Full::new(Bytes::from_static(b"{}")))
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers().get("x-hull-endpoint").unwrap(),
+        "healthy"
+    );
+    assert_eq!(response.headers().get("x-hull-attempts").unwrap(), "2");
+
+    let request = Request::get(format!("http://{}/v1/x", proxy.addr))
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers().get("x-hull-endpoint").unwrap(),
+        "healthy"
+    );
+    assert_eq!(broken.request_count(), 3);
+    assert_eq!(healthy.request_count(), 2);
+}
+
+#[tokio::test]
 async fn streams_sse_chunks_through() {
     let upstream = MockUpstream::start(MockUpstreamConfig::default().with_sse_chunks(vec![
         "one".into(),
