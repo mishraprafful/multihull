@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 router-core = { workspace = true }
 router-proxy = { workspace = true }
+router-obs = { workspace = true }
 arc-swap = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
@@ -18,4 +19,5 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 http-body-util = { workspace = true }
+metrics = { workspace = true }
 tower = { workspace = true }

@@ -36,7 +36,8 @@ async fn main() -> anyhow::Result<()> {
         },
         default_filter: config.log.filter.clone(),
     });
-    router_obs::metrics::describe_all();
+    let metrics_handle = router_obs::install_prometheus()
+        .map_err(|error| anyhow::anyhow!("installing prometheus recorder: {error}"))?;
     let tls = match &config.tls {
         Some(tls) => Some(Arc::new(
             TlsReloader::new(tls.cert.clone(), tls.key.clone())
@@ -51,8 +52,9 @@ async fn main() -> anyhow::Result<()> {
 
     let proxy_state = ProxyState::try_new(config.proxy_config(), snapshot.clone())
         .context("building upstream tls client")?;
-    let admin_state =
-        router_admin::AdminState::new(snapshot.clone()).with_proxy(proxy_state.clone());
+    let admin_state = router_admin::AdminState::new(snapshot.clone())
+        .with_proxy(proxy_state.clone())
+        .with_metrics(metrics_handle);
 
     let (degraded_tx, degraded_rx) = tokio::sync::mpsc::channel(64);
     let source_task = {
