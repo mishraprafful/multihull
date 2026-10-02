@@ -1,5 +1,5 @@
 use http::header::HeaderName;
-use http::{header, HeaderValue, Method, Request, Response};
+use http::{header, HeaderValue, Method, Request, Response, Version};
 use http_body_util::{BodyExt, Limited};
 use hyper::body::Incoming;
 use router_auth::ApiKey;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::attempt::{response_headers, send, UpstreamResponse};
-use crate::body::{ProxyBody, TimedBody};
+use crate::body::{ProxyBody, StreamContext, Termination, TimedBody};
 use crate::error::ProxyError;
 use crate::runtime::{OutstandingGuard, ThreadRng};
 use crate::state::ProxyState;
@@ -44,6 +44,7 @@ async fn proxy(
     let started = Instant::now();
     let deadline = started + state.config.timeouts.total;
     let (parts, body) = request.into_parts();
+    let client_version = parts.version;
     let host = parts
         .headers
         .get(header::HOST)
@@ -149,9 +150,14 @@ async fn proxy(
             return match fallback.take() {
                 Some((response, endpoint, guard)) => {
                     let extra = finish_session(&state, &route, session.take(), Some(&endpoint));
-                    Ok(forward(
-                        response, &state, &endpoint, attempts, deadline, guard, extra,
-                    ))
+                    let plan = Forward {
+                        state: &state,
+                        route: &route,
+                        client_version,
+                        attempts,
+                        deadline,
+                    };
+                    Ok(forward(response, &plan, &endpoint, guard, extra))
                 }
                 None => {
                     finish_session(&state, &route, session.take(), None);
@@ -198,9 +204,14 @@ async fn proxy(
                 .response
                 .expect("status present for success or fatal");
             let extra = finish_session(&state, &route, session.take(), Some(&endpoint));
-            return Ok(forward(
-                response, &state, &endpoint, attempts, deadline, guard, extra,
-            ));
+            let plan = Forward {
+                state: &state,
+                route: &route,
+                client_version,
+                attempts,
+                deadline,
+            };
+            return Ok(forward(response, &plan, &endpoint, guard, extra));
         }
 
         let retry_ctx = RetryContext {
@@ -243,9 +254,14 @@ async fn proxy(
                 return match attempt.response {
                     Some(response) => {
                         let extra = finish_session(&state, &route, session.take(), Some(&endpoint));
-                        Ok(forward(
-                            response, &state, &endpoint, attempts, deadline, guard, extra,
-                        ))
+                        let plan = Forward {
+                            state: &state,
+                            route: &route,
+                            client_version,
+                            attempts,
+                            deadline,
+                        };
+                        Ok(forward(response, &plan, &endpoint, guard, extra))
                     }
                     None => {
                         finish_session(&state, &route, session.take(), None);
@@ -578,12 +594,18 @@ fn rng_index(rng: &mut ThreadRng, len: usize) -> usize {
     router_core::rng::Rng::next_below(rng, len)
 }
 
-fn forward(
-    upstream: UpstreamResponse,
-    state: &ProxyState,
-    endpoint: &Endpoint,
+struct Forward<'a> {
+    state: &'a Arc<ProxyState>,
+    route: &'a Route,
+    client_version: Version,
     attempts: u32,
     deadline: Instant,
+}
+
+fn forward(
+    upstream: UpstreamResponse,
+    forward: &Forward<'_>,
+    endpoint: &Endpoint,
     guard: OutstandingGuard,
     extra: Vec<(HeaderName, HeaderValue)>,
 ) -> Response<ProxyBody> {
@@ -591,14 +613,27 @@ fn forward(
         response,
         first_frame,
     } = upstream;
+    let attempts = forward.attempts;
     let (parts, body) = response.into_parts();
+    let content_type = parts
+        .headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    let termination =
+        Termination::for_response(forward.route, content_type, forward.client_version);
     let timed = TimedBody::new(
         body,
         first_frame,
-        state.config.timeouts.idle,
-        deadline,
+        forward.state.config.timeouts.idle,
+        forward.deadline,
         guard,
-    );
+    )
+    .with_context(StreamContext {
+        state: forward.state.clone(),
+        route_id: forward.route.id.clone(),
+        endpoint: endpoint.clone(),
+        termination,
+    });
     let mut builder = Response::builder()
         .status(parts.status)
         .version(parts.version);

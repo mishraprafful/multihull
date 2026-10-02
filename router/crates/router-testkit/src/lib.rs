@@ -23,6 +23,8 @@ pub struct MockUpstreamConfig {
     pub sse_chunks: Vec<String>,
     pub sse_chunk_interval: Duration,
     pub sse_first_chunk_delay: Duration,
+    pub sse_drop_after_chunks: usize,
+    pub stream_content_type: String,
     pub drop_connection: bool,
     pub etag: Option<String>,
 }
@@ -36,6 +38,8 @@ impl Default for MockUpstreamConfig {
             sse_chunks: Vec::new(),
             sse_chunk_interval: Duration::from_millis(5),
             sse_first_chunk_delay: Duration::ZERO,
+            sse_drop_after_chunks: 0,
+            stream_content_type: "text/event-stream".to_string(),
             drop_connection: false,
             etag: None,
         }
@@ -70,6 +74,16 @@ impl MockUpstreamConfig {
 
     pub fn dropping_connections(mut self) -> Self {
         self.drop_connection = true;
+        self
+    }
+
+    pub fn dropping_sse_after(mut self, chunks: usize) -> Self {
+        self.sse_drop_after_chunks = chunks;
+        self
+    }
+
+    pub fn with_stream_content_type(mut self, content_type: impl Into<String>) -> Self {
+        self.stream_content_type = content_type.into();
         self
     }
 
@@ -199,7 +213,7 @@ async fn respond(
     req: Request<Incoming>,
     config: MockUpstreamConfig,
     (counter, not_modified): (Arc<AtomicUsize>, Arc<AtomicUsize>),
-) -> Result<Response<BoxBody<Bytes, Infallible>>, Infallible> {
+) -> Result<Response<BoxBody<Bytes, std::io::Error>>, Infallible> {
     counter.fetch_add(1, Ordering::SeqCst);
     if config.ttft_delay > Duration::ZERO {
         tokio::time::sleep(config.ttft_delay).await;
@@ -215,13 +229,19 @@ async fn respond(
             let response = Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
                 .header("etag", etag)
-                .body(Full::new(Bytes::new()).boxed())
+                .body(
+                    Full::new(Bytes::new())
+                        .map_err(|never| match never {})
+                        .boxed(),
+                )
                 .expect("valid response");
             return Ok(response);
         }
     }
     if config.sse_chunks.is_empty() {
-        let body = Full::new(config.body).boxed();
+        let body = Full::new(config.body)
+            .map_err(|never| match never {})
+            .boxed();
         let mut builder = Response::builder()
             .status(config.status)
             .header("content-type", "application/json");
@@ -231,13 +251,23 @@ async fn respond(
         let response = builder.body(body).expect("valid response");
         return Ok(response);
     }
-    let (tx, rx) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(16);
+    let (tx, rx) = mpsc::channel::<Result<Frame<Bytes>, std::io::Error>>(16);
     let interval = config.sse_chunk_interval;
     let first_chunk_delay = config.sse_first_chunk_delay;
+    let drop_after = config.sse_drop_after_chunks;
     let chunks = config.sse_chunks.clone();
     tokio::spawn(async move {
         tokio::time::sleep(first_chunk_delay).await;
-        for chunk in chunks {
+        for (sent, chunk) in chunks.into_iter().enumerate() {
+            if drop_after > 0 && sent == drop_after {
+                let _ = tx
+                    .send(Err(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionAborted,
+                        "mock upstream dropped the stream",
+                    )))
+                    .await;
+                return;
+            }
             let frame = Frame::data(Bytes::from(format!("data: {chunk}\n\n")));
             if tx.send(Ok(frame)).await.is_err() {
                 return;
@@ -251,7 +281,7 @@ async fn respond(
     let body = StreamBody::new(ReceiverStream::new(rx)).boxed();
     let response = Response::builder()
         .status(config.status)
-        .header("content-type", "text/event-stream")
+        .header("content-type", config.stream_content_type.as_str())
         .body(body)
         .expect("valid response");
     Ok(response)
