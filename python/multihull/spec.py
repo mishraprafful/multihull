@@ -230,5 +230,5 @@ def dump(spec: ServiceSpec) -> dict[str, Any]:
 def json_schema() -> dict[str, Any]:
     schema = ServiceSpec.model_json_schema(by_alias=True)
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
-    schema["$id"] = "https://multihull.dev/schema/v1/multihull.schema.json"
+    schema["$id"] = "https://multihull.pages.dev/schema/v1/multihull.schema.json"
     return schema

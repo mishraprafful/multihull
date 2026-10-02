@@ -21,6 +21,12 @@ gh secret set CLOUDFLARE_API_TOKEN      # prompts, value not echoed
 gh secret set CLOUDFLARE_ACCOUNT_ID
 ```
 
+Cloudflare keeps preview deployments forever, so `.github/workflows/docs-preview-sweep.yml` runs daily and deletes every preview deployment older than 24 hours. Production deployments are never touched. A preview link in a PR comment therefore works for about a day; push again to get a fresh one. To sweep by hand, or to preview what a sweep would delete:
+
+```sh
+gh workflow run docs-preview-sweep.yml -f older_than_hours=24 -f dry_run=true
+```
+
 The API token needs the account permission "Cloudflare Pages: Edit". Cloudflare's Git integration is not used, because the build needs `uv` and Python.
 
 Custom domain: attach it to the `multihull` project in the Cloudflare dashboard, then set `SITE_URL` to it in the workflow's `env`. Without `SITE_URL`, `astro.config.mjs` uses `https://multihull.pages.dev`.
