@@ -10,14 +10,11 @@ Rules for entries
 
 ## Current state
 
-- Merged: architecture plan (PR 1), name placeholders (PR 2), v0.1 scaffold (PR 3).
-- Open draft PRs, each from its own branch and verified locally before push:
-  - PR 5 `ci/github-actions`: CI for python, router, website, chart; release skeleton gated by `release` environment and `PUBLISH_ENABLED`; dependabot; PR template; generated spec-schema and CLI reference pages; README. CI green on the PR itself.
-  - PR 6 `feat/python-deploy-controller`: `hull deploy/destroy/logs/controller`, gRPC `Discovery.Stream` server, checked-in grpc stubs, `multihull.sdk.Service`. 81 tests.
-  - PR 7 `feat/router-sticky-tls`: sticky routing, provider circuits and panic threshold in selection, adaptive concurrency with admission queue and `Degraded` signalling, `router-tls` crate, HTTP snapshot source. 151 tests.
-- PR 4 was closed and its branch deleted: its commits carried `Claude-Session` trailers. PR 5 is the same tree with clean messages.
-- PRs 6 and 7 have no CI runs until PR 5 merges, since the workflows live there.
-- Not yet exercised against any real provider. Modal log access in PR 6 uses private SDK internals.
+- Merged to `main`: architecture plan (PR 1), name placeholders (PR 2), v0.1 scaffold (PR 3), CI and generated reference docs (PR 5), Python deploy, destroy, logs, controller and SDK (PR 6), router sticky routing, provider circuits, adaptive concurrency, TLS and HTTP snapshot source (PR 7).
+- CI runs on every PR with path-filtered jobs for python, router, website and chart. Release workflow exists; publishing is gated by the `release` environment and the `PUBLISH_ENABLED` repository variable.
+- Test counts at merge: Python 81, Rust 151.
+- PR 4 was closed unmerged: its commits carried `Claude-Session` trailers. PR 5 is the same tree with clean messages.
+- Not yet exercised against any real provider. Modal log access uses private SDK internals.
 - Name placeholders `multihull` 0.0.1 not yet published to PyPI or crates.io; needs the owner's tokens.
 - GitHub repo `mishraprafful/multihull` is private.
 
@@ -42,15 +39,18 @@ Rules for entries
 
 ## Next steps
 
-1. Merge PR 5 first so PRs 6 and 7 get CI, then merge 6 and 7 (no file overlap expected: python/ vs router/ vs .github and website).
-2. First live run: `hull doctor` then `hull deploy --apply` against a real Kubernetes cluster and Modal using the llama-8b example, with the router in front from a file snapshot. Record findings here.
-3. Expose admission, pressure and circuit tuning in `router.toml` and the Helm ConfigMap.
-4. Replace Modal private-API log access with a supported path or drop `hull logs -p modal` until one exists.
-5. Scale-back after `Degraded` clears in the controller.
-6. RunPod, Baseten and Replicate `apply` implementations (currently render-only) with the translator conformance suite from the plan.
+1. First live run: `hull doctor` then `hull deploy --apply` against a real Kubernetes cluster and Modal using the llama-8b example, with the router in front from a file snapshot. Record findings here.
+2. Expose admission, pressure and circuit tuning in `router.toml` and the Helm ConfigMap.
+3. Replace Modal private-API log access with a supported path or drop `hull logs -p modal` until one exists.
+4. Scale-back after `Degraded` clears in the controller.
+5. RunPod, Baseten and Replicate `apply` implementations (currently render-only) with the translator conformance suite from the plan.
+6. End-to-end test: Python controller gRPC stream to the Rust router, including `Degraded` round trip.
 7. Owner publishes the 0.0.1 placeholders.
 
 ## Session log
+
+### 2026-10-02
+- Merged PR 5, then merged `main` into PRs 6 and 7 with merge commits (no rebase, no force push) so CI ran on them. Both green; merged 6 and 7.
 
 ### 2026-10-01 (evening)
 - Merged PR 3. Ran three worktree agents in parallel; opened PRs 5, 6, 7.
