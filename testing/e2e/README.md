@@ -35,7 +35,7 @@ Create `tests/test_NN_name.py` (modules run in numeric order), request `deployme
 
 - The router has no active health prober. The "health returns 503" row is driven by the controller's probe: the docker provider reports `Failed`, the snapshot marks the endpoint `down`, and the router stops picking it. No circuit opens and `router_failovers_total` does not move.
 - A mid-stream disconnect reaches the client as a dropped stream (`APIConnectionError` after the delivered chunks), not as an `upstream_disconnected` SSE event. The retry with the same `Idempotency-Key` succeeds only once the fault is cleared; the mock keeps no idempotency table.
-- Recovery closes the circuit after three half-open successes, so the 30 s admission ramp is rarely observed.
+- Recovery closes the circuit after three half-open successes, so the 30 s admission ramp is rarely observed. The recovery row is `xfail(strict=False)`: on Docker Desktop a stopped container's port can keep accepting and hang, the router sees `Capacity` instead of `Transient`, and the circuit never opens before the controller marks the endpoint down.
 - The "flapping every 2 s" row is not implemented.
 - Only the `Degraded` signal and the logged scale attempt are asserted; the docker provider refuses `min > 1`.
 - Mock `__stats` count health probes too, so scenarios assert on router metrics and response headers rather than on `by_status`.
