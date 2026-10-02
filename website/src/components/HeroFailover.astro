@@ -30,11 +30,11 @@
 
     <g class="hf-legend t2">
       <circle class="c-ok" cx="708" cy="21" r="4" />
-      <text class="t2" x="718" y="21">closed</text>
+      <text class="t2" x="718" y="21">serving</text>
       <circle class="c-down" cx="782" cy="21" r="4" />
-      <text class="t2" x="792" y="21">open</text>
+      <text class="t2" x="792" y="21">down</text>
       <circle class="c-warn" cx="846" cy="21" r="4" />
-      <text class="t2" x="856" y="21">half-open</text>
+      <text class="t2" x="856" y="21">recovering</text>
     </g>
 
     <rect class="hf-url" x="40" y="189" width="190" height="32" rx="16" />
@@ -62,9 +62,9 @@
         <rect class="hf-arm arm1" x="0" y="-1.25" width="14" height="2.5" />
       </g>
       <rect class="hf-pill pill1" x="290" y="-9" width="72" height="18" rx="9" />
-      <text class="t2 pill-text c-ok ph-ad" x="326" y="0.5">closed</text>
-      <text class="t2 pill-text c-down ph-b" x="326" y="0.5">open</text>
-      <text class="t2 pill-text c-warn ph-c" x="326" y="0.5">half-open</text>
+      <text class="t2 pill-text c-ok ph-ad" x="326" y="0.5">serving</text>
+      <text class="t2 pill-text c-down ph-b" x="326" y="0.5">down</text>
+      <text class="t2 pill-text c-warn ph-c" x="326" y="0.5">recovering</text>
       <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
         <g class="hf-health health1">
           <g class="hf-scroll"><use href="#hf-wave" /></g>
@@ -84,7 +84,7 @@
         <rect class="hf-arm" x="0" y="-1.25" width="14" height="2.5" />
       </g>
       <rect class="hf-pill" x="290" y="-9" width="72" height="18" rx="9" />
-      <text class="t2 pill-text c-ok" x="326" y="0.5">closed</text>
+      <text class="t2 pill-text c-ok" x="326" y="0.5">serving</text>
       <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
         <g class="hf-health health2">
           <g class="hf-scroll"><use href="#hf-wave" /></g>
@@ -104,7 +104,7 @@
         <rect class="hf-arm" x="0" y="-1.25" width="14" height="2.5" />
       </g>
       <rect class="hf-pill" x="290" y="-9" width="72" height="18" rx="9" />
-      <text class="t2 pill-text c-ok" x="326" y="0.5">closed</text>
+      <text class="t2 pill-text c-ok" x="326" y="0.5">serving</text>
       <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
         <g class="hf-health">
           <g class="hf-scroll"><use href="#hf-wave" /></g>
@@ -127,7 +127,7 @@
     <circle class="hf-probe q2" r="3.5" />
     <circle class="hf-probe q3" r="3.5" />
 
-    <text class="t2 caption ph-a" x="40" y="392">All circuits closed. Requests flow to priority 1.</text>
+    <text class="t2 caption ph-a" x="40" y="392">All hulls serving. Requests flow to priority 1.</text>
     <text class="t2 caption ph-b" x="40" y="392">Kubernetes circuit opens. Next request lands on Modal. Callers see zero errors.</text>
     <text class="t2 caption ph-c" x="40" y="392">Half-open: admit 1 request, then 5%, 25%, 100%.</text>
     <text class="t2 caption ph-d" x="40" y="392">Recovered. Traffic returns to priority 1.</text>
