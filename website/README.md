@@ -21,10 +21,10 @@ gh secret set CLOUDFLARE_API_TOKEN      # prompts, value not echoed
 gh secret set CLOUDFLARE_ACCOUNT_ID
 ```
 
-When a pull request closes, merged or not, the workflow deletes every preview deployment for its branch and updates the comment. Production is never touched. To clean up a branch by hand, run the Docs workflow with the `cleanup_branch` input:
+Cloudflare keeps preview deployments forever, so `.github/workflows/docs-preview-sweep.yml` runs daily and deletes every preview deployment older than 24 hours. Production deployments are never touched. A preview link in a PR comment therefore works for about a day; push again to get a fresh one. To sweep by hand, or to preview what a sweep would delete:
 
 ```sh
-gh workflow run docs.yml -f cleanup_branch=<branch>
+gh workflow run docs-preview-sweep.yml -f older_than_hours=24 -f dry_run=true
 ```
 
 The API token needs the account permission "Cloudflare Pages: Edit". Cloudflare's Git integration is not used, because the build needs `uv` and Python.
