@@ -194,6 +194,175 @@
   color: var(--sl-color-gray-2);
 }
 
+header.header {
+  border-bottom-color: var(--sl-color-hairline);
+}
+
+.site-title {
+  color: var(--sl-color-white);
+  font-size: var(--sl-text-lg);
+  letter-spacing: -0.01em;
+}
+
+.sidebar-content {
+  font-size: var(--sl-text-sm);
+}
+
+.sidebar-content .large {
+  font-size: var(--sl-text-sm);
+  font-weight: 500;
+}
+
+.sidebar-content summary .large {
+  font-size: var(--sl-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sl-color-gray-3);
+}
+
+.sidebar-content .top-level > li + li {
+  margin-top: 1.25rem;
+}
+
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+  font-weight: 500;
+  color: var(--sl-color-text-accent);
+  background-color: color-mix(in srgb, var(--sl-color-accent) 14%, transparent);
+}
+
+.right-sidebar {
+  border-inline-start-color: var(--sl-color-hairline);
+}
+
+.sl-markdown-content a:not(:where(.not-content *)),
+.mh-closing a {
+  color: var(--sl-color-text-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  transition: text-decoration-color 120ms ease;
+}
+
+.sl-markdown-content a:hover:not(:where(.not-content *)),
+.mh-closing a:hover {
+  color: var(--sl-color-text-accent);
+  text-decoration-color: currentColor;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 3px;
+  border-radius: 0.125rem;
+}
+
+.sl-link-button {
+  border-radius: var(--mh-radius);
+  font-weight: 500;
+}
+
+.sl-link-button.primary {
+  color: var(--mh-navy);
+}
+
+.sl-link-button.minimal {
+  color: var(--sl-color-gray-1);
+  text-underline-offset: 0.25em;
+}
+
+.sl-link-button.minimal:hover {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.expressive-code {
+  --ec-brdRad: var(--mh-radius);
+  --ec-brdCol: var(--sl-color-hairline);
+  --ec-codeBg: var(--mh-surface);
+  --ec-codePadInl: 1.25rem;
+  --ec-codePadBlk: 1rem;
+  --ec-frm-edBg: var(--mh-surface);
+  --ec-frm-edTabBarBg: var(--mh-surface);
+  --ec-frm-edTabBarBrdCol: var(--sl-color-hairline);
+  --ec-frm-edTabBarBrdBtmCol: var(--sl-color-hairline);
+  --ec-frm-edActTabBg: var(--mh-surface);
+  --ec-frm-edActTabBrdCol: transparent;
+  --ec-frm-edActTabIndTopCol: transparent;
+  --ec-frm-edActTabIndBtmCol: transparent;
+  --ec-frm-edActTabFg: var(--sl-color-gray-3);
+  --ec-frm-trmBg: var(--mh-surface);
+  --ec-frm-trmTtbBg: var(--mh-surface);
+  --ec-frm-trmTtbFg: var(--sl-color-gray-3);
+  --ec-frm-trmTtbBrdBtmCol: var(--sl-color-hairline);
+  --ec-frm-trmTtbDotsFg: var(--sl-color-gray-4);
+  --ec-frm-trmTtbDotsOpa: 0.6;
+  --ec-frm-frameBoxShdCssVal: none;
+}
+
+.expressive-code .frame.has-title:not(.is-terminal) .title {
+  font-size: var(--sl-text-xs);
+  letter-spacing: 0.01em;
+}
+
+.sl-markdown-content pre:not(:where(.expressive-code *)) {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: var(--mh-radius);
+  background: var(--mh-surface);
+}
+
+.sl-markdown-content code:not(:where(.not-content *, pre *)) {
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+}
+
+.sl-markdown-content table {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--sl-text-sm);
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--sl-color-hairline);
+}
+
+.sl-markdown-content :is(th, td):first-child:not(:where(.not-content *)) {
+  padding-inline-start: 0;
+}
+
+.sl-markdown-content :is(th, td):last-child:not(:where(.not-content *)) {
+  padding-inline-end: 0;
+}
+
+.sl-markdown-content th:not(:where(.not-content *)) {
+  font-size: var(--sl-text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+
+.sl-markdown-content td:not(:where(.not-content *)) {
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-xs);
+  white-space: nowrap;
+}
+
+.sl-markdown-content td:not(:where(.not-content *)) code {
+  background: transparent;
+  padding: 0;
+}
+
+.sl-markdown-content .starlight-aside {
+  border-radius: 0 var(--mh-radius) var(--mh-radius) 0;
+}
+
+.pagination-links a {
+  box-shadow: none;
+  border-color: var(--sl-color-hairline);
+}
+
 .mh-pill {
   display: inline-flex;
   align-items: center;
