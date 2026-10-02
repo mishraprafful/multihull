@@ -37,7 +37,10 @@ pub fn hash_key(key: &[u8]) -> KeyHash {
 }
 
 pub fn truncated_key_hash(key: &[u8]) -> String {
-    let hash = hash_key(key);
+    truncate_hash(&hash_key(key))
+}
+
+pub fn truncate_hash(hash: &KeyHash) -> String {
     hash[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -116,6 +119,13 @@ struct Pin {
     seq: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PinEntry {
+    pub key_hash: KeyHash,
+    pub endpoint: EndpointId,
+    pub age: Duration,
+}
+
 #[derive(Clone, Debug)]
 pub struct PinTable {
     capacity: usize,
@@ -142,6 +152,25 @@ impl PinTable {
 
     pub fn is_empty(&self) -> bool {
         self.pins.is_empty()
+    }
+
+    pub fn ttl(&self) -> Duration {
+        self.ttl
+    }
+
+    pub fn entries(&self, now: Duration) -> Vec<PinEntry> {
+        let mut entries: Vec<PinEntry> = self
+            .pins
+            .iter()
+            .filter(|(_, pin)| now.saturating_sub(pin.last_seen) <= self.ttl)
+            .map(|(key, pin)| PinEntry {
+                key_hash: *key,
+                endpoint: pin.endpoint.clone(),
+                age: now.saturating_sub(pin.last_seen),
+            })
+            .collect();
+        entries.sort_by(|a, b| a.age.cmp(&b.age).then_with(|| a.key_hash.cmp(&b.key_hash)));
+        entries
     }
 
     pub fn get(&mut self, key: &KeyHash, now: Duration) -> Option<EndpointId> {
@@ -333,6 +362,21 @@ mod tests {
         assert_eq!(table.len(), 1);
         assert_eq!(table.expire(Duration::from_secs(30)), 1);
         assert!(table.is_empty());
+    }
+
+    #[test]
+    fn entries_skip_expired_pins_and_report_age() {
+        let mut table = PinTable::new(8, Duration::from_secs(10));
+        table.pin(hash_key(b"old"), "a".into(), Duration::from_secs(0));
+        table.pin(hash_key(b"new"), "b".into(), Duration::from_secs(5));
+        let entries = table.entries(Duration::from_secs(8));
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].endpoint, "b");
+        assert_eq!(entries[0].age, Duration::from_secs(3));
+        let entries = table.entries(Duration::from_secs(12));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].endpoint, "b");
+        assert_eq!(table.ttl(), Duration::from_secs(10));
     }
 
     #[test]

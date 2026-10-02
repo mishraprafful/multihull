@@ -104,7 +104,8 @@ fn ewma(previous: Option<f64>, sample: f64, window: u32) -> f64 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct AdmissionQueue {
     pub max_wait: Duration,
     pub bound: usize,

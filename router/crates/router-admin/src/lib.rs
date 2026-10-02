@@ -5,7 +5,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use router_core::snapshot::Health;
+use router_core::sticky::truncate_hash;
 use router_core::Snapshot;
+use router_proxy::ProxyState;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,11 +16,20 @@ use tokio::net::TcpListener;
 #[derive(Clone)]
 pub struct AdminState {
     pub snapshot: Arc<ArcSwap<Snapshot>>,
+    pub proxy: Option<Arc<ProxyState>>,
 }
 
 impl AdminState {
     pub fn new(snapshot: Arc<ArcSwap<Snapshot>>) -> Self {
-        Self { snapshot }
+        Self {
+            snapshot,
+            proxy: None,
+        }
+    }
+
+    pub fn with_proxy(mut self, proxy: Arc<ProxyState>) -> Self {
+        self.proxy = Some(proxy);
+        self
     }
 }
 
@@ -27,6 +38,7 @@ pub fn router(state: AdminState) -> Router {
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics))
         .route("/debug/endpoints", get(debug_endpoints))
+        .route("/debug/sessions", get(debug_sessions))
         .with_state(state)
 }
 
@@ -60,6 +72,11 @@ pub struct EndpointView {
     pub health: Health,
     pub ready_replicas: u32,
     pub max_concurrency: u32,
+    pub circuit: Option<&'static str>,
+    pub provider_circuit_open: Option<bool>,
+    pub outstanding: Option<u32>,
+    pub concurrency_limit: Option<u32>,
+    pub ewma_ttft_seconds: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -68,22 +85,30 @@ pub struct EndpointsView {
     pub endpoints: Vec<EndpointView>,
 }
 
-pub fn endpoints_view(snapshot: &Snapshot) -> EndpointsView {
+pub fn endpoints_view(snapshot: &Snapshot, proxy: Option<&ProxyState>) -> EndpointsView {
     EndpointsView {
         snapshot_version: snapshot.version,
         endpoints: snapshot
             .endpoints()
-            .map(|(route, endpoint)| EndpointView {
-                route: route.id.clone(),
-                id: endpoint.id.clone(),
-                provider: endpoint.provider.clone(),
-                url: endpoint.url.clone(),
-                region: endpoint.region.clone(),
-                priority: endpoint.priority,
-                weight: endpoint.weight,
-                health: endpoint.health,
-                ready_replicas: endpoint.ready_replicas,
-                max_concurrency: endpoint.max_concurrency,
+            .map(|(route, endpoint)| {
+                let status = proxy.and_then(|proxy| proxy.runtime.status(endpoint));
+                EndpointView {
+                    route: route.id.clone(),
+                    id: endpoint.id.clone(),
+                    provider: endpoint.provider.clone(),
+                    url: endpoint.url.clone(),
+                    region: endpoint.region.clone(),
+                    priority: endpoint.priority,
+                    weight: endpoint.weight,
+                    health: endpoint.health,
+                    ready_replicas: endpoint.ready_replicas,
+                    max_concurrency: endpoint.max_concurrency,
+                    circuit: status.as_ref().map(|s| s.circuit),
+                    provider_circuit_open: status.as_ref().map(|s| s.provider_circuit_open),
+                    outstanding: status.as_ref().map(|s| s.outstanding),
+                    concurrency_limit: status.as_ref().map(|s| s.concurrency_limit),
+                    ewma_ttft_seconds: status.as_ref().and_then(|s| s.ewma_ttft_secs),
+                }
             })
             .collect(),
     }
@@ -91,7 +116,50 @@ pub fn endpoints_view(snapshot: &Snapshot) -> EndpointsView {
 
 async fn debug_endpoints(State(state): State<AdminState>) -> Json<EndpointsView> {
     let snapshot = state.snapshot.load();
-    Json(endpoints_view(&snapshot))
+    Json(endpoints_view(&snapshot, state.proxy.as_deref()))
+}
+
+#[derive(Serialize)]
+pub struct SessionView {
+    pub route: String,
+    pub key_hash: String,
+    pub owner: String,
+    pub age_seconds: f64,
+}
+
+#[derive(Serialize)]
+pub struct SessionsView {
+    pub active: usize,
+    pub sessions: Vec<SessionView>,
+}
+
+pub fn sessions_view(proxy: Option<&ProxyState>) -> SessionsView {
+    let Some(proxy) = proxy else {
+        return SessionsView {
+            active: 0,
+            sessions: Vec::new(),
+        };
+    };
+    proxy.runtime.expire_sessions();
+    let sessions: Vec<SessionView> = proxy
+        .runtime
+        .sessions()
+        .into_iter()
+        .map(|entry| SessionView {
+            route: entry.route,
+            key_hash: truncate_hash(&entry.pin.key_hash),
+            owner: entry.pin.endpoint,
+            age_seconds: entry.pin.age.as_secs_f64(),
+        })
+        .collect();
+    SessionsView {
+        active: sessions.len(),
+        sessions,
+    }
+}
+
+async fn debug_sessions(State(state): State<AdminState>) -> Json<SessionsView> {
+    Json(sessions_view(state.proxy.as_deref()))
 }
 
 #[cfg(test)]
@@ -166,6 +234,96 @@ mod tests {
         assert_eq!(parsed["endpoints"].as_array().unwrap().len(), 2);
         assert_eq!(parsed["endpoints"][1]["health"], "degraded");
         assert_eq!(parsed["endpoints"][0]["provider"], "gke-prod");
+    }
+
+    #[tokio::test]
+    async fn debug_endpoints_exposes_circuit_state_from_the_proxy_runtime() {
+        let (_, body) = get_body("/debug/endpoints").await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(parsed["endpoints"][0]["circuit"].is_null());
+
+        let base = state();
+        let snapshot = base.snapshot.clone();
+        let proxy = ProxyState::new(router_proxy::ProxyConfig::default(), snapshot.clone());
+        let loaded = snapshot.load();
+        let gke = loaded.find_endpoint("gke").unwrap();
+        let modal = loaded.find_endpoint("modal").unwrap();
+        let mut rng = router_core::rng::ZeroRng;
+        proxy.runtime.endpoint(modal);
+        for _ in 0..5 {
+            proxy.runtime.record_attempt(
+                gke,
+                router_core::Outcome::Transient,
+                Some(502),
+                proxy.runtime.now(),
+                &mut rng,
+            );
+        }
+        let response = router(base.with_proxy(proxy))
+            .oneshot(
+                Request::builder()
+                    .uri("/debug/endpoints")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["endpoints"][0]["circuit"], "open");
+        assert_eq!(parsed["endpoints"][0]["provider_circuit_open"], true);
+        assert_eq!(parsed["endpoints"][0]["outstanding"], 0);
+        assert_eq!(parsed["endpoints"][1]["circuit"], "closed");
+        assert_eq!(parsed["endpoints"][1]["provider_circuit_open"], false);
+        assert!(
+            parsed["endpoints"][1]["concurrency_limit"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
+    }
+
+    #[tokio::test]
+    async fn debug_sessions_lists_pins_with_truncated_hashes() {
+        let (_, body) = get_body("/debug/sessions").await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["active"], 0);
+
+        let snapshot = Arc::new(ArcSwap::from_pointee(Snapshot::default()));
+        let proxy = ProxyState::new(router_proxy::ProxyConfig::default(), snapshot.clone());
+        let sticky = router_core::snapshot::Sticky {
+            key: "header:X-Session-Id".into(),
+            ttl_seconds: 60,
+            ..Default::default()
+        };
+        let key = b"session-1";
+        proxy.runtime.pin(
+            "llama",
+            &sticky,
+            router_core::sticky::hash_key(key),
+            "gke".into(),
+        );
+        let state = AdminState::new(snapshot).with_proxy(proxy);
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/debug/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["active"], 1);
+        assert_eq!(parsed["sessions"][0]["route"], "llama");
+        assert_eq!(parsed["sessions"][0]["owner"], "gke");
+        assert_eq!(
+            parsed["sessions"][0]["key_hash"],
+            router_core::sticky::truncated_key_hash(key)
+        );
+        assert!(parsed["sessions"][0]["age_seconds"].as_f64().unwrap() < 5.0);
+        assert!(!body.contains("session-1"));
     }
 
     #[tokio::test]

@@ -2,21 +2,19 @@ use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, Uri};
 use http_body_util::Full;
 use hyper::body::Incoming;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::Client;
 use router_core::outcome::AttemptError;
 use router_core::snapshot::Endpoint;
+use router_tls::TlsError;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
-pub type UpstreamClient = Client<HttpConnector, Full<Bytes>>;
+pub type UpstreamClient = router_tls::HttpsClient;
 
-pub fn build_client(connect_timeout: Duration) -> UpstreamClient {
-    let mut connector = HttpConnector::new();
-    connector.set_connect_timeout(Some(connect_timeout));
-    connector.set_nodelay(true);
-    Client::builder(hyper_util::rt::TokioExecutor::new())
-        .pool_idle_timeout(Duration::from_secs(90))
-        .build(connector)
+pub fn build_client(
+    connect_timeout: Duration,
+    upstream_ca: Option<&Path>,
+) -> Result<UpstreamClient, TlsError> {
+    router_tls::https_client(connect_timeout, upstream_ca)
 }
 
 pub struct AttemptOutcome {

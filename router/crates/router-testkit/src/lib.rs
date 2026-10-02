@@ -1,10 +1,10 @@
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
 use hyper::body::{Frame, Incoming};
-use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
+use tokio_rustls::TlsAcceptor;
 use tokio_stream::wrappers::ReceiverStream;
 
 #[derive(Clone, Debug)]
@@ -22,6 +23,7 @@ pub struct MockUpstreamConfig {
     pub sse_chunks: Vec<String>,
     pub sse_chunk_interval: Duration,
     pub drop_connection: bool,
+    pub etag: Option<String>,
 }
 
 impl Default for MockUpstreamConfig {
@@ -33,6 +35,7 @@ impl Default for MockUpstreamConfig {
             sse_chunks: Vec::new(),
             sse_chunk_interval: Duration::from_millis(5),
             drop_connection: false,
+            etag: None,
         }
     }
 }
@@ -62,23 +65,50 @@ impl MockUpstreamConfig {
         self.drop_connection = true;
         self
     }
+
+    pub fn with_etag(mut self, etag: impl Into<String>) -> Self {
+        self.etag = Some(etag.into());
+        self
+    }
 }
 
 pub struct MockUpstream {
     addr: SocketAddr,
+    tls: bool,
     requests: Arc<AtomicUsize>,
+    not_modified: Arc<AtomicUsize>,
     config_tx: watch::Sender<MockUpstreamConfig>,
     shutdown_tx: Option<watch::Sender<bool>>,
 }
 
 impl MockUpstream {
     pub async fn start(config: MockUpstreamConfig) -> std::io::Result<Self> {
+        Self::start_with_tls(config, None).await
+    }
+
+    pub async fn start_tls(
+        config: MockUpstreamConfig,
+        cert_pem: &[u8],
+        key_pem: &[u8],
+    ) -> std::io::Result<Self> {
+        let server_config = router_tls::server_config_from_pem(cert_pem, key_pem)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+        Self::start_with_tls(config, Some(TlsAcceptor::from(Arc::new(server_config)))).await
+    }
+
+    async fn start_with_tls(
+        config: MockUpstreamConfig,
+        acceptor: Option<TlsAcceptor>,
+    ) -> std::io::Result<Self> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let addr = listener.local_addr()?;
         let requests = Arc::new(AtomicUsize::new(0));
+        let not_modified = Arc::new(AtomicUsize::new(0));
         let (config_tx, config_rx) = watch::channel(config);
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
         let counter = requests.clone();
+        let not_modified_counter = not_modified.clone();
+        let tls = acceptor.is_some();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -91,15 +121,27 @@ impl MockUpstream {
                         }
                         let config_rx = config_rx.clone();
                         let counter = counter.clone();
+                        let not_modified_counter = not_modified_counter.clone();
+                        let acceptor = acceptor.clone();
                         tokio::spawn(async move {
                             let service = service_fn(move |req| {
                                 let config = config_rx.borrow().clone();
-                                let counter = counter.clone();
-                                async move { respond(req, config, counter).await }
+                                let counters = (counter.clone(), not_modified_counter.clone());
+                                async move { respond(req, config, counters).await }
                             });
-                            let _ = http1::Builder::new()
-                                .serve_connection(TokioIo::new(stream), service)
-                                .await;
+                            match acceptor {
+                                Some(acceptor) => {
+                                    let Ok(stream) = acceptor.accept(stream).await else { return };
+                                    let _ = auto::Builder::new(TokioExecutor::new())
+                                        .serve_connection(TokioIo::new(stream), service)
+                                        .await;
+                                }
+                                None => {
+                                    let _ = auto::Builder::new(TokioExecutor::new())
+                                        .serve_connection(TokioIo::new(stream), service)
+                                        .await;
+                                }
+                            }
                         });
                     }
                     _ = shutdown_rx.changed() => break,
@@ -108,10 +150,16 @@ impl MockUpstream {
         });
         Ok(Self {
             addr,
+            tls,
             requests,
+            not_modified,
             config_tx,
             shutdown_tx: Some(shutdown_tx),
         })
+    }
+
+    pub fn not_modified_count(&self) -> usize {
+        self.not_modified.load(Ordering::SeqCst)
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -119,7 +167,8 @@ impl MockUpstream {
     }
 
     pub fn url(&self) -> String {
-        format!("http://{}", self.addr)
+        let scheme = if self.tls { "https" } else { "http" };
+        format!("{scheme}://localhost:{}", self.addr.port())
     }
 
     pub fn request_count(&self) -> usize {
@@ -140,21 +189,39 @@ impl Drop for MockUpstream {
 }
 
 async fn respond(
-    _req: Request<Incoming>,
+    req: Request<Incoming>,
     config: MockUpstreamConfig,
-    counter: Arc<AtomicUsize>,
+    (counter, not_modified): (Arc<AtomicUsize>, Arc<AtomicUsize>),
 ) -> Result<Response<BoxBody<Bytes, Infallible>>, Infallible> {
     counter.fetch_add(1, Ordering::SeqCst);
     if config.ttft_delay > Duration::ZERO {
         tokio::time::sleep(config.ttft_delay).await;
     }
+    if let Some(etag) = &config.etag {
+        let matches = req
+            .headers()
+            .get("if-none-match")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value == etag);
+        if matches {
+            not_modified.fetch_add(1, Ordering::SeqCst);
+            let response = Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header("etag", etag)
+                .body(Full::new(Bytes::new()).boxed())
+                .expect("valid response");
+            return Ok(response);
+        }
+    }
     if config.sse_chunks.is_empty() {
         let body = Full::new(config.body).boxed();
-        let response = Response::builder()
+        let mut builder = Response::builder()
             .status(config.status)
-            .header("content-type", "application/json")
-            .body(body)
-            .expect("valid response");
+            .header("content-type", "application/json");
+        if let Some(etag) = &config.etag {
+            builder = builder.header("etag", etag);
+        }
+        let response = builder.body(body).expect("valid response");
         return Ok(response);
     }
     let (tx, rx) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(16);

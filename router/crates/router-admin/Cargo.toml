@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 router-core = { workspace = true }
+router-proxy = { workspace = true }
 arc-swap = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }

@@ -1,9 +1,11 @@
 use crate::outcome::Outcome;
 use crate::rng::Rng;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::Duration;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CircuitConfig {
     pub consecutive_failures: u32,
     pub error_ratio: f64,

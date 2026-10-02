@@ -1,73 +1,18 @@
+mod common;
+
 use arc_swap::ArcSwap;
 use bytes::Bytes;
+use common::{closed_port_url, endpoint, start_proxy, start_proxy_with};
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::Request;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
-use router_core::snapshot::{Endpoint, Health, Route, Snapshot};
+use router_core::snapshot::{Route, Snapshot};
 use router_proxy::{ProxyConfig, ProxyState};
 use router_testkit::{MockUpstream, MockUpstreamConfig};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
-
-struct RunningProxy {
-    addr: SocketAddr,
-    _stop: oneshot::Sender<()>,
-}
-
-async fn start_proxy(endpoints: Vec<Endpoint>) -> RunningProxy {
-    start_proxy_with(Snapshot {
-        version: 1,
-        at: None,
-        routes: vec![Route {
-            id: "llama".into(),
-            endpoints,
-            ..Default::default()
-        }],
-    })
-    .await
-}
-
-async fn start_proxy_with(snapshot: Snapshot) -> RunningProxy {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let config = ProxyConfig {
-        listen: addr,
-        ..ProxyConfig::default()
-    };
-    let state = ProxyState::new(config, Arc::new(ArcSwap::from_pointee(snapshot)));
-    let (stop, stopped) = oneshot::channel();
-    tokio::spawn(async move {
-        router_proxy::serve(state, listener, async {
-            let _ = stopped.await;
-        })
-        .await
-        .unwrap();
-    });
-    RunningProxy { addr, _stop: stop }
-}
-
-fn endpoint(id: &str, provider: &str, url: String, priority: u32) -> Endpoint {
-    Endpoint {
-        id: id.into(),
-        provider: provider.into(),
-        url,
-        priority,
-        health: Health::Ready,
-        max_concurrency: 8,
-        ..Default::default()
-    }
-}
-
-async fn closed_port_url() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    format!("http://{addr}")
-}
 
 #[tokio::test]
 async fn proxies_request_to_healthy_upstream() {
