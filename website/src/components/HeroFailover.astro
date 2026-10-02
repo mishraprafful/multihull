@@ -7,7 +7,7 @@
   >
     <title id="hf-title">Per-request failover across three providers</title>
     <desc id="hf-desc">
-      Requests from one URL on the left reach the router at the forward crossbeam and flow to the Kubernetes hull.
+      Requests from one URL on the left reach the router ahead of the hulls, cross the forward beam and flow to the Kubernetes hull.
       Its circuit opens, the status pill turns coral and the stream moves to Modal within one beat while the error counter stays at zero.
       Kubernetes recovers through an amber half-open ramp and traffic returns.
     </desc>
@@ -47,7 +47,8 @@
     <text class="t2 counter ph-a" x="188" y="248.5">failovers 0</text>
     <text class="t2 counter ph-bcd" x="188" y="248.5">failovers 1</text>
 
-    <line class="hf-lane" x1="230" y1="205" x2="444" y2="205" />
+    <line class="hf-lane" x1="230" y1="205" x2="364" y2="205" />
+    <line class="hf-beam" x1="416" y1="205" x2="470" y2="205" />
 
     <g class="hf-hull" transform="translate(440 100)">
       <use class="hf-hull-body" href="#hf-hull-shape" />
@@ -114,9 +115,9 @@
     <line class="hf-beam" x1="470" y1="100" x2="470" y2="310" />
     <line class="hf-beam" x1="690" y1="100" x2="690" y2="310" />
 
-    <rect class="hf-router" x="444" y="179" width="52" height="52" rx="10" />
-    <use class="hf-router-mark" href="#hf-mark" transform="translate(458 184) scale(0.375)" />
-    <text class="t2 router-label" x="470" y="220">router</text>
+    <rect class="hf-router" x="364" y="179" width="52" height="52" rx="10" />
+    <use class="hf-router-mark" href="#hf-mark" transform="translate(378 184) scale(0.375)" />
+    <text class="t2 router-label" x="390" y="220">router</text>
 
     <circle class="hf-pkt p1" r="4.5" />
     <circle class="hf-pkt p2" r="4.5" />
@@ -330,7 +331,7 @@
 
   .p1 { transform: translate(290px, 205px); }
   .p2 { transform: translate(360px, 205px); }
-  .p3 { transform: translate(425px, 205px); }
+  .p3 { transform: translate(443px, 205px); }
   .p4 { transform: translate(504px, 205px); }
 
   @media (max-width: 40rem) {
