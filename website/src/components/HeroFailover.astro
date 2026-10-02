@@ -61,10 +61,18 @@
         <circle cx="16" cy="0" r="2.5" />
         <rect class="hf-arm arm1" x="0" y="-1.25" width="14" height="2.5" />
       </g>
-      <rect class="hf-pill pill1" x="290" y="-9" width="72" height="18" rx="9" />
-      <text class="t2 pill-text c-ok ph-ad" x="326" y="0.5">serving</text>
-      <text class="t2 pill-text c-down ph-b" x="326" y="0.5">down</text>
-      <text class="t2 pill-text c-warn ph-c" x="326" y="0.5">recovering</text>
+      <rect class="hf-pill" x="290" y="-9" width="72" height="18" rx="9" />
+      <text class="t2 pill-text c-ok" x="326" y="0.5">serving</text>
+      <g class="ph-b">
+        <rect class="hf-pill-mask" x="290" y="-9" width="72" height="18" rx="9" />
+        <rect class="hf-pill pill-down" x="290" y="-9" width="72" height="18" rx="9" />
+        <text class="t2 pill-text c-down" x="326" y="0.5">down</text>
+      </g>
+      <g class="ph-c">
+        <rect class="hf-pill-mask" x="290" y="-9" width="72" height="18" rx="9" />
+        <rect class="hf-pill pill-warn" x="290" y="-9" width="72" height="18" rx="9" />
+        <text class="t2 pill-text c-warn" x="326" y="0.5">recovering</text>
+      </g>
       <g transform="translate(0 34)" clip-path="url(#hf-spark-clip)">
         <g class="hf-health health1">
           <g class="hf-scroll"><use href="#hf-wave" /></g>
@@ -304,9 +312,19 @@
     opacity: 1;
   }
 
-  .pill1 {
+  .hf-pill-mask {
+    fill: var(--mh-surface);
+    stroke: none;
+  }
+
+  .pill-down {
     fill: color-mix(in srgb, var(--mh-down) 14%, transparent);
     stroke: var(--mh-down);
+  }
+
+  .pill-warn {
+    fill: color-mix(in srgb, var(--mh-warn) 14%, transparent);
+    stroke: var(--mh-warn);
   }
 
   .breaker1 {
@@ -361,7 +379,6 @@
     .q2 { animation-delay: -11s; }
     .q3 { animation-delay: -10.2s; }
 
-    .pill1 { animation: hf-pill1 12s linear infinite; }
     .breaker1 { animation: hf-breaker1 12s linear infinite; }
     .arm1 { animation: hf-arm1 12s ease-out infinite; }
     .health1 { animation: hf-health1 12s linear infinite; }
@@ -424,13 +441,6 @@
     65.4% { transform: translate(470px, 100px); }
     66.4% { transform: translate(520px, 100px); opacity: 1; }
     66.8%, 100% { transform: translate(520px, 100px); opacity: 0; }
-  }
-
-  @keyframes hf-pill1 {
-    0%, 36.4% { fill: color-mix(in srgb, var(--mh-ok) 14%, transparent); stroke: var(--mh-ok); }
-    36.5%, 62.4% { fill: color-mix(in srgb, var(--mh-down) 14%, transparent); stroke: var(--mh-down); }
-    62.5%, 82.4% { fill: color-mix(in srgb, var(--mh-warn) 14%, transparent); stroke: var(--mh-warn); }
-    82.5%, 100% { fill: color-mix(in srgb, var(--mh-ok) 14%, transparent); stroke: var(--mh-ok); }
   }
 
   @keyframes hf-breaker1 {
