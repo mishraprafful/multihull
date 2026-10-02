@@ -11,7 +11,7 @@ Rules for entries
 ## Current state
 
 - Merged to `main`: architecture plan (PR 1), name placeholders (PR 2), v0.1 scaffold (PR 3), CI and generated reference docs (PR 5), Python deploy, destroy, logs, controller and SDK (PR 6), router sticky routing, provider circuits, adaptive concurrency, TLS and HTTP snapshot source (PR 7), handover (PR 8), Cloudflare Pages docs deploy (PR 16).
-- Docs are live at https://multihull.pages.dev, deployed by `.github/workflows/docs.yml` on pushes to `main`. PRs touching `website/`, `docs/`, `python/` or the workflow get a preview deployment and one sticky comment with the URL. PR 17 (open) deletes a PR's preview deployments when it closes.
+- Docs are live at https://multihull.pages.dev, deployed by `.github/workflows/docs.yml` on pushes to `main`. PRs touching `website/`, `docs/`, `python/` or the workflow get a preview deployment and one sticky comment with the URL. `.github/workflows/docs-preview-sweep.yml` runs daily at 03:17 UTC and deletes preview deployments older than 24 hours; Cloudflare itself never expires them. The on-close cleanup from PR 17 was replaced by this sweep.
 - Cloudflare secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are repository secrets. The `website` environment was removed because environment secrets cannot reach PR runs.
 - CI runs on every PR with path-filtered jobs for python, router, website and chart. Release workflow exists; publishing is gated by the `release` environment and the `PUBLISH_ENABLED` repository variable.
 - Test counts at merge: Python 81, Rust 151.
@@ -54,6 +54,7 @@ Rules for entries
 ## Session log
 
 ### 2026-10-02 (later)
+- Replaced the on-close preview cleanup with a daily sweep workflow after confirming in Cloudflare's docs that preview deployments have no retention limit and are never deleted automatically.
 - Set up Cloudflare Pages via an agent (PR 16, merged). First preview URLs showed a TLS error for a few minutes while Cloudflare issued the certificate; resolved on its own.
 - Opened PR 17: cleanup of preview deployments on PR close, manual `cleanup_branch` input. Pointed the JSON Schema `$id` at pages.dev.
 
