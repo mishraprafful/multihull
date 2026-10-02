@@ -329,6 +329,13 @@ def write_router_config(
     log_filter: str = "info",
     tuning: Mapping[str, Mapping[str, TomlValue]] | None = None,
 ) -> Path:
+    overrides = {name: dict(entries) for name, entries in (tuning or {}).items()}
+    tables: dict[str, dict[str, TomlValue]] = {
+        "snapshot": {"source": source},
+        "timeouts": {"first_byte": first_byte_seconds, **overrides.pop("timeouts", {})},
+        "log": {"format": "json", "filter": log_filter},
+        **overrides,
+    }
     path.write_text(
         "\n".join(
             [
@@ -336,17 +343,7 @@ def write_router_config(
                 f'admin_listen = "127.0.0.1:{admin_port}"',
                 f'node_id = "e2e-router-{listen_port}"',
                 "",
-                "[snapshot]",
-                f'source = "{source}"',
-                "",
-                "[timeouts]",
-                f"first_byte = {first_byte_seconds}",
-                "",
-                "[log]",
-                'format = "json"',
-                f'filter = "{log_filter}"',
-                "",
-                toml_tables(tuning or {}),
+                toml_tables(tables),
             ]
         )
     )
@@ -404,6 +401,11 @@ class Router(Process):
 
     def sessions(self) -> dict[str, Any]:
         response = self.http.get(f"{self.admin_url}/debug/sessions")
+        response.raise_for_status()
+        return response.json()
+
+    def config(self) -> dict[str, Any]:
+        response = self.http.get(f"{self.admin_url}/debug/config")
         response.raise_for_status()
         return response.json()
 
