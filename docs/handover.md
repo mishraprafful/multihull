@@ -10,12 +10,13 @@ Rules for entries
 
 ## Current state
 
-- Architecture plan merged (PR 1) at `docs/design/architecture-plan.md`. Name placeholders merged (PR 2).
-- v0.1 scaffold on branch `feat/scaffold`, PR 3: Python control plane (spec, five translators, SQLite state, engine, `hull` CLI, 59 tests), Rust workspace (router-core policies, proxy, discovery client, admin, testkit, `multihull` binary, 107 tests), `proto/discovery.proto`, Helm chart, llama-8b example, Starlight site (17 pages, builds).
-- Scoped out of the scaffold: `hull deploy/destroy/logs/controller`, Python SDK module, gRPC transport on the Python side, HTTP snapshot source and TLS in the router, sticky routing and provider circuits wired into the proxy handler, live calls against real providers.
+- Merged to `main`: architecture plan (PR 1), name placeholders (PR 2), v0.1 scaffold (PR 3), CI and generated reference docs (PR 5), Python deploy, destroy, logs, controller and SDK (PR 6), router sticky routing, provider circuits, adaptive concurrency, TLS and HTTP snapshot source (PR 7).
+- CI runs on every PR with path-filtered jobs for python, router, website and chart. Release workflow exists; publishing is gated by the `release` environment and the `PUBLISH_ENABLED` repository variable.
+- Test counts at merge: Python 81, Rust 151.
+- PR 4 was closed unmerged: its commits carried `Claude-Session` trailers. PR 5 is the same tree with clean messages.
+- Not yet exercised against any real provider. Modal log access uses private SDK internals.
+- Name placeholders `multihull` 0.0.1 not yet published to PyPI or crates.io; needs the owner's tokens.
 - GitHub repo `mishraprafful/multihull` is private.
-- Package names: `multihull` on PyPI and crates.io were free on 2026-10-01. Not yet published; publishing needs the owner's registry tokens.
-- Local toolchain on the owner's machine: Python 3.14 with `uv`, Node 24 with `npm`, Docker, kubectl, rustup via Homebrew with stable Rust 1.98.1. `cargo` needs `$(brew --prefix rustup)/bin` or `~/.cargo/bin` on `PATH`. No `helm`, `buf` or `protoc`.
 
 ## Decisions log
 
@@ -38,15 +39,23 @@ Rules for entries
 
 ## Next steps
 
-1. Review and merge PR 3 (scaffold).
-2. Owner publishes the 0.0.1 placeholders to PyPI and crates.io (tokens stay local).
-3. `hull deploy` end to end against a real Kubernetes cluster and Modal, with `hull destroy` and `hull logs`.
-4. Python gRPC `Discovery.Stream` server (`hull controller`) using `grpcio-tools` from `proto/discovery.proto`.
-5. Router: wire sticky routing and provider circuits into the proxy handler, add hyper-rustls for TLS upstreams and listener, implement the HTTP snapshot source.
-6. CI: GitHub Actions for `uv run pytest`, `cargo test`, `npm run build`, `helm lint`.
-7. Website: generate `docs/reference/spec-schema` from `hull schema`.
+1. First live run: `hull doctor` then `hull deploy --apply` against a real Kubernetes cluster and Modal using the llama-8b example, with the router in front from a file snapshot. Record findings here.
+2. Expose admission, pressure and circuit tuning in `router.toml` and the Helm ConfigMap.
+3. Replace Modal private-API log access with a supported path or drop `hull logs -p modal` until one exists.
+4. Scale-back after `Degraded` clears in the controller.
+5. RunPod, Baseten and Replicate `apply` implementations (currently render-only) with the translator conformance suite from the plan.
+6. End-to-end test: Python controller gRPC stream to the Rust router, including `Degraded` round trip.
+7. Owner publishes the 0.0.1 placeholders.
 
 ## Session log
+
+### 2026-10-02
+- Merged PR 5, then merged `main` into PRs 6 and 7 with merge commits (no rebase, no force push) so CI ran on them. Both green; merged 6 and 7.
+
+### 2026-10-01 (evening)
+- Merged PR 3. Ran three worktree agents in parallel; opened PRs 5, 6, 7.
+- CI first run failed on `dorny/paths-filter` with "Resource not accessible by integration"; fixed by adding `pull-requests: read` to workflow permissions.
+- Lesson: subagents may append `Claude-Session` trailers even though AGENTS.md forbids attribution. Check `git log --format=%B` before pushing any agent branch.
 
 ### 2026-10-01 (later)
 - Merged PR 2. Scaffolded v0.1 on `feat/scaffold` with three parallel agents (python, router+proto, website+examples+charts) and opened PR 3.
