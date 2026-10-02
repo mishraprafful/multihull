@@ -30,6 +30,16 @@ def llama_raw() -> dict[str, Any]:
 
 
 @pytest.fixture
+def mock_docker_spec() -> ServiceSpec:
+    return specmod.load(FIXTURES / "mock-three-docker.yaml")
+
+
+@pytest.fixture
+def mock_docker_raw() -> dict[str, Any]:
+    return yaml.safe_load((FIXTURES / "mock-three-docker.yaml").read_text())
+
+
+@pytest.fixture
 def target_for(llama_spec: ServiceSpec):
     def build(provider: str) -> Target:
         return Target(llama_spec, llama_spec.target(provider))

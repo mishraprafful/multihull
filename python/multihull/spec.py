@@ -7,7 +7,16 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ProviderType = Literal["kubernetes", "modal", "runpod", "baseten", "replicate"]
+ProviderType = Literal["kubernetes", "modal", "runpod", "baseten", "replicate", "docker"]
+PROVIDER_TYPES: tuple[ProviderType, ...] = (
+    "kubernetes",
+    "modal",
+    "runpod",
+    "baseten",
+    "replicate",
+    "docker",
+)
+GPU_OPTIONAL_TYPES: frozenset[str] = frozenset({"docker"})
 
 
 class GPU(StrEnum):
@@ -51,7 +60,7 @@ class Container(SpecModel):
 
 
 class Resources(SpecModel):
-    gpu: list[GPU] = Field(min_length=1)
+    gpu: list[GPU] = []
     gpuCount: int = Field(default=1, ge=1)
     memory: str | None = None
 
@@ -108,6 +117,15 @@ class ReplicateBlock(SpecModel):
     owner: str | None = None
 
 
+class DockerBlock(SpecModel):
+    image: str | None = None
+    host: str = "127.0.0.1"
+    hostPort: int | None = Field(default=None, ge=0, le=65535)
+    env: dict[str, str] = {}
+    network: str | None = None
+    pull: bool = True
+
+
 class TargetSpec(SpecModel):
     provider: str = Field(min_length=1)
     type: ProviderType
@@ -119,10 +137,11 @@ class TargetSpec(SpecModel):
     runpod: RunpodBlock | None = None
     baseten: BasetenBlock | None = None
     replicate: ReplicateBlock | None = None
+    docker: DockerBlock | None = None
 
     @model_validator(mode="after")
     def block_matches_type(self) -> TargetSpec:
-        for block in ("kubernetes", "modal", "runpod", "baseten", "replicate"):
+        for block in PROVIDER_TYPES:
             if block != self.type and getattr(self, block) is not None:
                 raise ValueError(
                     f"target {self.provider}: block {block} does not match type {self.type}"
@@ -200,6 +219,19 @@ class ServiceSpec(SpecModel):
         for target in self.targets:
             if target.type == "replicate" and (build is None or build.target != "cog"):
                 raise ValueError(f"target {target.provider}: replicate requires build.target: cog")
+        return self
+
+    @model_validator(mode="after")
+    def gpu_required_unless_all_targets_gpu_optional(self) -> ServiceSpec:
+        if self.resources.gpu:
+            return self
+        needing_gpu = [t for t in self.targets if t.type not in GPU_OPTIONAL_TYPES]
+        if needing_gpu:
+            names = ", ".join(f"{t.provider} ({t.type})" for t in needing_gpu)
+            raise ValueError(
+                f"resources.gpu is empty but these targets need a GPU class: {names}; "
+                "an empty gpu list is allowed only when every target is of type docker"
+            )
         return self
 
     @model_validator(mode="after")

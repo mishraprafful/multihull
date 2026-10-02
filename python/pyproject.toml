@@ -22,6 +22,7 @@ dependencies = [
   "kubernetes>=29",
   "grpcio>=1.66",
   "protobuf>=5.26",
+  "docker>=7.2.0",
 ]
 
 [project.optional-dependencies]
@@ -55,3 +56,4 @@ select = ["E", "F", "I", "UP", "B", "SIM", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["docker: needs a local docker daemon; enabled with MULTIHULL_DOCKER_TESTS=1"]

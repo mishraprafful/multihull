@@ -72,7 +72,7 @@ def test_endpoints_from_refs() -> None:
 
 
 def test_registry_covers_all_types() -> None:
-    assert set(PROVIDERS) == {"kubernetes", "modal", "runpod", "baseten", "replicate"}
+    assert set(PROVIDERS) == {"kubernetes", "modal", "runpod", "baseten", "replicate", "docker"}
     for provider_type in PROVIDERS:
         assert isinstance(create(provider_type), Provider)
     with pytest.raises(ValueError, match="unknown provider type"):
