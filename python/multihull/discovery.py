@@ -38,6 +38,7 @@ PROTO_ENDPOINT_TYPE = {
     "runpod": pb.ENDPOINT_TYPE_RUNPOD,
     "baseten": pb.ENDPOINT_TYPE_BASETEN,
     "replicate": pb.ENDPOINT_TYPE_REPLICATE,
+    "docker": pb.ENDPOINT_TYPE_UNSPECIFIED,
 }
 PROTO_HEALTH = {
     "healthy": pb.HEALTH_READY,

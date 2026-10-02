@@ -118,6 +118,7 @@ class Plan:
     type: str
     payload: dict[str, Any] | list[dict[str, Any]]
     format: Literal["yaml", "json"] = "json"
+    notes: list[str] = field(default_factory=list)
 
 
 @runtime_checkable
