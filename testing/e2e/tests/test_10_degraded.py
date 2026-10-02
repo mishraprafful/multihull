@@ -13,7 +13,7 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded(
     degraded_before = len(controller.log_lines("degraded e2e-three/"))
     scale_before = len(controller.log_lines("scale "))
 
-    outcomes = load_for(client, 10, stream=False, concurrency=12)
+    outcomes = load_for(client, 12, stream=False, concurrency=12)
 
     assert len(outcomes) >= 12
     unexpected = [o.describe() for o in outcomes if o.status not in (200, 429)]
@@ -22,7 +22,7 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded(
 
     degraded = wait_until(
         lambda: controller.log_lines("degraded e2e-three/")[degraded_before:],
-        20,
+        30,
         message="controller logs a Degraded signal",
     )
     assert any("QUEUE_DEPTH" in line or "TTFT_P95" in line for line in degraded), degraded

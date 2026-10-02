@@ -30,20 +30,22 @@ class CircuitSampler:
         self.stop_event.set()
         self.thread.join(timeout=5)
 
-    def state_at(self, moment: float) -> str | None:
+    def state_after(self, moment: float) -> str | None:
         times = [sample[0] for sample in self.samples]
-        position = bisect_right(times, moment) - 1
-        return self.samples[max(position, 0)][1]
+        position = min(bisect_right(times, moment), len(self.samples) - 1)
+        return self.samples[position][1]
+
+    def states(self) -> set[str | None]:
+        return {state for _, state in self.samples}
 
 
 def test_traffic_returns_to_primary_only_after_the_circuit_closes(
     deployment: Deployment, router: Router, client: RouterClient, stream: bool
 ) -> None:
+    sampler = CircuitSampler(router, "primary").start()
     deployment.stop_container("primary", timeout=1)
     load(client, 40, stream=stream, concurrency=8, idempotency_key=fresh_keys())
-    wait_until(
-        lambda: router.endpoint("primary")["circuit"] == "open", 5, message="primary circuit open"
-    )
+    wait_until(lambda: "open" in sampler.states(), 5, message="primary circuit open after the stop")
 
     deployment.start_container("primary")
     wait_until(
@@ -52,7 +54,6 @@ def test_traffic_returns_to_primary_only_after_the_circuit_closes(
         message="controller marks primary ready",
     )
 
-    sampler = CircuitSampler(router, "primary").start()
     observed: list[Outcome] = []
     closed_at: float | None = None
     deadline = time.monotonic() + 60
@@ -70,9 +71,9 @@ def test_traffic_returns_to_primary_only_after_the_circuit_closes(
     assert failures(after_close) == []
     from_primary = [o for o in observed + after_close if o.provider == "primary"]
     assert from_primary, "traffic never returned to primary"
-    assert all(sampler.state_at(o.started_at) != "open" for o in from_primary)
+    assert all(sampler.state_after(o.started_at) != "open" for o in from_primary)
     assert any(o.provider == "primary" for o in after_close)
-    assert {state for _, state in sampler.samples} >= {"closed"}
+    assert sampler.states() >= {"open", "closed"}
 
     metrics = router.metrics()
     assert metrics.circuit_state("e2e-three/primary") == 0
