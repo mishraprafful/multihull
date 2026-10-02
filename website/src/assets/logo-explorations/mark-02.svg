@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor">
+  <path d="M32 3C37.5 14 38.5 30 38 46V54A6 6 0 0 1 26 54V46C25.5 30 26.5 14 32 3Z"/>
+  <path d="M11 14C14.5 22 15 32 14.5 42V46A3.5 3.5 0 0 1 7.5 46V42C7 32 7.5 22 11 14Z"/>
+  <path d="M53 14C56.5 22 57 32 56.5 42V46A3.5 3.5 0 0 1 49.5 46V42C49 32 49.5 22 53 14Z"/>
+  <rect x="11" y="23" width="42" height="5" rx="2.5"/>
+  <rect x="11" y="39" width="42" height="5" rx="2.5"/>
+</svg>
