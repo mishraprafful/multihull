@@ -30,6 +30,11 @@ STICKY_SPEC_NAME = "multihull-sticky.yaml"
 READY_HEALTH = {"ready"}
 DEGRADED_COOLDOWN = "5s"
 DEGRADED_COOLDOWN_SECONDS = 5.0
+DEFAULT_PROBE: dict[str, float] = {"interval": 5, "timeout": 2, "jitter_fraction": 0.2}
+
+
+def probe_ejection_budget(probe: Mapping[str, float] = DEFAULT_PROBE) -> float:
+    return 3 * probe["interval"] * (1 + probe["jitter_fraction"]) + probe["timeout"]
 
 
 def free_port() -> int:

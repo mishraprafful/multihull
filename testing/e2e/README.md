@@ -33,7 +33,7 @@ Create `tests/test_NN_name.py` (modules run in numeric order), request `deployme
 
 ## Known limitations
 
-- The "health returns 503" row stops the controller first so the router's own prober is the only thing that can eject the endpoint; with the controller running, its docker health check would mark the endpoint `down` in the snapshot at about the same time. The ejection is counted as `router_failovers_total{reason="probe"}`, not as a per-request retry.
+- The "health returns 503" row stops the controller first so the router's own prober is the only thing that can eject the endpoint; with the controller running, its docker health check would mark the endpoint `down` in the snapshot at about the same time. The ejection is counted as `router_failovers_total{reason="probe"}`, not as a per-request retry. The circuit stays the only selection gate, so a few requests may reach the primary during half-open windows between probe rounds; the row allows up to 20 percent leakage.
 - A mid-stream disconnect reaches the client as a terminal `upstream_disconnected` SSE event followed by `data: [DONE]`; the OpenAI SDK surfaces that event as an `APIError`, so `stream_raw` reads the frames directly. The retry with the same `Idempotency-Key` succeeds only once the fault is cleared; the mock keeps no idempotency table.
 - Recovery closes the circuit after three half-open successes, so the 30 s admission ramp is rarely observed. The recovery row is `xfail(strict=False)`: on Docker Desktop a stopped container's port can keep accepting and hang, the router sees `Capacity` instead of `Transient`, and the circuit never opens before the controller marks the endpoint down.
 - The "flapping every 2 s" row is not implemented.
