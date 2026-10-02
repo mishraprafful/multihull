@@ -52,6 +52,7 @@ cd website && npm install && npm run build
 
 - [Architecture plan](docs/design/architecture-plan.md)
 - [Handover: current state and next steps](docs/handover.md)
+- [Contributing guide](CONTRIBUTING.md)
 - [AGENTS.md: instructions for coding agents](AGENTS.md)
 - [Docs site source](website/)
 - [Example spec](examples/llama-8b/multihull.yaml)
