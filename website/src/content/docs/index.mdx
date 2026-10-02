@@ -4,8 +4,6 @@ description: Deploy hot GPU containers to many providers. One URL. Automatic fai
 template: splash
 hero:
   tagline: Deploy hot GPU containers to many providers. One URL. Automatic failover.
-  image:
-    file: ../../assets/mark.svg
   actions:
     - text: Quickstart
       link: /docs/quickstart/
@@ -21,26 +19,32 @@ import StatusPill from '../../components/StatusPill.astro';
 import HeroFailover from '../../components/HeroFailover.astro';
 import SpecToProviders from '../../components/SpecToProviders.astro';
 
-<HeroFailover />
+<section class="mh-section">
+  <HeroFailover />
+</section>
 
-<div class="mh-value-props not-content">
+<section class="mh-section mh-value-props not-content">
   <div>
     <h3>One spec</h3>
-    <p>Describe image, GPU class, scaling and targets once in <code>multihull.yaml</code>. Each provider gets its native payload.</p>
+    <p>Image, GPU class, scaling and targets in one <code>multihull.yaml</code>. Each provider gets its native payload.</p>
   </div>
   <div>
     <h3>Always warm</h3>
-    <p>At least two providers stay hot by default. Fallbacks never scale to zero. Health beats price.</p>
+    <p>Two providers stay hot by default. Fallbacks never scale to zero. Health beats price.</p>
   </div>
   <div>
     <h3>Per-request failover</h3>
-    <p>A stateless Rust router retries across providers before the first byte is committed. Callers see one URL.</p>
+    <p>A stateless Rust router retries across providers before the first byte. Callers see one URL.</p>
   </div>
-</div>
+</section>
 
 <Horizon />
 
+<section class="mh-section">
+
 ## A minimal spec
+
+<p class="mh-lead">Two targets, one hostname. The control plane turns this into a Kubernetes Deployment and a Modal app.</p>
 
 ```yaml title="multihull.yaml"
 apiVersion: multihull/v1
@@ -69,7 +73,13 @@ route:
 
 <SpecToProviders />
 
+</section>
+
+<section class="mh-section">
+
 ## What `hull status` shows
+
+<p class="mh-lead">The router owns liveness. The CLI prints what it sees.</p>
 
 | Target | State | Replicas | GPU |
 |---|---|---|---|
@@ -77,6 +87,10 @@ route:
 | modal-main | <StatusPill state="degraded" /> | 1/1 | A10G |
 | runpod-eu | <StatusPill state="failover" label="Serving failover" /> | 1/1 | L4 |
 
-<Horizon />
+</section>
+
+<div class="mh-section mh-closing">
 
 [Start with the Quickstart](/docs/quickstart/), or read how [targets and failover](/docs/concepts/targets-and-failover/) work.
+
+</div>
