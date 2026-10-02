@@ -7,7 +7,7 @@ import pytest
 
 from multihull import discovery
 from multihull._proto import discovery_pb2 as pb
-from multihull.providers import create
+from multihull.providers import PROVIDERS, create
 from multihull.providers.base import Observed, Ref
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
@@ -131,7 +131,15 @@ def test_snapshot_docker_endpoints(mock_docker_spec: ServiceSpec, tmp_path: Path
     message = discovery.snapshot_to_proto(snapshot)
     proto_endpoints = message.routes[0].endpoints
     assert [e.url for e in proto_endpoints] == [e["url"] for e in endpoints]
-    assert {e.type for e in proto_endpoints} == {pb.ENDPOINT_TYPE_UNSPECIFIED}
+    assert {e.type for e in proto_endpoints} == {pb.ENDPOINT_TYPE_DOCKER}
+
+
+def test_every_provider_type_has_a_distinct_proto_endpoint_type() -> None:
+    assert set(discovery.PROTO_ENDPOINT_TYPE) == set(PROVIDERS)
+    values = list(discovery.PROTO_ENDPOINT_TYPE.values())
+    assert len(set(values)) == len(values)
+    assert pb.ENDPOINT_TYPE_UNSPECIFIED not in values
+    assert discovery.PROTO_ENDPOINT_TYPE["docker"] == pb.ENDPOINT_TYPE_DOCKER
 
 
 def test_load_api_keys_from_file(tmp_path: Path) -> None:

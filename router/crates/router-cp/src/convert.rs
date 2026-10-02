@@ -248,6 +248,7 @@ enum_bridge!(proto::EndpointType, core::EndpointType, {
     Runpod => Runpod,
     Baseten => Baseten,
     Replicate => Replicate,
+    Docker => Docker,
 });
 
 enum_bridge!(proto::Health, core::Health, {
@@ -327,6 +328,21 @@ mod tests {
         );
         let back: core::Snapshot = proto.into();
         assert_eq!(back, original);
+    }
+
+    #[test]
+    fn docker_endpoint_type_round_trips() {
+        let endpoint = core::Endpoint {
+            id: "mock/primary".into(),
+            kind: core::EndpointType::Docker,
+            url: "http://127.0.0.1:18001".into(),
+            ..Default::default()
+        };
+        let proto: proto::Endpoint = endpoint.clone().into();
+        assert_eq!(proto.r#type, proto::EndpointType::Docker as i32);
+        assert_eq!(proto.r#type, 6);
+        let back: core::Endpoint = proto.into();
+        assert_eq!(back, endpoint);
     }
 
     #[test]
