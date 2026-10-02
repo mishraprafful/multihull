@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -155,7 +156,9 @@ class ModalProvider:
         fn.update_autoscaler(min_containers=min, max_containers=max)
 
     def logs(self, ref: Ref, since: timedelta) -> Iterator[str]:
-        yield from ()
+        if self.dry_run:
+            return
+        yield from fetch_logs_with_sdk(ref.ids["app"], ref.ids.get("environment"), since)
 
     def endpoint(self, ref: Ref) -> Endpoint:
         url = ref.ids.get("web_url") or derive_web_url(
@@ -193,6 +196,33 @@ class ModalProvider:
         except Exception:
             return None
         return Ref(provider="modal", type="modal", service=service, ids={"app": app_name})
+
+
+def fetch_logs_with_sdk(app_name: str, environment: str | None, since: timedelta) -> Iterator[str]:
+    try:
+        import modal
+        from modal._logs import fetch_logs
+        from modal.client import _Client
+    except ImportError as exc:
+        raise RuntimeError(
+            "modal SDK not installed or too old for log access; install multihull[modal]"
+        ) from exc
+    app = modal.App.lookup(app_name, environment_name=environment)
+    app_id = app.app_id
+    if app_id is None:
+        raise RuntimeError(f"modal app {app_name} has no app id; is it deployed?")
+    until = datetime.now(UTC)
+
+    async def collect() -> list[str]:
+        client = await _Client.from_env()
+        lines: list[str] = []
+        async for batch in fetch_logs(client, app_id, until - since, until):
+            for item in batch.items:
+                if item.data:
+                    lines.extend(f"{batch.task_id} {line}" for line in item.data.splitlines())
+        return lines
+
+    yield from asyncio.run(collect())
 
 
 def deploy_with_sdk(spec: dict[str, Any]) -> str:

@@ -19,6 +19,8 @@ pub struct Config {
     #[serde(default)]
     pub tls: Option<TlsConfig>,
     #[serde(default)]
+    pub upstream_ca: Option<PathBuf>,
+    #[serde(default)]
     pub timeouts: PhaseTimeouts,
     #[serde(default = "default_max_body")]
     pub max_buffered_body_bytes: usize,
@@ -93,6 +95,10 @@ impl Config {
             timeouts: self.timeouts.clone(),
             max_buffered_body_bytes: self.max_buffered_body_bytes,
             region: self.region.clone(),
+            upstream_ca: self.upstream_ca.clone(),
+            circuit: router_core::circuit::CircuitConfig::default(),
+            admission: router_core::limit::AdmissionQueue::default(),
+            pressure: router_core::pressure::PressureConfig::default(),
         }
     }
 }
@@ -113,6 +119,20 @@ mod tests {
         assert_eq!(config.timeouts.connect, Duration::from_secs(2));
         assert_eq!(config.log.format, LogFormat::Json);
         assert!(config.tls.is_some());
+        assert!(config.upstream_ca.is_none());
+    }
+
+    #[test]
+    fn upstream_ca_is_optional_and_independent_of_listener_tls() {
+        let config = Config::parse(
+            "upstream_ca = \"/etc/multihull/upstream-ca.pem\"\n[snapshot]\nsource = \"x\"\n",
+        )
+        .unwrap();
+        assert!(config.tls.is_none());
+        assert_eq!(
+            config.proxy_config().upstream_ca.as_deref(),
+            Some(Path::new("/etc/multihull/upstream-ca.pem"))
+        );
     }
 
     #[test]

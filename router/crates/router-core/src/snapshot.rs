@@ -122,6 +122,27 @@ pub struct Sticky {
     pub fallback_key: String,
 }
 
+impl Sticky {
+    pub const DEFAULT_TTL_SECONDS: u64 = 30 * 60;
+
+    pub fn ttl(&self) -> std::time::Duration {
+        let seconds = if self.ttl_seconds == 0 {
+            Self::DEFAULT_TTL_SECONDS
+        } else {
+            self.ttl_seconds
+        };
+        std::time::Duration::from_secs(seconds)
+    }
+
+    pub fn fails_on_unhealthy(&self) -> bool {
+        self.on_unhealthy == StickyOnUnhealthy::Fail
+    }
+
+    pub fn is_provider_mode(&self) -> bool {
+        self.mode == StickyMode::Provider
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StickyMode {
@@ -293,6 +314,26 @@ mod tests {
         assert_eq!(endpoint.weight, 1);
         assert_eq!(endpoint.max_concurrency, 32);
         assert!(endpoint.accepts_traffic());
+    }
+
+    #[test]
+    fn sticky_ttl_defaults_to_thirty_minutes() {
+        let sticky = Sticky {
+            key: "client-ip".into(),
+            ..Default::default()
+        };
+        assert_eq!(sticky.ttl(), std::time::Duration::from_secs(1800));
+        assert!(!sticky.fails_on_unhealthy());
+        assert!(!sticky.is_provider_mode());
+        let sticky = Sticky {
+            ttl_seconds: 60,
+            mode: StickyMode::Provider,
+            on_unhealthy: StickyOnUnhealthy::Fail,
+            ..sticky
+        };
+        assert_eq!(sticky.ttl(), std::time::Duration::from_secs(60));
+        assert!(sticky.fails_on_unhealthy());
+        assert!(sticky.is_provider_mode());
     }
 
     #[test]

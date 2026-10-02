@@ -2,3 +2,5 @@ node_modules/
 dist/
 .astro/
 src/content/docs/docs/design/architecture.md
+src/content/docs/docs/reference/cli.mdx
+src/content/docs/docs/reference/spec-schema.mdx

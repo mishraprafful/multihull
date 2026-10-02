@@ -10,7 +10,7 @@ from multihull.providers import create
 from multihull.providers.base import Observed, Ref
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
-from tests.test_engine import FakeProvider
+from tests.fakes import FakeProvider
 
 
 def test_hash_api_key_never_returns_plaintext() -> None:

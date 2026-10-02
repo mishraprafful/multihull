@@ -3,6 +3,7 @@ use crate::proto::{
     control_message, router_message, Ack, ControlMessage, Hello, Nack, RouterMessage,
 };
 use crate::source::SnapshotError;
+use router_core::snapshot::Degraded;
 use router_core::Snapshot;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +13,8 @@ use tonic::transport::Channel;
 
 const INITIAL_RECONNECT: Duration = Duration::from_secs(1);
 const MAX_RECONNECT: Duration = Duration::from_secs(30);
+
+pub type DegradedReceiver = mpsc::Receiver<Degraded>;
 
 pub async fn connect(url: String) -> Result<DiscoveryClient<Channel>, SnapshotError> {
     let channel = Channel::from_shared(url)
@@ -26,10 +29,11 @@ pub async fn run(
     url: String,
     node_id: String,
     tx: watch::Sender<Arc<Snapshot>>,
+    mut degraded: Option<DegradedReceiver>,
 ) -> Result<(), SnapshotError> {
     let mut backoff = INITIAL_RECONNECT;
     loop {
-        match stream_once(&url, &node_id, &tx).await {
+        match stream_once(&url, &node_id, &tx, &mut degraded).await {
             Ok(()) => backoff = INITIAL_RECONNECT,
             Err(SnapshotError::ReceiverDropped) => return Err(SnapshotError::ReceiverDropped),
             Err(error) => {
@@ -45,6 +49,7 @@ async fn stream_once(
     url: &str,
     node_id: &str,
     tx: &watch::Sender<Arc<Snapshot>>,
+    degraded: &mut Option<DegradedReceiver>,
 ) -> Result<(), SnapshotError> {
     let mut client = connect(url.to_string()).await?;
     let (outbound_tx, outbound_rx) = mpsc::channel::<RouterMessage>(16);
@@ -57,14 +62,36 @@ async fn stream_once(
         .stream(ReceiverStream::new(outbound_rx))
         .await?
         .into_inner();
-    while let Some(message) = inbound.message().await? {
-        if let Some(reply) = handle(message, tx)? {
-            if outbound_tx.send(reply).await.is_err() {
-                break;
+    loop {
+        tokio::select! {
+            message = inbound.message() => {
+                let Some(message) = message? else { break };
+                if let Some(reply) = handle(message, tx)? {
+                    if outbound_tx.send(reply).await.is_err() {
+                        break;
+                    }
+                }
+            }
+            signal = next_degraded(degraded) => {
+                match signal {
+                    Some(signal) => {
+                        if outbound_tx.send(degraded_message(signal)).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => *degraded = None,
+                }
             }
         }
     }
     Ok(())
+}
+
+async fn next_degraded(receiver: &mut Option<DegradedReceiver>) -> Option<Degraded> {
+    match receiver {
+        Some(receiver) => receiver.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 fn hello(node_id: &str, last_version: u64) -> RouterMessage {
@@ -73,6 +100,12 @@ fn hello(node_id: &str, last_version: u64) -> RouterMessage {
             node_id: node_id.to_string(),
             last_version,
         })),
+    }
+}
+
+pub fn degraded_message(signal: Degraded) -> RouterMessage {
+    RouterMessage {
+        message: Some(router_message::Message::Degraded(signal.into())),
     }
 }
 
@@ -146,6 +179,41 @@ mod tests {
         assert!(handle(ControlMessage { message: None }, &tx)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn degraded_signal_becomes_a_router_message() {
+        let message = degraded_message(Degraded {
+            service: "llama".into(),
+            provider: "modal".into(),
+            reason: router_core::snapshot::DegradedReason::QueueDepth,
+            observed_concurrency: 12,
+        });
+        match message.message {
+            Some(router_message::Message::Degraded(d)) => {
+                assert_eq!(d.service, "llama");
+                assert_eq!(d.provider, "modal");
+                assert_eq!(d.reason, proto::DegradedReason::QueueDepth as i32);
+                assert_eq!(d.observed_concurrency, 12);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn next_degraded_pends_without_a_receiver_and_drains_with_one() {
+        let mut none: Option<DegradedReceiver> = None;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), next_degraded(&mut none))
+                .await
+                .is_err()
+        );
+        let (tx, rx) = mpsc::channel(1);
+        let mut some = Some(rx);
+        tx.send(Degraded::default()).await.unwrap();
+        assert!(next_degraded(&mut some).await.is_some());
+        drop(tx);
+        assert!(next_degraded(&mut some).await.is_none());
     }
 
     #[test]

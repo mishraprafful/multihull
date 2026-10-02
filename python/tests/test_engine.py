@@ -1,60 +1,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
-from datetime import timedelta
 from pathlib import Path
-from typing import ClassVar
 
 import yaml
 
 from multihull import engine
-from multihull.providers.base import CredHealth, Endpoint, GPUOffer, Observed, Plan, Ref, Target
+from multihull.providers.base import Ref
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
-
-
-class FakeProvider:
-    type: ClassVar = "fake"
-
-    def __init__(self, fail: bool = False) -> None:
-        self.fail = fail
-        self.applied: list[str] = []
-
-    def plan(self, desired: Target, observed: Ref | None) -> Plan:
-        return Plan(
-            desired.provider, desired.type, {"name": desired.name, "min": desired.replicas.min}
-        )
-
-    def apply(self, desired: Target, observed: Ref | None) -> Ref:
-        if self.fail:
-            raise RuntimeError("provider exploded")
-        self.applied.append(desired.provider)
-        return Ref(desired.provider, desired.type, desired.name, {"id": "1"})
-
-    def destroy(self, ref: Ref) -> None:
-        return None
-
-    def status(self, ref: Ref) -> Observed:
-        return Observed("Ready", 1, 1)
-
-    def scale(self, ref: Ref, min: int, max: int) -> None:
-        return None
-
-    def logs(self, ref: Ref, since: timedelta) -> Iterator[str]:
-        yield from ()
-
-    def endpoint(self, ref: Ref) -> Endpoint:
-        return Endpoint(url=f"https://{ref.provider}.example")
-
-    def gpu_inventory(self) -> list[GPUOffer]:
-        return []
-
-    def credentials_health(self) -> CredHealth:
-        return CredHealth(True)
-
-    def rediscover(self, service: str) -> Ref | None:
-        return None
+from tests.fakes import FakeProvider
 
 
 def test_plan_diff_lifecycle(llama_spec: ServiceSpec, tmp_path: Path) -> None:

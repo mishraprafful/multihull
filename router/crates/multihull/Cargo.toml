@@ -20,6 +20,7 @@ router-core = { workspace = true }
 router-cp = { workspace = true }
 router-obs = { workspace = true }
 router-proxy = { workspace = true }
+router-tls = { workspace = true }
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 clap = { workspace = true }
