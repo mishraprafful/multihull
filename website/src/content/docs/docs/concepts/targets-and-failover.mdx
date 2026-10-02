@@ -38,13 +38,13 @@ The router retries only when all of these hold:
 - request body fully buffered,
 - the method is idempotent, or an `Idempotency-Key` is present, or the outcome is Capacity or a connect failure.
 
-Retries go to a different provider, at most two per request, within a retry budget of 20% of live volume per service.
+Retries go to a different provider, at most two per request, within a per-route retry budget described below.
 
 ## When the fallback fails too
 
 Spillover keeps walking down the priority list. With P1 down, requests land on P2. With P1 and P2 down, they land on P3. Callers see a 503 only when every target is ejected, or when the panic threshold routes to all endpoints and they all fail.
 
-Each hop spends from the retry budget: 20% of live volume over a 10 s window, never fewer than 3 retries, so a storm cannot double the load on the last healthy tier. A request still gets at most two retries, and only before the first byte is committed.
+Each hop spends from the retry budget. Over a trailing 10 s window a route may retry up to 20% of the requests it admitted, plus a floor of 10 retries per second (100 per window), so a storm cannot double the load on the last healthy tier while a low-volume route can still fail over. The budget is not yet configurable. A request still gets at most two retries, and only before the first byte is committed.
 
 Recovery runs in the other direction. An ejected target waits out its backoff, then its circuit goes half-open and admits 1 request, then 5%, 25% and 100% over 30 s. As each target passes the ramp, traffic climbs back to the best priority that is healthy. The home page hero plays this sequence: Kubernetes down, then Modal down too with traffic on RunPod, then Modal and Kubernetes recovering in turn.
 
