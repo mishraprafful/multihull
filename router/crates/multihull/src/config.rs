@@ -198,6 +198,10 @@ mod tests {
                 "[pressure]\nttft_degrade_factor = inf\n",
                 "pressure.ttft_degrade_factor",
             ),
+            (
+                "[pressure]\nttft_rebaseline_after = 0\n",
+                "pressure.ttft_rebaseline_after",
+            ),
             ("[circuit]\nratio_window = 10.5\n", "circuit.ratio_window"),
             ("[retry]\nbudget_window = 2.5\n", "retry.budget_window"),
         ];

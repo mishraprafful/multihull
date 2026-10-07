@@ -66,11 +66,16 @@ sustained = 2
 resend_every = 30
 # Pressure forgotten after this long without samples.
 stale_after = 10
-# TTFT p95 above baseline * factor over ttft_window samples sends Degraded(TtftP95).
+# TTFT p95 above baseline * factor over ttft_window samples sends Degraded(TtftP95),
+# re-sent every resend_every while new samples arrive, until a window is healthy again.
 # The factor must be finite and greater than 1.
 ttft_degrade_factor = 2.0
 ttft_window = 50
+# Only healthy windows move the baseline, by this share of the difference.
 ttft_baseline_smoothing = 0.2
+# A slowdown that lasts this long becomes the new baseline and stops Degraded(TtftP95).
+# Longer keeps raised floors through long incidents; shorter accepts a permanent shift sooner.
+ttft_rebaseline_after = 3600
 
 [probe]
 # Active health probe per endpoint: GET <endpoint url><health_path from the snapshot, default /health>.

@@ -43,6 +43,7 @@ router:
       ttft_degrade_factor: 2.0
       ttft_window: 50
       ttft_baseline_smoothing: 0.2
+      ttft_rebaseline_after: 3600
     probe:
       enabled: true
       interval: 5

@@ -16,6 +16,8 @@ pub struct PressureConfig {
     pub ttft_degrade_factor: f64,
     pub ttft_window: usize,
     pub ttft_baseline_smoothing: f64,
+    #[serde(with = "crate::serde_secs")]
+    pub ttft_rebaseline_after: Duration,
 }
 
 impl PressureConfig {
@@ -41,6 +43,9 @@ impl PressureConfig {
         if !(self.ttft_baseline_smoothing > 0.0 && self.ttft_baseline_smoothing <= 1.0) {
             return Err("pressure.ttft_baseline_smoothing must be in (0, 1]".into());
         }
+        if self.ttft_rebaseline_after.is_zero() {
+            return Err("pressure.ttft_rebaseline_after must be positive".into());
+        }
         Ok(())
     }
 }
@@ -55,6 +60,7 @@ impl Default for PressureConfig {
             ttft_degrade_factor: 2.0,
             ttft_window: 50,
             ttft_baseline_smoothing: 0.2,
+            ttft_rebaseline_after: Duration::from_secs(3600),
         }
     }
 }
@@ -152,6 +158,7 @@ impl PressureDetector {
         let window = self.config.ttft_window.max(2);
         let factor = self.config.ttft_degrade_factor;
         let smoothing = self.config.ttft_baseline_smoothing;
+        let rebaseline_after = self.config.ttft_rebaseline_after;
         let state = self.ttft.entry(endpoint.to_string()).or_default();
         state.service = service.to_string();
         state.provider = provider.to_string();
@@ -165,7 +172,11 @@ impl PressureDetector {
         state.recent.clear();
         match state.baseline_p95 {
             Some(baseline) if p95 > baseline * factor => {
-                state.degraded_since.get_or_insert(now);
+                let since = *state.degraded_since.get_or_insert(now);
+                if now.saturating_sub(since) >= rebaseline_after {
+                    state.baseline_p95 = Some(p95);
+                    state.recover();
+                }
             }
             Some(baseline) => {
                 state.baseline_p95 = Some(baseline + smoothing * (p95 - baseline));
@@ -389,6 +400,22 @@ mod tests {
     }
 
     #[test]
+    fn a_ttft_slowdown_that_outlasts_rebaseline_after_becomes_the_baseline() {
+        let config = PressureConfig {
+            ttft_rebaseline_after: secs(10),
+            ..ttft_config()
+        };
+        let mut detector = PressureDetector::new(config, secs(5));
+        assert!(ttft_reports(&mut detector, millis(100), &[0]).is_empty());
+        assert_eq!(
+            ttft_reports(&mut detector, millis(300), &range(1, 30)),
+            vec![1, 4, 7, 10]
+        );
+        assert!(ttft_reports(&mut detector, millis(500), &[31]).is_empty());
+        assert_eq!(ttft_reports(&mut detector, millis(800), &[32]), vec![32]);
+    }
+
+    #[test]
     fn config_validation_names_the_offending_key() {
         assert!(PressureConfig::default().validate().is_ok());
         let stale = PressureConfig {
@@ -419,6 +446,14 @@ mod tests {
             ..PressureConfig::default()
         };
         assert!(resend.validate().unwrap_err().contains("resend_every"));
+        let rebaseline = PressureConfig {
+            ttft_rebaseline_after: Duration::ZERO,
+            ..PressureConfig::default()
+        };
+        assert!(rebaseline
+            .validate()
+            .unwrap_err()
+            .contains("ttft_rebaseline_after"));
         let parsed: PressureConfig = serde_json::from_str(r#"{"sustained":0.5}"#).unwrap();
         assert_eq!(parsed.sustained, millis(500));
     }
