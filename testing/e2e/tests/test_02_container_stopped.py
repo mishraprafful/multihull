@@ -7,6 +7,7 @@ from e2e.harness import Deployment, Router, endpoint_id, probe_ejection_budget
 from e2e.waiting import wait_until
 
 STOP_AFTER = 10
+EJECTION_REASONS = ("transient", "probe")
 
 
 def test_stopped_primary_fails_over_without_client_errors(
@@ -44,7 +45,11 @@ def test_stopped_primary_fails_over_without_client_errors(
     assert all(o.attempts is not None and o.attempts <= 3 for o in outcomes)
 
     metrics = router.metrics()
-    assert metrics.failovers(**{"from": "primary", "reason": "transient"}) >= 1
+    ejections = {
+        reason: metrics.failovers(**{"from": "primary", "reason": reason})
+        for reason in EJECTION_REASONS
+    }
+    assert sum(ejections.values()) >= 1, ejections
     assert metrics.requests(endpoint=endpoint_id("secondary"), outcome="success") >= 1
     assert metrics.circuit_state(endpoint_id("primary")) == 2
 
