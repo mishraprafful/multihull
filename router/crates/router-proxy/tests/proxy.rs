@@ -278,6 +278,67 @@ async fn missing_route_empty_route_and_dead_upstream_map_to_404_503_502() {
     assert!(response.headers().contains_key("retry-after"));
 }
 
+async fn statuses_with_and_without_a_key(snapshot: Snapshot) -> (u16, u16) {
+    let proxy = start_proxy_with(snapshot).await;
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    let without = client
+        .request(
+            Request::get(format!("http://{}/v1/x", proxy.addr))
+                .body(Empty::new())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let with = client
+        .request(
+            Request::get(format!("http://{}/v1/x", proxy.addr))
+                .header("authorization", "Bearer hull_team1_notasecretjustatest")
+                .body(Empty::new())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    (without.status().as_u16(), with.status().as_u16())
+}
+
+fn route_with_auth(url: String, auth: router_core::snapshot::Auth) -> Snapshot {
+    Snapshot {
+        version: 1,
+        at: None,
+        routes: vec![Route {
+            id: "secure".into(),
+            auth,
+            endpoints: vec![endpoint("a", "p1", url, 1)],
+            ..Default::default()
+        }],
+    }
+}
+
+#[tokio::test]
+async fn required_route_without_key_hashes_rejects_every_request() {
+    let upstream = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let auth = router_core::snapshot::Auth {
+        api_key_hashes: vec![],
+        required: true,
+    };
+    let statuses = statuses_with_and_without_a_key(route_with_auth(upstream.url(), auth)).await;
+    assert_eq!(statuses, (401, 401));
+    assert_eq!(upstream.request_count(), 0);
+}
+
+#[tokio::test]
+async fn route_without_required_or_key_hashes_stays_open() {
+    let upstream = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let auth = router_core::snapshot::Auth::default();
+    let statuses = statuses_with_and_without_a_key(route_with_auth(upstream.url(), auth)).await;
+    assert_eq!(statuses, (200, 200));
+    assert_eq!(upstream.request_count(), 2);
+}
+
 #[tokio::test]
 async fn api_key_is_required_when_route_has_hashes() {
     let upstream = MockUpstream::start(MockUpstreamConfig::default())

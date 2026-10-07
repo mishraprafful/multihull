@@ -479,7 +479,7 @@ fn take_preferred(
 }
 
 fn authorize(route: &Route, headers: &http::HeaderMap) -> Result<(), (ProxyError, u32)> {
-    if route.auth.api_key_hashes.is_empty() {
+    if route.auth.api_key_hashes.is_empty() && !route.auth.required {
         return Ok(());
     }
     let raw = headers
