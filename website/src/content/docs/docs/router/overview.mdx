@@ -16,9 +16,11 @@ The router is stateless. It reads a static `router.toml` and a dynamic endpoint 
 
 | Source | When |
 |---|---|
-| gRPC stream from `hull controller` | Teams; carries `Degraded` signals back |
+| `grpcs://` stream from `hull controller` | Teams; carries `Degraded` signals back |
 | `snapshot.json` written by `hull deploy` | Solo dev, CI |
 | HTTPS or object-store URL polled | Multi-region routers without controller reachability |
+
+The gRPC stream and HTTPS URLs take a CA bundle, a client certificate and a bearer token under `[snapshot]`; plaintext `grpc://` and `http://` need `insecure = true`. See [Controller stream](/docs/router/controller-stream/).
 
 The last snapshot is persisted to disk and served indefinitely on control-plane loss, with an alert after 1 h.
 

@@ -61,6 +61,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', slug: 'docs/router/overview' },
             { label: 'Health and circuits', slug: 'docs/router/health-and-circuits' },
+            { label: 'Controller stream', slug: 'docs/router/controller-stream' },
           ],
         },
         {
