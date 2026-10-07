@@ -4,7 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -21,6 +21,7 @@ from multihull.providers.base import (
     Ref,
     Target,
     resolve_secret_values,
+    secret_env_name,
 )
 from multihull.spec import GPU, ModalBlock, RegistrySecret
 
@@ -79,18 +80,27 @@ def credentials_source() -> str | None:
     return None
 
 
-def secret_fragments() -> list[str]:
+def secret_fragments(env_names: Iterable[str]) -> list[str]:
     fragments: set[str] = set()
-    for name in (TOKEN_ID_ENV, TOKEN_SECRET_ENV):
+    for name in env_names:
         value = os.environ.get(name, "")
         fragments.update({value, value.strip(), repr(value)[1:-1], *value.split()})
     return sorted((f for f in fragments if f), key=len, reverse=True)
 
 
-def redact(text: str) -> str:
-    for fragment in secret_fragments():
+def redact(text: str, env_names: Iterable[str] = ()) -> str:
+    for fragment in secret_fragments([TOKEN_ID_ENV, TOKEN_SECRET_ENV, *env_names]):
         text = text.replace(fragment, REDACTED)
     return text
+
+
+def secret_env_names(spec: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    if spec["image"]["secret"]:
+        names.append(spec["image"]["secret"]["passwordEnv"])
+    if spec["secret"]:
+        names.extend(secret_env_name(key) for key in spec["secret"]["keys"])
+    return names
 
 
 async def hello_from_env(modal: Any) -> None:
@@ -268,7 +278,10 @@ class ModalProvider:
             raise ValueError(MISSING_COMMAND_NOTE)
         if self.dry_run:
             return ref_for(desired)
-        web_url = deploy_with_sdk(spec)
+        try:
+            web_url = deploy_with_sdk(spec)
+        except Exception as exc:
+            raise RuntimeError(redact(str(exc), secret_env_names(spec))) from None
         return ref_for(desired, web_url)
 
     def destroy(self, ref: Ref) -> None:

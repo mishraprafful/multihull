@@ -234,6 +234,21 @@ def test_deploy_pulls_private_image_with_serialized_server(
     assert url == "https://ws--multihull-live-mock.modal.run"
 
 
+def test_apply_error_keeps_image_build_hint_and_hides_secrets(
+    mock_kind_modal_spec: ServiceSpec, fake_modal: FakeModal, registry_env: dict[str, str]
+) -> None:
+    fake_modal.deploy_error = RuntimeError(
+        "Image build for im-AbC123 failed.\nView the build logs:\n  modal image logs im-AbC123"
+        f"\npull with {registry_env['GHCR_TOKEN']}"
+    )
+    with pytest.raises(RuntimeError) as raised:
+        ModalProvider(dry_run=False).apply(mock_modal_target(mock_kind_modal_spec), None)
+    message = str(raised.value)
+    assert "Image build for im-AbC123 failed." in message
+    assert "modal image logs im-AbC123" in message
+    assert registry_env["GHCR_TOKEN"] not in message and "<redacted>" in message
+
+
 def test_status_scale_and_logs_use_the_server_class(fake_modal: FakeModal) -> None:
     provider = ModalProvider(dry_run=False)
     ref = Ref("modal", "modal", "live-mock", {"app": "multihull-live-mock", "environment": "main"})

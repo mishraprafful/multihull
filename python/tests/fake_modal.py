@@ -62,6 +62,7 @@ class FakeModal:
         self.log_entries: list[FakeLogEntry] = []
         self.log_since: datetime | None = None
         self.lookups: list[tuple[str, str | None]] = []
+        self.deploy_error: BaseException | None = None
         self.App = self._app_type()
         self.Image = SimpleNamespace(from_registry=self._from_registry)
         self.Secret = SimpleNamespace(from_dict=FakeSecret)
@@ -91,6 +92,8 @@ class FakeModal:
                 return lambda cls: cls
 
             def deploy(self, name: str, environment_name: str) -> None:
+                if fake.deploy_error is not None:
+                    raise fake.deploy_error
                 fake.deployed.append((name, environment_name))
 
             @staticmethod
