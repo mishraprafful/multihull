@@ -52,7 +52,7 @@ Recovery runs in the other direction. An ejected target waits out its backoff, t
 
 ## Streaming
 
-Once the first SSE byte is forwarded the stream is committed and mid-stream failover is never attempted. If the upstream drops, goes idle past `timeouts.idle` or hits `timeouts.total` mid-stream, the router discards any incomplete event and ends the response cleanly with a terminal event:
+Once the first SSE byte is forwarded the stream is committed and mid-stream failover is never attempted. If the upstream drops or goes idle past `timeouts.idle` mid-stream, the router discards any incomplete event and ends the response cleanly with a terminal event:
 
 ```
 data: {"error":{"type":"upstream_disconnected","retryable":true,"provider":"<name>","reason":"disconnect"}}
@@ -60,7 +60,7 @@ data: {"error":{"type":"upstream_disconnected","retryable":true,"provider":"<nam
 data: [DONE]
 ```
 
-`reason` is `disconnect`, `idle_timeout` or `total_timeout`. The caller retries with the same `Idempotency-Key`; the router does not retry for it. Non-SSE HTTP/2 responses carry an `x-hull-error: upstream_disconnected` trailer when the request sent `te: trailers` or is gRPC; other streams are reset or closed. See [Mid-stream failures](/docs/router/health-and-circuits/#mid-stream-failures).
+`reason` is `disconnect` or `idle_timeout`. The caller retries with the same `Idempotency-Key`; the router does not retry for it. Non-SSE HTTP/2 responses carry an `x-hull-error: upstream_disconnected` trailer when the request sent `te: trailers` or is gRPC; other streams are reset or closed. A stream still running when `timeouts.total` expires ends the same way with `"type":"total_timeout","retryable":false` (trailer `x-hull-error: total_timeout`): the cap covers the whole request, so a retry would hit it again, and the endpoint is not blamed. See [Mid-stream failures](/docs/router/health-and-circuits/#mid-stream-failures).
 
 ## States you will see
 

@@ -81,8 +81,8 @@ Rules for entries
 - [ ] `router/crates/router-core/src/circuit.rs:77`: `panic_threshold` accepts 0.0 and rejects 1.0. Use (0, 1] and revisit the test that rejects 1.0.
 - [ ] `router/crates/router-core/src/pressure.rs:30`: NaN or infinity pass `ttft_degrade_factor` validation. Require finite and greater than 1.
 - [ ] `router/crates/router-core/src/retry.rs:30` and circuit.rs ratio window: fractional windows are truncated to whole seconds by `as_secs()`. Reject non-integer windows or bucket on milliseconds.
-- [ ] `router/crates/router-proxy/src/body.rs:203`: hitting `timeouts.total` is reported as a retryable upstream disconnect and counted against the endpoint. Skip the circuit record and emit a distinct non-retryable error type.
-- [ ] `router/crates/router-proxy/src/handler.rs:587` (predates PR 29): `admit()` spends the half-open trial before `try_reserve` checks headroom. Reserve first, then admit.
+- [x] `router/crates/router-proxy/src/body.rs:203`: hitting `timeouts.total` is reported as a retryable upstream disconnect and counted against the endpoint. Skip the circuit record and emit a distinct non-retryable error type. Done in PR 86.
+- [x] `router/crates/router-proxy/src/handler.rs:587` (predates PR 29): `admit()` spends the half-open trial before `try_reserve` checks headroom. Reserve first, then admit. Done in PR 86.
 - [ ] RunPod and Baseten translators inject no provider auth and Baseten's base URL ends in `/production/predict`, so their probes and traffic will fail once implemented; fix with their `apply` work.
 
 **Controller:**
@@ -110,6 +110,7 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some 
 - Chart: the controller Deployment passed `--spec` and `--listen`, which `hull controller` never had. Fixed, and `render.sh` now checks the rendered command against `hull controller --help`. TLS and token values added with refusal cases.
 - Lesson: when another agent runs the e2e suite, its sweeper removes every `e2e-three` container, so check `docker ps` before starting a local run.
 - Lesson: kind can use its own `--kubeconfig` file so a local run never changes the user's current kube context.
+- PR 86 (issues 53, 54): a stream reaching `timeouts.total` feeds no circuit and ends with a non-retryable `total_timeout` event or trailer; selection reserves headroom before taking the half-open trial. Each fix has a test that failed first.
 
 ### 2026-10-07 (later)
 - Live smoke run 37678680863 failed after merging main: Modal's single container held 37 in-flight inputs against `max_inputs` 32, so 17 requests got Modal `408 Request Timeout`, forwarded as Fatal, and 7 missed the 10 s first-byte deadline, were retried on kind (circuit open, probe down) and became router `502 upstream_unavailable`. Fixed on PR 37: 408 is Transient (retried only for idempotent or keyed requests), retries return to a healthy tried provider before the panic pool, `hull validate/plan/deploy` warn when fallbacks are below the 1.4 overprovision floor, live Modal `replicas.max` is 2.

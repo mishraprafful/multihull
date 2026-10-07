@@ -75,7 +75,8 @@ const yaml = ['name: llama-8b', 'container:', `${indent}image: ghcr.io/acme/vllm
 
 <style>
   .sp {
-    margin: 1.5rem 0 2rem;
+    max-width: 60rem;
+    margin: 1.5rem auto 2rem;
     color: var(--sl-color-text);
   }
 
@@ -163,6 +164,12 @@ const yaml = ['name: llama-8b', 'container:', `${indent}image: ghcr.io/acme/vllm
   .sp-glyph .dot {
     fill: var(--mh-ok);
     stroke: none;
+  }
+
+  @media (min-width: 72rem) {
+    .t1 { font-size: 14px; }
+    .file { font-size: 13px; }
+    .head, .key, .payload { font-size: 12px; }
   }
 
   @media (max-width: 40rem) {
