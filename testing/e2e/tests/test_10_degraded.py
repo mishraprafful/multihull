@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
+import pytest
+
 from e2e.client import RouterClient, load_for
 from e2e.harness import DEGRADED_COOLDOWN_SECONDS, TARGETS, Controller, Deployment, Router
 from e2e.waiting import wait_until
@@ -13,6 +15,7 @@ SCALE_UP = re.compile(r"scale (\w+) to min=(\d+) failed")
 SCALE_BACK = re.compile(r"scale back (\w+) to min=(\d+) failed")
 TIMESTAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
 HOUSEKEEPING_SECONDS = 0.5
+RESEND_SECONDS = 1
 CLIENTS = 12
 
 
@@ -20,6 +23,10 @@ def logged_at(line: str) -> datetime:
     match = TIMESTAMP.match(line)
     assert match is not None, line
     return datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S,%f")
+
+
+def resent(signals: list[str]) -> list[str]:
+    return signals if len(signals) >= 2 else []
 
 
 def queue_pressure_threshold(config: dict[str, Any]) -> float:
@@ -32,6 +39,7 @@ def queue_pressure_budget(config: dict[str, Any]) -> float:
     )
 
 
+@pytest.mark.router_tuning(pressure={"resend_every": RESEND_SECONDS})
 def test_sustained_queue_pressure_reaches_the_controller_as_degraded_and_scales_back(
     deployment: Deployment, controller: Controller, router: Router, client: RouterClient
 ) -> None:
@@ -47,11 +55,11 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded_and_scales_
     with ThreadPoolExecutor(max_workers=1) as pool:
         loading = pool.submit(load_for, client, 2 * budget, False, CLIENTS)
         signals = wait_until(
-            lambda: router.log_lines("degraded signal"),
-            budget,
-            message="router reports sustained queue pressure while saturated",
+            lambda: resent(router.log_lines("degraded signal")),
+            budget + RESEND_SECONDS + 2 * HOUSEKEEPING_SECONDS,
+            message="router reports and re-sends sustained queue pressure while saturated",
         )
-        assert not loading.done(), "load ended before the router reported pressure"
+        assert not loading.done(), "load ended before the router re-sent pressure"
         outcomes = loading.result()
     assert any('"reason":"QueueDepth"' in line for line in signals), signals
 
@@ -103,8 +111,10 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded_and_scales_
     assert all("exactly one container" in line for line in attempts)
 
     first_scale_back = min(logged_at(line) for line in attempts)
-    degraded_at = [logged_at(line) for line in controller.log_lines("degraded e2e-three/")]
-    last_degraded = max(moment for moment in degraded_at if moment <= first_scale_back)
+    episode = controller.log_lines("degraded e2e-three/")[degraded_before:]
+    assert len(episode) >= 2, episode
+    last_degraded = max(logged_at(line) for line in episode)
+    assert last_degraded < first_scale_back, "scaled back while Degraded was still arriving"
     quiet = (first_scale_back - last_degraded).total_seconds()
     assert DEGRADED_COOLDOWN_SECONDS <= quiet <= 2 * DEGRADED_COOLDOWN_SECONDS + 2, quiet
 

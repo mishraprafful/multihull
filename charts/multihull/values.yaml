@@ -36,6 +36,7 @@ router:
     pressure:
       queue_wait_fraction: 0.5
       sustained: 2
+      resend_every: 30
       stale_after: 10
       ttft_degrade_factor: 2.0
       ttft_window: 50

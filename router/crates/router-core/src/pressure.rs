@@ -10,6 +10,8 @@ pub struct PressureConfig {
     #[serde(with = "crate::serde_secs")]
     pub sustained: Duration,
     #[serde(with = "crate::serde_secs")]
+    pub resend_every: Duration,
+    #[serde(with = "crate::serde_secs")]
     pub stale_after: Duration,
     pub ttft_degrade_factor: f64,
     pub ttft_window: usize,
@@ -23,6 +25,9 @@ impl PressureConfig {
         }
         if self.sustained.is_zero() {
             return Err("pressure.sustained must be positive".into());
+        }
+        if self.resend_every.is_zero() {
+            return Err("pressure.resend_every must be positive".into());
         }
         if self.stale_after <= self.sustained {
             return Err("pressure.stale_after must exceed pressure.sustained".into());
@@ -45,6 +50,7 @@ impl Default for PressureConfig {
         Self {
             queue_wait_fraction: 0.5,
             sustained: Duration::from_secs(2),
+            resend_every: Duration::from_secs(30),
             stale_after: Duration::from_secs(10),
             ttft_degrade_factor: 2.0,
             ttft_window: 50,
@@ -58,7 +64,16 @@ struct QueueState {
     pressured_since: Option<Duration>,
     last_sample: Duration,
     observed_concurrency: u32,
-    reported: bool,
+    reported_at: Option<Duration>,
+}
+
+impl QueueState {
+    fn report_due(&self, since: Duration, now: Duration, config: &PressureConfig) -> bool {
+        match self.reported_at {
+            None => now.saturating_sub(since) >= config.sustained,
+            Some(at) => self.last_sample > at && now.saturating_sub(at) >= config.resend_every,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -106,7 +121,7 @@ impl PressureDetector {
             state.pressured_since.get_or_insert(now);
         } else if still_queued == 0 {
             state.pressured_since = None;
-            state.reported = false;
+            state.reported_at = None;
         }
     }
 
@@ -149,19 +164,17 @@ impl PressureDetector {
     }
 
     pub fn tick(&mut self, now: Duration) -> Vec<Degraded> {
-        let sustained = self.config.sustained;
-        let stale_after = self.config.stale_after;
         for (service, state) in &mut self.queues {
-            if now.saturating_sub(state.last_sample) > stale_after {
+            if now.saturating_sub(state.last_sample) > self.config.stale_after {
                 state.pressured_since = None;
-                state.reported = false;
+                state.reported_at = None;
                 continue;
             }
             let Some(since) = state.pressured_since else {
                 continue;
             };
-            if !state.reported && now.saturating_sub(since) >= sustained {
-                state.reported = true;
+            if state.report_due(since, now, &self.config) {
+                state.reported_at = Some(now);
                 self.pending.push(Degraded {
                     service: service.clone(),
                     provider: String::new(),
@@ -241,6 +254,29 @@ mod tests {
     }
 
     #[test]
+    fn queue_pressure_is_resent_while_new_samples_confirm_it() {
+        let config = PressureConfig {
+            resend_every: secs(3),
+            ..PressureConfig::default()
+        };
+        let mut detector = PressureDetector::new(config, secs(5));
+        detector.record_queue_wait("llama", millis(3000), 4, 7, secs(0));
+        assert_eq!(detector.tick(secs(2)).len(), 1);
+        detector.record_queue_wait("llama", millis(3000), 4, 8, secs(3));
+        assert!(detector.tick(secs(4)).is_empty());
+        let resent = detector.tick(secs(5));
+        assert_eq!(resent.len(), 1);
+        assert_eq!(resent[0].reason, DegradedReason::QueueDepth);
+        assert_eq!(resent[0].observed_concurrency, 8);
+        assert!(detector.tick(secs(9)).is_empty());
+        detector.record_queue_wait("llama", millis(1000), 2, 8, secs(9));
+        assert_eq!(detector.tick(secs(9)).len(), 1);
+        detector.record_queue_wait("llama", millis(100), 0, 1, secs(10));
+        detector.record_queue_wait("llama", millis(100), 0, 1, secs(13));
+        assert!(detector.tick(secs(13)).is_empty());
+    }
+
+    #[test]
     fn stale_queue_pressure_clears_without_samples() {
         let mut detector = PressureDetector::new(PressureConfig::default(), secs(5));
         detector.record_queue_wait("llama", millis(4000), 0, 1, secs(0));
@@ -294,6 +330,11 @@ mod tests {
             ..PressureConfig::default()
         };
         assert!(window.validate().unwrap_err().contains("ttft_window"));
+        let resend = PressureConfig {
+            resend_every: Duration::ZERO,
+            ..PressureConfig::default()
+        };
+        assert!(resend.validate().unwrap_err().contains("resend_every"));
         let parsed: PressureConfig = serde_json::from_str(r#"{"sustained":0.5}"#).unwrap();
         assert_eq!(parsed.sustained, millis(500));
     }
