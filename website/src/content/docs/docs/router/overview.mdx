@@ -57,4 +57,4 @@ Set `route.auth.apiKeys.from` in the spec to `env:NAME` (comma-separated keys) o
 
 ## Deploying
 
-The Helm chart in `charts/multihull` runs the router as a Deployment with a Service, ConfigMap for `router.toml`, and an optional PodDisruptionBudget and controller.
+The Helm chart in `charts/multihull` runs the router as a Deployment with a Service, ConfigMap for `router.toml`, and an optional PodDisruptionBudget and controller. A grpc snapshot source needs TLS values or an explicit plaintext opt-in; see [Controller stream](/docs/router/controller-stream/#helm-chart).

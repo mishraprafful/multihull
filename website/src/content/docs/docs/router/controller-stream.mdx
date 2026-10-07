@@ -45,6 +45,41 @@ token_env = "MULTIHULL_DISCOVERY_TOKEN"
 - An `https://` snapshot URL takes the same keys and sends the same bearer token.
 - A snapshot file needs none of them, but keep it at mode `0600` when it carries credentials.
 
+## Helm chart
+
+The chart mounts cert-manager style Secrets (`tls.crt`, `tls.key`, `ca.crt`) and refuses to render a plaintext stream unless you opt in.
+
+```yaml title="values.yaml"
+controller:
+  enabled: true
+  tls:
+    secretName: multihull-controller-tls   # tls.crt, tls.key; SAN <release>-multihull-controller
+    clientCaSecret: multihull-discovery-ca # ca.crt; require router client certificates
+  token:
+    existingSecret: multihull-discovery-token
+    key: token
+router:
+  snapshot:
+    type: grpc
+    tls:
+      secretName: multihull-router-discovery # ca.crt, plus tls.crt and tls.key for mTLS
+      clientCertificate: true
+    token:
+      existingSecret: multihull-discovery-token
+      key: token
+```
+
+| Value | Effect |
+|---|---|
+| `controller.tls.secretName` | Required unless `controller.insecure`; passed as `--tls-cert` and `--tls-key` |
+| `controller.tls.clientCaSecret` | Passed as `--client-ca` (mTLS) |
+| `controller.token.existingSecret`, `.key` | Exposed as `MULTIHULL_DISCOVERY_TOKEN` |
+| `router.snapshot.tls.secretName` | Renders `grpcs://`, `ca` and, with `clientCertificate`, `client_cert` and `client_key` |
+| `router.snapshot.token.existingSecret`, `.key` | Exposed as `MULTIHULL_DISCOVERY_TOKEN` and rendered as `token_env` |
+| `controller.insecure`, `router.snapshot.insecure` | Plaintext opt-in for local clusters only |
+
+The render fails when the controller has no TLS and no opt-in, when TLS has neither a client CA nor a token, and when a grpc or http source would be plaintext without `router.snapshot.insecure`.
+
 ## Local development
 
 ```sh
