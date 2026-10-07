@@ -328,12 +328,14 @@ impl Runtime {
             router_obs::metrics::labels::PROVIDER => endpoint.provider.clone()
         )
         .record(ttft.as_secs_f64());
+        let now = self.now();
         lock(&self.pressure).record_ttft(
             &route.id,
             &endpoint.provider,
             &endpoint.id,
             ttft,
             runtime.outstanding(),
+            now,
         );
     }
 
