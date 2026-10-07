@@ -46,6 +46,7 @@ def test_snapshot_shape(
     assert route["auth"]["api_key_hashes"] == sorted(
         [hash_api_key("hull_fixture_one"), hash_api_key("hull_fixture_two")]
     )
+    assert route["auth"]["required"] is True
     assert "hull_fixture_one" not in str(snapshot)
 
     endpoints = route["endpoints"]
@@ -102,6 +103,7 @@ def test_written_snapshot_uses_the_router_json_shape(
     assert route["protocol"] == "http" and route["path_prefix"] == "/"
     assert route["failover"]["policy"] == "priority" and route["failover"]["max_retries"] == 2
     assert len(route["auth"]["api_key_hashes"]) == 1
+    assert route["auth"]["required"] is True
     assert route["sticky"] == {
         "key": "header:X-Session-Id",
         "ttl_seconds": 900,
@@ -128,7 +130,8 @@ def test_router_document_without_auth_or_sticky(
         mock_docker_spec, state, {"docker-a": create("docker")}, version=1
     )
     route = discovery.router_document(snapshot)["routes"][0]
-    assert route["auth"] == {"api_key_hashes": []} and route["sticky"] is None
+    assert route["auth"] == {"api_key_hashes": [], "required": False}
+    assert route["sticky"] is None
     assert route["endpoints"][0]["type"] == "docker"
     assert route["endpoints"][0]["health"] == "unspecified"
     assert route["endpoints"][0]["region"] == ""
@@ -148,7 +151,10 @@ def test_snapshot_skips_unreachable_endpoint(
     providers = {t.provider: create(t.type) for t in llama_spec.targets}
     snapshot = discovery.build_snapshot(llama_spec, state, providers)
     assert snapshot["routes"][0]["endpoints"] == []
-    assert snapshot["routes"][0]["auth"] == {"api_key_hashes": [hash_api_key("hull_fixture_one")]}
+    assert snapshot["routes"][0]["auth"] == {
+        "api_key_hashes": [hash_api_key("hull_fixture_one")],
+        "required": True,
+    }
 
 
 def test_snapshot_docker_endpoints(mock_docker_spec: ServiceSpec, tmp_path: Path) -> None:
@@ -224,4 +230,4 @@ def test_comment_lines_in_a_key_file_are_skipped(llama_raw: dict[str, Any], tmp_
     keys.write_text("# team one\nhull_a1_first\n  # retired key\n")
     llama_raw["route"]["auth"]["apiKeys"]["from"] = f"file:{keys}"
     block = discovery.auth_block(ServiceSpec.model_validate(llama_raw))
-    assert block == {"api_key_hashes": [hash_api_key("hull_a1_first")]}
+    assert block == {"api_key_hashes": [hash_api_key("hull_a1_first")], "required": True}

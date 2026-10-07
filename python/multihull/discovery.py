@@ -57,7 +57,7 @@ def auth_block(spec: ServiceSpec) -> dict[str, Any] | None:
     auth = spec.route.auth
     if auth is None or auth.apiKeys is None:
         return None
-    return {"api_key_hashes": api_key_hashes(spec.name, auth.apiKeys.from_)}
+    return {"api_key_hashes": api_key_hashes(spec.name, auth.apiKeys.from_), "required": True}
 
 
 def sticky_block(spec: ServiceSpec) -> dict[str, Any] | None:
@@ -202,7 +202,10 @@ def router_route(route: pb.Route) -> dict[str, Any]:
             "retry_on": list(route.failover.retry_on),
             "max_retries": route.failover.max_retries,
         },
-        "auth": {"api_key_hashes": list(route.auth.api_key_hashes)},
+        "auth": {
+            "api_key_hashes": list(route.auth.api_key_hashes),
+            "required": route.auth.required,
+        },
         "sticky": router_sticky(route.sticky) if route.HasField("sticky") else None,
         "endpoints": [router_endpoint(endpoint) for endpoint in route.endpoints],
     }
@@ -255,7 +258,12 @@ def route_to_proto(route: dict[str, Any]) -> pb.Route:
         endpoints=[endpoint_to_proto(entry) for entry in route["endpoints"]],
     )
     if route["auth"] is not None:
-        message.auth.CopyFrom(pb.Auth(api_key_hashes=list(route["auth"]["api_key_hashes"])))
+        message.auth.CopyFrom(
+            pb.Auth(
+                api_key_hashes=list(route["auth"]["api_key_hashes"]),
+                required=route["auth"]["required"],
+            )
+        )
     sticky = route["sticky"]
     if sticky is not None:
         message.sticky.CopyFrom(

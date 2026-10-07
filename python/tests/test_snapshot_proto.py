@@ -67,6 +67,7 @@ def test_dict_and_proto_snapshot_share_fields(
     assert list(proto_route.failover.retry_on) == route["failover"]["retry_on"]
     assert proto_route.failover.max_retries == 2
     assert list(proto_route.auth.api_key_hashes) == route["auth"]["api_key_hashes"]
+    assert proto_route.auth.required is True
     assert proto_route.sticky.key == "header:X-Session-Id"
     assert proto_route.sticky.ttl_seconds == 900
     assert proto_route.sticky.mode == pb.STICKY_MODE_ENDPOINT

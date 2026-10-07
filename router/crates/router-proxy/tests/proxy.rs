@@ -291,6 +291,7 @@ async fn api_key_is_required_when_route_has_hashes() {
             id: "secure".into(),
             auth: router_core::snapshot::Auth {
                 api_key_hashes: vec![key.hash()],
+                required: true,
             },
             endpoints: vec![endpoint("a", "p1", upstream.url(), 1)],
             ..Default::default()

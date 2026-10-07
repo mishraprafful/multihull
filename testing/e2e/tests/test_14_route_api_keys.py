@@ -81,6 +81,7 @@ def test_snapshot_carries_only_hashes(
     load(RouterClient(router.base_url, api_key=route_keys[0]), 1, concurrency=1)
     document = auth_controller.snapshot()
     assert document is not None
+    assert document["routes"][0]["auth"]["required"] is True
     hashes = document["routes"][0]["auth"]["api_key_hashes"]
     assert hashes == sorted(hash_api_key(key) for key in route_keys)
     assert all(HASH.fullmatch(digest) for digest in hashes)
