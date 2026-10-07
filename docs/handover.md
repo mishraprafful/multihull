@@ -100,6 +100,7 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some 
 ## Session log
 
 ### 2026-10-08
+- Issues 92, 93 (branch `test/e2e-isolation-and-test02`): e2e runs are isolated by `E2E_RUN_ID` (service, containers, labels, sweeper, temp dir, router node id, host port block), so concurrent runs on one machine no longer collide. `test_02` accepts a `transient` or `probe` failover from primary: PR 86's first e2e attempt failed because the controller marked the stopped primary down before any request reached it, and the probe then ejected it.
 - PR 86 (issues 53, 54): a stream reaching `timeouts.total` feeds no circuit and ends with a non-retryable `total_timeout` event or trailer; selection reserves headroom before taking the half-open trial. Each fix has a test that failed first.
 - PR 90 (issue 48): release tags push the chart to `oci://ghcr.io/mishraprafful/charts/multihull`, `images.yml` tags images with the release version (no `latest`), docs gained "Install from OCI" in the router overview.
 - Decision: one script, `charts/package.sh`, packages for both CI and release, so the PR dry run exercises the release path. It rejects tags that are not `v<semver>`, and build metadata, because `+` is not valid in an image tag.
