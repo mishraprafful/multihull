@@ -36,9 +36,9 @@ The router retries only when all of these hold:
 
 - zero bytes committed to the client,
 - request body fully buffered,
-- the method is idempotent, or an `Idempotency-Key` is present, or the outcome is Capacity or a connect failure.
+- the method is idempotent, or an `Idempotency-Key` is present, or the outcome is Capacity, a connect failure or a 408 (the upstream never received the request).
 
-Retries go to a different provider, at most two per request, within a per-route retry budget described below.
+Retries go to a different provider, at most two per request, within a per-route retry budget described below. When every untried provider has an open circuit, the retry goes back to a provider already tried that answered and whose circuit is still closed: a Modal URL or a Kubernetes Service spreads requests over replicas, so a second try usually lands on a healthy one, while a provider with an open circuit is known to fail. A connect failure never retries the same endpoint.
 
 ## When the fallback fails too
 

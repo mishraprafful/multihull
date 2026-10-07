@@ -20,7 +20,7 @@ reliability:
 - At least two providers warm.
 - Fallbacks never scale to zero.
 - On-demand before spot.
-- Capacity over-provisioned by 1.4x, the Envoy priority-spillover factor.
+- Capacity over-provisioned by 1.4x, the Envoy priority-spillover factor. `hull validate`, `plan` and `deploy` warn when the fallbacks' combined `replicas.max` is below 1.4 times the primary's.
 
 ## Cost features are opt-in
 

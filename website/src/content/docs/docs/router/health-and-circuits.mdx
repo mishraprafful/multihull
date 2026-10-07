@@ -11,8 +11,8 @@ import { Aside } from '@astrojs/starlight/components';
 |---|---|---|
 | Success | 2xx | Raises adaptive limit |
 | Capacity | 429, queue depth, TTFT timeout | Lowers limit by 0.7; never ejects |
-| Transient | connect failure, 502, 503, 504, reset | Feeds circuit |
-| Fatal | 500 with body, 4xx | Feeds circuit |
+| Transient | connect failure, 408, 502, 503, 504, reset | Feeds circuit |
+| Fatal | 500 with body, other 4xx | Feeds circuit |
 | ClientAbort | caller disconnected | Ignored |
 
 <Aside type="tip" title="Busy is not broken">
@@ -63,7 +63,7 @@ Opens when 50% of a provider's endpoints are open, or on 401/403 (credentials ar
 
 ## Panic threshold
 
-If more than 50% of all endpoints are open, the router routes to all of them rather than none.
+If more than 50% of all endpoints are open, the router routes to all of them rather than none. A retry first goes back to a healthy provider it already tried before it uses the panic pool.
 
 ## Cold-start masking
 
