@@ -95,16 +95,31 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Destroy
         if: always()
-        working-directory: ${{ runner.temp }}/live
         run: |
-          if [ -f multihull.yaml ]; then
+          workdir="$RUNNER_TEMP/live"
+          mkdir -p "$workdir/logs"
+          if [ -f "$workdir/multihull.yaml" ]; then
+            cd "$workdir"
             uv run --project "$GITHUB_WORKSPACE/testing/live" hull destroy multihull.yaml --yes \
-              --state .multihull/state.db --snapshot-out .multihull/snapshot.json
+              --state .multihull/state.db --snapshot-out .multihull/snapshot.json 2>&1 \
+              | tee logs/workflow-destroy.log
+          else
+            echo "no rendered spec; nothing to destroy" | tee "$workdir/logs/workflow-destroy.log"
           fi
       - name: Stop Modal apps left by this run
         if: always()
         working-directory: testing/live
-        run: uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" --env "$MODAL_ENVIRONMENT"
+        run: >
+          uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}"
+          --env "$MODAL_ENVIRONMENT" | tee "$RUNNER_TEMP/live/logs/backstop.log"
+      - name: Job summary
+        if: always()
+        working-directory: testing/live
+        run: >
+          uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
+          --job-status "$JOB_STATUS" --artifact live-smoke-logs --spec kind-modal
+        env:
+          JOB_STATUS: ${{ job.status }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -114,6 +129,7 @@ jobs:
             ${{ runner.temp }}/live/multihull.yaml
             ${{ runner.temp }}/live/router.toml
             ${{ runner.temp }}/live/summary.md
+            ${{ runner.temp }}/live/summary.json
             ${{ runner.temp }}/live/results.xml
           if-no-files-found: ignore
 
