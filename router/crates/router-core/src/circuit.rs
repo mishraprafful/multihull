@@ -195,7 +195,7 @@ impl Circuit {
                 since,
                 backoff_n,
                 wait,
-            } if now >= since + wait => State::HalfOpen {
+            } if self.backoff_elapsed(since, wait, now) => State::HalfOpen {
                 admitted: 0,
                 started: now,
                 successes: 0,
@@ -278,6 +278,10 @@ impl Circuit {
         true
     }
 
+    fn backoff_elapsed(&self, since: Duration, wait: Duration, now: Duration) -> bool {
+        !self.ejected_by_probe && now >= since + wait
+    }
+
     fn advance(&mut self, now: Duration) {
         if let State::Open {
             since,
@@ -285,7 +289,7 @@ impl Circuit {
             wait,
         } = self.state
         {
-            if now >= since + wait {
+            if self.backoff_elapsed(since, wait, now) {
                 self.state = State::HalfOpen {
                     admitted: 0,
                     started: now,
@@ -805,17 +809,9 @@ mod tests {
                 wait: secs(5)
             }
         );
-        assert!(!circuit.eject(secs(2), &mut rng));
-        assert!(circuit.eject(secs(7), &mut rng));
-        assert_eq!(
-            circuit.state(),
-            State::Open {
-                since: secs(7),
-                backoff_n: 1,
-                wait: secs(10)
-            }
-        );
         assert!(circuit.ejected_by_probe());
+        assert!(!circuit.eject(secs(2), &mut rng));
+        assert!(!circuit.eject(secs(7), &mut rng));
         assert!(circuit.release(secs(8)));
         assert_eq!(
             circuit.state(),
@@ -823,11 +819,53 @@ mod tests {
                 admitted: 0,
                 started: secs(8),
                 successes: 0,
-                backoff_n: 1
+                backoff_n: 0
             }
         );
         assert!(!circuit.ejected_by_probe());
-        assert!(!circuit.release(secs(9)));
+        assert!(!circuit.release(secs(8)));
+        assert!(circuit.admit(secs(8), &mut rng));
+        assert!(circuit.eject(secs(9), &mut rng));
+        assert_eq!(
+            circuit.state(),
+            State::Open {
+                since: secs(9),
+                backoff_n: 1,
+                wait: secs(10)
+            }
+        );
+        assert!(circuit.release(secs(10)));
+        assert!(matches!(
+            circuit.state(),
+            State::HalfOpen { backoff_n: 1, .. }
+        ));
+    }
+
+    #[test]
+    fn probe_ejection_holds_the_circuit_open_past_its_backoff_until_released() {
+        let mut circuit = Circuit::default();
+        let mut rng = ZeroRng;
+        assert!(circuit.eject(secs(1), &mut rng));
+        for later in [secs(7), secs(600), secs(MAX_BACKOFF_SECS * 10)] {
+            assert!(circuit.peek(later).is_open());
+            assert!(!circuit.admit(later, &mut rng));
+            circuit.record(Outcome::Success, later, &mut rng);
+            assert!(circuit.state().is_open());
+        }
+        let back = secs(MAX_BACKOFF_SECS * 10);
+        assert!(circuit.release(back));
+        assert!(circuit.admit(back, &mut rng));
+        circuit.record(Outcome::Fatal, back, &mut rng);
+        assert_eq!(
+            circuit.state(),
+            State::Open {
+                since: back,
+                backoff_n: 1,
+                wait: secs(10)
+            }
+        );
+        assert!(circuit.peek(back + secs(9)).is_open());
+        assert!(!circuit.peek(back + secs(10)).is_open());
     }
 
     #[test]
