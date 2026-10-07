@@ -177,8 +177,8 @@ class ApiKeys(SpecModel):
         alias="from",
         pattern=r"^(env|file):.+$",
         description=(
-            "env:NAME (comma-separated keys) or file:PATH (one key per line). "
-            'Keys are hull_<id>_<secret>; only blake3("<id>_<secret>") reaches the snapshot.'
+            "`env:NAME` (comma-separated keys) or `file:PATH` (one key per line). Keys are "
+            '`hull_<id>_<secret>`; only `blake3("<id>_<secret>")` reaches the snapshot.'
         ),
     )
 
