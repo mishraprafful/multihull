@@ -10,7 +10,8 @@
     "secret": {
       "usernameEnv": "GHCR_USERNAME",
       "passwordEnv": "GHCR_TOKEN"
-    }
+    },
+    "builder_version": "2025.06"
   },
   "gpu": null,
   "memory_mib": 512,

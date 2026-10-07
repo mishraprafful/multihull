@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -57,6 +58,7 @@ class FakeModal:
         self.cls_kwargs: dict[str, Any] = {}
         self.web_server_kwargs: dict[str, Any] = {}
         self.deployed: list[tuple[str, str]] = []
+        self.builder_versions: list[str | None] = []
         self.autoscaler: dict[str, int] = {}
         self.runners = 1
         self.log_entries: list[FakeLogEntry] = []
@@ -95,6 +97,7 @@ class FakeModal:
                 if fake.deploy_error is not None:
                     raise fake.deploy_error
                 fake.deployed.append((name, environment_name))
+                fake.builder_versions.append(os.environ.get("MODAL_IMAGE_BUILDER_VERSION"))
 
             @staticmethod
             def lookup(name: str, environment_name: str | None = None) -> Any:

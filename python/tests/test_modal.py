@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import timedelta
@@ -10,6 +11,8 @@ import pytest
 from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref, Target
 from multihull.providers.modal import (
+    IMAGE_BUILDER_VERSION,
+    IMAGE_BUILDER_VERSION_ENV,
     MISSING_COMMAND_NOTE,
     CredentialStatus,
     ModalProvider,
@@ -28,6 +31,11 @@ from tests.fake_modal import FakeAuthError, FakeLogEntry, FakeModal
 REGISTRY_ENV = {"GHCR_USERNAME": "fixture-user", "GHCR_TOKEN": "fixture-registry-value"}
 FAKE_TOKEN_ID = "ak-fixture-token-id"
 FAKE_TOKEN_SECRET = "as-fixture-token-secret"
+
+
+@pytest.fixture(autouse=True)
+def default_image_builder_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(IMAGE_BUILDER_VERSION_ENV, raising=False)
 
 
 def test_golden_app_spec(target_for) -> None:
@@ -232,6 +240,22 @@ def test_deploy_pulls_private_image_with_serialized_server(
     }
     assert fake_modal.deployed == [("multihull-live-mock", "main")]
     assert url == "https://ws--multihull-live-mock.modal.run"
+
+
+def test_deploy_pins_image_builder_version_only_while_deploying(
+    mock_kind_modal_spec: ServiceSpec,
+    fake_modal: FakeModal,
+    registry_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = mock_modal_target(mock_kind_modal_spec)
+    deploy_with_sdk(render_app_spec(target))
+    assert fake_modal.builder_versions == [IMAGE_BUILDER_VERSION]
+    assert IMAGE_BUILDER_VERSION_ENV not in os.environ
+    monkeypatch.setenv(IMAGE_BUILDER_VERSION_ENV, "PREVIEW")
+    deploy_with_sdk(render_app_spec(target))
+    assert fake_modal.builder_versions[-1] == "PREVIEW"
+    assert os.environ[IMAGE_BUILDER_VERSION_ENV] == "PREVIEW"
 
 
 def test_apply_error_keeps_image_build_hint_and_hides_secrets(

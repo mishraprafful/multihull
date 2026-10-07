@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -51,6 +52,8 @@ ENV_CREDENTIALS = f"{TOKEN_ID_ENV}/{TOKEN_SECRET_ENV}"
 CONFIG_CREDENTIALS = "~/.modal.toml"
 CREDENTIALS_TIMEOUT_SECONDS = 10.0
 REDACTED = "<redacted>"
+IMAGE_BUILDER_VERSION = "2025.06"
+IMAGE_BUILDER_VERSION_ENV = "MODAL_IMAGE_BUILDER_VERSION"
 
 
 class CredentialStatus(StrEnum):
@@ -143,6 +146,23 @@ def check_credentials(timeout: float = CREDENTIALS_TIMEOUT_SECONDS) -> Credentia
     return CredentialCheck(CredentialStatus.ACCEPTED, f"Modal accepted {source}")
 
 
+def image_builder_version() -> str:
+    return os.environ.get(IMAGE_BUILDER_VERSION_ENV) or IMAGE_BUILDER_VERSION
+
+
+@contextmanager
+def env_override(name: str, value: str) -> Iterator[None]:
+    previous = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = previous
+
+
 def modal_block(desired: Target) -> ModalBlock:
     return desired.target.modal or ModalBlock()
 
@@ -164,7 +184,11 @@ def render_app_spec(desired: Target) -> dict[str, Any]:
         "environment": block.environment,
         "region": block.region,
         "tags": {SERVICE_LABEL: desired.name},
-        "image": {"ref": desired.image_ref, "secret": registry_secret_names(block.registrySecret)},
+        "image": {
+            "ref": desired.image_ref,
+            "secret": registry_secret_names(block.registrySecret),
+            "builder_version": image_builder_version(),
+        },
         "gpu": modal_gpu(desired),
         "memory_mib": memory_to_mib(desired.service.resources.memory),
         "min_containers": replicas.min,
@@ -400,5 +424,6 @@ def deploy_with_sdk(spec: dict[str, Any]) -> str:
         def serve(self) -> None:
             return None
 
-    app.deploy(name=spec["app_name"], environment_name=spec["environment"])
+    with env_override(IMAGE_BUILDER_VERSION_ENV, spec["image"]["builder_version"]):
+        app.deploy(name=spec["app_name"], environment_name=spec["environment"])
     return str(Server().serve.get_web_url())
