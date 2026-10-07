@@ -5,6 +5,7 @@ chart="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 values="$chart/tests/values"
 helm="${HELM:-helm}"
 multihull="${MULTIHULL_BIN:-$chart/../../router/target/release/multihull}"
+read -r -a hull <<<"${HULL:-hull}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 failures=0
@@ -78,6 +79,30 @@ template_fails() {
   fi
 }
 
+controller_accepted() {
+  local name=$1 line
+  shift
+  if ! "$helm" template multihull "$chart" --show-only templates/controller-deployment.yaml "$@" >"$work/$name-controller.yaml"; then
+    fail "$name" "helm template failed"
+    return 0
+  fi
+  awk '/^ *command:$/ {list = 1; next} list && /^ *- / {sub(/^ *- /, ""); gsub(/"/, ""); print; next} list {exit}' \
+    "$work/$name-controller.yaml" >"$work/$name.args"
+  local args=()
+  while IFS= read -r line; do
+    args+=("$line")
+  done <"$work/$name.args"
+  if [ "${#args[@]}" -lt 3 ] || [ "${args[0]}" != hull ] || [ "${args[1]}" != controller ]; then
+    fail "$name" "controller command is not 'hull controller ...': ${args[*]}"
+  elif [ "${args[2]}" != /etc/multihull/multihull.yaml ]; then
+    fail "$name" "controller spec argument is '${args[2]}', expected /etc/multihull/multihull.yaml"
+  elif ! "${hull[@]}" "${args[@]:1}" --help >/dev/null 2>"$work/$name.err"; then
+    fail "$name" "hull rejected the controller args '${args[*]}': $(cat "$work/$name.err")"
+  else
+    echo "ok   $name (hull controller accepts: ${args[*]:2})"
+  fi
+}
+
 lacks() {
   local name=$1 text=$2
   if grep -qF "$text" "$work/$name.toml"; then
@@ -136,6 +161,10 @@ before extra-config-tables-only "[retry]" "[log]"
 
 template_fails extra-config-map "router.extraConfig must be a string of TOML" \
   --set router.extraConfig.node_id=router-eu
+
+controller_accepted controller-args \
+  --set controller.enabled=true --set controller.stateBackend.existingSecret=state \
+  --set controller.specConfigMap=spec
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures chart render check(s) failed"

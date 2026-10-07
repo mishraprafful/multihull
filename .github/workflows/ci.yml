@@ -47,6 +47,7 @@ jobs:
             chart:
               - 'charts/**'
               - 'router/**'
+              - 'python/**'
               - '.github/workflows/ci.yml'
             mock_server:
               - 'testing/mock-server/**'
@@ -137,9 +138,15 @@ jobs:
           workspaces: router
       - run: cargo build -p multihull
         working-directory: router
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+      - run: uv sync --locked --project python
       - run: charts/multihull/tests/render.sh
         env:
           MULTIHULL_BIN: ${{ github.workspace }}/router/target/debug/multihull
+          HULL: uv run --project ${{ github.workspace }}/python hull
 
   mock-server:
     needs: changes

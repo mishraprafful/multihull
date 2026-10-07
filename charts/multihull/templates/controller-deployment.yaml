@@ -32,9 +32,8 @@ spec:
           command:
             - hull
             - controller
-            - "--spec"
             - "/etc/multihull/multihull.yaml"
-            - "--listen"
+            - "--grpc-listen"
             - "0.0.0.0:{{ .Values.controller.grpcPort }}"
           ports:
             - name: grpc
