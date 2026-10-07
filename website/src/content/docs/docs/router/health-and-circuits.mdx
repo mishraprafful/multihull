@@ -25,7 +25,7 @@ The router probes every endpoint's health path (`container.health.path` from the
 
 ## Mid-stream failures
 
-Once the first byte of a response has reached the client, the router never retries. If the upstream drops an SSE stream (route protocol `sse` or `Content-Type: text/event-stream`) the router appends one final event
+Once the first byte of a response has reached the client, the router never retries. SSE responses (route protocol `sse` or `Content-Type: text/event-stream`) are forwarded event by event: complete events pass through at once, and bytes after the last blank line (LF, CRLF or CR) wait for their event to finish. If the upstream drops the stream, the router discards the incomplete event and appends one final event
 
 ```
 data: {"error":{"type":"upstream_disconnected","retryable":true,"provider":"<name>","reason":"disconnect"}}
@@ -33,7 +33,7 @@ data: {"error":{"type":"upstream_disconnected","retryable":true,"provider":"<nam
 data: [DONE]
 ```
 
-and ends the response cleanly, so SDKs can retry with the same `Idempotency-Key`. HTTP/2 non-SSE streams end with an `x-hull-error: upstream_disconnected` trailer; HTTP/1 non-SSE streams are closed. Each case counts as `router_requests_total{outcome="upstream_disconnected"}` and feeds the endpoint circuit as `Transient`.
+and ends the response cleanly, so SDKs never parse truncated JSON and can retry with the same `Idempotency-Key`. A clean upstream end flushes any trailing bytes unchanged. Non-SSE streams never end as if complete: HTTP/2 requests with `te: trailers` or a gRPC content type get an `x-hull-error: upstream_disconnected` trailer, other HTTP/2 streams are reset (`RST_STREAM`) and HTTP/1 connections are closed. Each case counts as `router_requests_total{outcome="upstream_disconnected"}` and feeds the endpoint circuit as `Transient`.
 
 ## Circuit per endpoint
 
@@ -57,7 +57,7 @@ If more than 50% of all endpoints are open, the router routes to all of them rat
 
 ## Cold-start masking
 
-Gradient2 adaptive concurrency per endpoint on time-to-first-token. A bounded per-service admission queue waits up to 5 s, then returns 429 with `Retry-After`. Sustained pressure lowers the spillover threshold and sends a pre-warm signal to the controller, which raises warm replicas on healthy targets by one per `Degraded`. Once no `Degraded` has arrived for `--degraded-cooldown` (default 10 m) the controller lowers that floor one step per cooldown until the pre-degraded minimum is back, never below the spec minimum and never below `reliability.minWarmProviders` warm targets.
+Gradient2 adaptive concurrency per endpoint on time-to-first-token. A bounded per-service admission queue waits up to 5 s, then returns 429 with `Retry-After`. Sustained pressure lowers the spillover threshold and sends a pre-warm signal to the controller, which raises warm replicas on healthy targets by one per `Degraded`. Once no `Degraded` has arrived for `--degraded-cooldown` (default 10 m) the controller lowers that floor one step per cooldown until the pre-degraded minimum is back, never below the spec minimum and never below `reliability.minWarmProviders` warm targets. A scale call that fails leaves the floor unchanged and is retried on the next `Degraded` or cooldown step.
 
 ## Tuning
 

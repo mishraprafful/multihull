@@ -6,6 +6,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from multihull import discovery, engine
 from multihull._proto import discovery_pb2 as pb
 from multihull._proto import discovery_pb2_grpc as pb_grpc
 from multihull.deploy import DEFAULT_SNAPSHOT_PATH
-from multihull.providers.base import Observed, Provider, Ref
+from multihull.providers.base import Observed, Provider, Ref, ScaleRefused
 from multihull.spec import ServiceSpec
 from multihull.state.base import StateBackend
 
@@ -27,6 +28,13 @@ DEFAULT_DEGRADED_COOLDOWN = timedelta(minutes=10)
 DEFAULT_GRPC_LISTEN = "0.0.0.0:7700"
 SCALABLE_PHASES = {"Ready"}
 SCALE_BACK_TICKS_PER_COOLDOWN = 10
+PERMANENT_SCALE_REFUSALS = (ScaleRefused, NotImplementedError)
+
+
+class ScaleResult(Enum):
+    APPLIED = "applied"
+    REFUSED = "refused"
+    FAILED = "failed"
 
 
 @dataclass
@@ -189,14 +197,10 @@ class Controller:
             new_min = max(floor, min(current + 1, replicas.max))
             if new_min == current:
                 continue
-            self.pre_degraded_min.setdefault(target.provider, current)
-            try:
-                self.providers[target.provider].scale(
-                    Ref.from_json(record.ref), new_min, replicas.max
-                )
-            except Exception as exc:
-                log.error("scale %s to min=%d failed: %s", target.provider, new_min, exc)
-            else:
+            result = self.apply_scale("scale", target.provider, record.ref, new_min, replicas.max)
+            if result is ScaleResult.FAILED:
+                continue
+            if result is ScaleResult.APPLIED:
                 log.info(
                     "scaled %s min replicas %d -> %d (max %d) after degraded %s",
                     target.provider,
@@ -205,11 +209,37 @@ class Controller:
                     replicas.max,
                     provider,
                 )
+            self.pre_degraded_min.setdefault(target.provider, current)
             self.min_replicas[target.provider] = new_min
             action = ScaleAction(target.provider, current, new_min, replicas.max)
             actions.append(action)
             self.scale_actions.append(action)
         return actions
+
+    def apply_scale(
+        self, verb: str, provider: str, ref: str, new_min: int, maximum: int
+    ) -> ScaleResult:
+        try:
+            self.providers[provider].scale(Ref.from_json(ref), new_min, maximum)
+        except PERMANENT_SCALE_REFUSALS as exc:
+            log.warning(
+                "%s %s to min=%d failed: refused by provider, recorded as intent: %s",
+                verb,
+                provider,
+                new_min,
+                exc,
+            )
+            return ScaleResult.REFUSED
+        except Exception as exc:
+            log.error(
+                "%s %s to min=%d failed: %s; keeping the current min and retrying later",
+                verb,
+                provider,
+                new_min,
+                exc,
+            )
+            return ScaleResult.FAILED
+        return ScaleResult.APPLIED
 
     async def handle_degraded(self, message: pb.Degraded) -> list[ScaleAction]:
         reason = pb.DegradedReason.Name(message.reason)
@@ -259,13 +289,12 @@ class Controller:
             record = records.get(target.provider)
             if record is None:
                 continue
-            try:
-                self.providers[target.provider].scale(
-                    Ref.from_json(record.ref), new_min, replicas.max
-                )
-            except Exception as exc:
-                log.error("scale back %s to min=%d failed: %s", target.provider, new_min, exc)
-            else:
+            result = self.apply_scale(
+                "scale back", target.provider, record.ref, new_min, replicas.max
+            )
+            if result is ScaleResult.FAILED:
+                continue
+            if result is ScaleResult.APPLIED:
                 log.info(
                     "scaled back %s min replicas %d -> %d (max %d): no degraded for %s",
                     target.provider,

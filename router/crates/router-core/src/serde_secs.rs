@@ -12,7 +12,8 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duratio
             "duration must be a non-negative number of seconds",
         ));
     }
-    Ok(Duration::from_secs_f64(secs))
+    Duration::try_from_secs_f64(secs)
+        .map_err(|_| serde::de::Error::custom(format!("duration of {secs} seconds is too large")))
 }
 
 #[cfg(test)]
@@ -34,5 +35,12 @@ mod tests {
         assert_eq!(holder.wait, Duration::from_millis(1500));
         assert_eq!(serde_json::to_string(&holder).unwrap(), r#"{"wait":1.5}"#);
         assert!(serde_json::from_str::<Holder>(r#"{"wait":-1}"#).is_err());
+    }
+
+    #[test]
+    fn durations_too_large_for_duration_are_errors_not_panics() {
+        let error = serde_json::from_str::<Holder>(r#"{"wait":1e20}"#).unwrap_err();
+        assert!(error.to_string().contains("too large"), "{error}");
+        assert!(serde_json::from_str::<Holder>(r#"{"wait":1.8446744073709552e19}"#).is_err());
     }
 }
