@@ -100,6 +100,7 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some 
 ## Session log
 
 ### 2026-10-08
+- Issue 95: `publish-crates` gains `contents: read` (job-level `permissions` set unlisted scopes to none, so checkout failed on the private repo); no other job has the pattern. `kind.yml` pins Helm v4.3.0 like the chart and release jobs.
 - PR 86 (issues 53, 54): a stream reaching `timeouts.total` feeds no circuit and ends with a non-retryable `total_timeout` event or trailer; selection reserves headroom before taking the half-open trial. Each fix has a test that failed first.
 - PR 90 (issue 48): release tags push the chart to `oci://ghcr.io/mishraprafful/charts/multihull`, `images.yml` tags images with the release version (no `latest`), docs gained "Install from OCI" in the router overview.
 - Decision: one script, `charts/package.sh`, packages for both CI and release, so the PR dry run exercises the release path. It rejects tags that are not `v<semver>`, and build metadata, because `+` is not valid in an image tag.
