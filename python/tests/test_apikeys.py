@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from multihull import apikeys
 from multihull.apikeys import ApiKeyError
+
+VECTOR = json.loads(
+    (Path(__file__).resolve().parents[2] / "proto" / "testdata" / "api-key-hash.json").read_text()
+)
+
+
+def test_hash_matches_the_cross_language_vector() -> None:
+    assert apikeys.hash_input(VECTOR["key"]) == VECTOR["hash_input"]
+    assert apikeys.hash_api_key(VECTOR["key"]) == VECTOR["blake3"]
 
 
 def test_secret_keeps_its_underscores_and_the_prefix_is_not_hashed() -> None:

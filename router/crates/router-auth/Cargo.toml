@@ -10,3 +10,6 @@ publish = false
 [dependencies]
 blake3 = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

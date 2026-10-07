@@ -102,6 +102,21 @@ mod tests {
     }
 
     #[test]
+    fn hash_matches_the_cross_language_vector() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../proto/testdata/api-key-hash.json"
+        )))
+        .unwrap();
+        let expected = vector["blake3"].as_str().unwrap();
+        let key = ApiKey::parse(vector["key"].as_str().unwrap()).unwrap();
+        assert_eq!(key.hash(), expected);
+        let input = vector["hash_input"].as_str().unwrap();
+        assert_eq!(blake3::hash(input.as_bytes()).to_hex().as_str(), expected);
+        assert!(key.matches_any([expected]));
+    }
+
+    #[test]
     fn rejects_malformed_keys() {
         assert_eq!(ApiKey::parse("sk_abc_def"), Err(KeyError::MissingPrefix));
         assert_eq!(ApiKey::parse("hull_abc"), Err(KeyError::Malformed));
