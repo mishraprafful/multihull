@@ -4,7 +4,7 @@ import threading
 import time
 
 from e2e.client import Outcome, RouterClient, failures, fresh_keys, load
-from e2e.harness import Deployment, Router
+from e2e.harness import Deployment, Router, probe_ejection_budget
 from e2e.sampler import EndpointSampler
 from e2e.waiting import wait_until
 
@@ -35,7 +35,11 @@ def test_traffic_returns_to_primary_only_after_the_circuit_closes(
         idempotency_key=fresh_keys(),
         on_result=stop_primary_after_warmup,
     )
-    wait_until(lambda: "open" in sampler.states(), 5, message="primary circuit open after the stop")
+    wait_until(
+        lambda: "open" in sampler.states(),
+        max(5.0, probe_ejection_budget()) + 1,
+        message="primary circuit open after the stop",
+    )
 
     deployment.start_container("primary")
     wait_until(
