@@ -57,10 +57,10 @@ Rules for entries
 ## TODO from the PR 29 review
 
 **Probes can mask a failing model (do these together, plus a new harness row where /health returns 200 but inference returns 503 and the circuit must still open and stay open):**
-- [ ] `router/crates/router-proxy/src/runtime.rs:98`: `ProbeTransition::CameUp` calls `circuit.restore()`, closing from open and skipping backoff and the half-open trial; it also fires on Unknown to Up about 15 s after startup, force-closing a circuit live 5xx traffic opened. Restore only on Down to Up caused by a probe ejection, and move to half-open rather than closed.
-- [ ] `router/crates/router-core/src/circuit.rs:255`: probe successes count toward closing half-open and `close()` resets `backoff_n`, so /health alone can close the circuit. Require at least one admitted-request success, or count probe successes separately.
-- [ ] `router/crates/router-proxy/src/runtime.rs:127`: half-open `admit()` ignores the prober, so requests reach an endpoint probes still report down. Treat probe-down as open in admit and the peek-based gates while probes are enabled.
-- [ ] `router/crates/router-proxy/src/body.rs:86`: a mid-stream disconnect is recorded after the Success recorded at first byte (handler.rs:192), giving an exact 0.5 error ratio that strict `>` in `should_trip` never exceeds. For streamed responses record the outcome when the body ends.
+- [x] `router/crates/router-proxy/src/runtime.rs:98`: `ProbeTransition::CameUp` calls `circuit.restore()`, closing from open and skipping backoff and the half-open trial; it also fires on Unknown to Up about 15 s after startup, force-closing a circuit live 5xx traffic opened. Restore only on Down to Up caused by a probe ejection, and move to half-open rather than closed.
+- [x] `router/crates/router-core/src/circuit.rs:255`: probe successes count toward closing half-open and `close()` resets `backoff_n`, so /health alone can close the circuit. Require at least one admitted-request success, or count probe successes separately.
+- [x] `router/crates/router-proxy/src/runtime.rs:127`: half-open `admit()` ignores the prober, so requests reach an endpoint probes still report down. Treat probe-down as open in admit and the peek-based gates while probes are enabled.
+- [x] `router/crates/router-proxy/src/body.rs:86`: a mid-stream disconnect is recorded after the Success recorded at first byte (handler.rs:192), giving an exact 0.5 error ratio that strict `>` in `should_trip` never exceeds. For streamed responses record the outcome when the body ends.
 
 **Router config and probing:**
 - [ ] `router/crates/router-core/src/snapshot.rs:205` (also `router-proxy/src/probe.rs:35`): a health path without a leading slash builds a probe URL with the wrong host and ejects every endpoint. Prepend `/` in `health_path()` and validate `Health.path` in `python/multihull/spec.py`.
@@ -81,7 +81,7 @@ Rules for entries
 - [ ] `charts/multihull/templates/configmap.yaml:40`: tuning values rendered raw; large integers become Go floats (`1e+06`) and string durations are unquoted. Format by type or use toToml, and guard a null `router.tuning` with `default dict`.
 
 **Harness and docs:**
-- [ ] `testing/e2e/tests/test_03_health_503.py:53`: the 20 percent leak allowance is timing dependent. Sample the circuit during load and assert it is never closed while probes report down.
+- [x] `testing/e2e/tests/test_03_health_503.py:53`: the 20 percent leak allowance is timing dependent. Sample the circuit during load and assert it is never closed while probes report down.
 - [ ] `testing/e2e/tests/test_10_degraded.py:64`: `scale_before` counts all scale lines but slices only scale-back lines. Count scale-back lines separately.
 - [ ] Docs still say the `upstream_disconnected` event is planned and the retry budget is not configurable (`website/src/content/docs/docs/concepts/targets-and-failover.mdx` lines 47 and 53, `docs/design/architecture-plan.md:236`, `docs/design/testing-strategy.md:56`); PR 29 made both exist. `testing/e2e/README.md` still calls the recovery row xfail although it passes under the prober.
 
@@ -90,6 +90,7 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some 
 ## Session log
 
 ### 2026-10-07
+- Branch `fix/probe-masking` (local) fixes the four probe-masking items, one `fix(router)` commit each with tests that failed first, plus a follow-up counting a stream the client leaves after data as success: probe recovery releases into half-open, only admitted-request successes close half-open, a probe ejection holds the circuit open until the probe is up, streamed outcomes settle once at body end; new e2e row test_13 (health 200, inference 500), test_03 asserts zero leakage, test_08 xfail removed; e2e 3 runs of 27 rows all green, about 3 m 50 s each.
 - Hunk-guided review of PR 29 by three parallel reviewers. Four findings block the first live run; the rest are under "TODO from the PR 29 review".
 - Fixed the four blockers on `fix/live-run-blockers`, one `fix(...)` commit each with tests that failed first: `serde_secs` uses `try_from_secs_f64` and circuit backoffs are capped at one day; the controller updates `min_replicas` only after a successful scale call, keeping refusals as logged intent; SSE bodies are forwarded up to the last complete event boundary and a disconnect drops the held partial event; the HTTP/2 error trailer is sent only for `te: trailers` or gRPC, otherwise the stream is reset.
 - Gates: `cargo fmt --check`, `clippy -D warnings`, ruff and both test suites clean; e2e test_07 (raw SSE frames) and test_10 (refused scale attempts) pass unchanged. One unidentified Rust test failure in the first workspace run did not recur in 15 reruns.
