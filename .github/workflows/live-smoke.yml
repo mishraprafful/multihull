@@ -1,0 +1,141 @@
+name: Live smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      mock_image:
+        description: Mock server image that Modal pulls and kind loads
+        default: ghcr.io/mishraprafful/multihull-mock-server:main
+  pull_request:
+    types: [labeled, synchronize]
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+env:
+  KIND_CLUSTER: multihull-live
+  MODAL_ENVIRONMENT: main
+  APP_PREFIX: multihull-live-
+
+jobs:
+  gate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'live-smoke') ||
+      (github.event.action == 'synchronize' &&
+        contains(github.event.pull_request.labels.*.name, 'live-smoke'))
+    runs-on: ubuntu-latest
+    outputs:
+      modal: ${{ steps.check.outputs.modal }}
+    steps:
+      - id: check
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          if [ -n "$MODAL_TOKEN_ID" ] && [ -n "$MODAL_TOKEN_SECRET" ]; then
+            echo "modal=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "modal=false" >> "$GITHUB_OUTPUT"
+            echo "MODAL_TOKEN_ID or MODAL_TOKEN_SECRET is not available; skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  smoke:
+    needs: gate
+    if: needs.gate.outputs.modal == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: live-smoke
+      cancel-in-progress: false
+    env:
+      MOCK_IMAGE: ${{ inputs.mock_image || 'ghcr.io/mishraprafful/multihull-mock-server:main' }}
+      LIVE_SPEC: kind-modal
+      LIVE_SERVICE: live-${{ github.run_id }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER }}
+          config: testing/live/kind-config.yaml
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build --release -p multihull
+        working-directory: router
+      - run: docker build -t "$MOCK_IMAGE" testing/mock-server
+      - run: kind load docker-image "$MOCK_IMAGE" --name "$KIND_CLUSTER"
+      - run: uv sync --locked --project testing/live
+      - name: Doctor, deploy, baseline, failover to Modal, recovery, logs, destroy
+        timeout-minutes: 22
+        run: >
+          uv run --project testing/live pytest -q -x
+          -c testing/live/pyproject.toml testing/live/tests
+          --junitxml "$RUNNER_TEMP/live/results.xml"
+        env:
+          LIVE_MOCK_IMAGE: ${{ env.MOCK_IMAGE }}
+          LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
+          LIVE_WORKDIR: ${{ runner.temp }}/live
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Destroy
+        if: always()
+        working-directory: ${{ runner.temp }}/live
+        run: |
+          if [ -f multihull.yaml ]; then
+            uv run --project "$GITHUB_WORKSPACE/testing/live" hull destroy multihull.yaml --yes \
+              --state .multihull/state.db --snapshot-out .multihull/snapshot.json
+          fi
+      - name: Stop Modal apps left by this run
+        if: always()
+        working-directory: testing/live
+        run: uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" --env "$MODAL_ENVIRONMENT"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: live-smoke-logs
+          path: |
+            ${{ runner.temp }}/live/logs
+            ${{ runner.temp }}/live/multihull.yaml
+            ${{ runner.temp }}/live/router.toml
+            ${{ runner.temp }}/live/summary.md
+            ${{ runner.temp }}/live/results.xml
+          if-no-files-found: ignore
+
+  sweep:
+    needs: gate
+    if: needs.gate.outputs.modal == 'true' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Stop live apps older than two hours
+        working-directory: testing/live
+        run: >
+          uv run python -m live.sweep --prefix "$APP_PREFIX" --older-than 7200
+          --env "$MODAL_ENVIRONMENT" | tee -a "$GITHUB_STEP_SUMMARY"
