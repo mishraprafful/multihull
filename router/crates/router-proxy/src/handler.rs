@@ -472,10 +472,9 @@ fn take_preferred(
         return None;
     }
     let runtime = state.runtime.endpoint(endpoint);
-    if !runtime.admit(now, rng) {
-        return None;
-    }
-    runtime.try_reserve().map(|guard| (endpoint.clone(), guard))
+    runtime
+        .try_admit(now, rng)
+        .map(|guard| (endpoint.clone(), guard))
 }
 
 fn authorize(route: &Route, headers: &http::HeaderMap) -> Result<(), (ProxyError, u32)> {
@@ -652,10 +651,8 @@ fn reserve_one(
                 OutstandingGuard::acquire(runtime),
             ));
         }
-        if runtime.admit(now, rng) {
-            if let Some(guard) = runtime.try_reserve() {
-                return Some((Endpoint::clone(endpoint), guard));
-            }
+        if let Some(guard) = runtime.try_admit(now, rng) {
+            return Some((Endpoint::clone(endpoint), guard));
         }
         locally_excluded.insert(id);
     }
