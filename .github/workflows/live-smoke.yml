@@ -27,7 +27,7 @@ jobs:
       (github.event.action == 'labeled' && github.event.label.name == 'live-smoke') ||
       (github.event.action == 'synchronize' &&
         contains(github.event.pull_request.labels.*.name, 'live-smoke'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       modal: ${{ steps.check.outputs.modal }}
     steps:
@@ -46,7 +46,7 @@ jobs:
   smoke:
     needs: gate
     if: needs.gate.outputs.modal == 'true' && github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -136,7 +136,7 @@ jobs:
   sweep:
     needs: gate
     if: needs.gate.outputs.modal == 'true' && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
