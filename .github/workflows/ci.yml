@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       python: ${{ steps.filter.outputs.python }}
       router: ${{ steps.filter.outputs.router }}
@@ -60,7 +60,7 @@ jobs:
   python:
     needs: changes
     if: needs.changes.outputs.python == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: python
@@ -78,7 +78,7 @@ jobs:
   router:
     needs: changes
     if: needs.changes.outputs.router == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: router
@@ -97,7 +97,7 @@ jobs:
   website:
     needs: changes
     if: needs.changes.outputs.website == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: website
@@ -118,7 +118,7 @@ jobs:
   chart:
     needs: changes
     if: needs.changes.outputs.chart == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
@@ -134,7 +134,7 @@ jobs:
   mock-server:
     needs: changes
     if: needs.changes.outputs.mock_server == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: testing/mock-server
@@ -152,7 +152,7 @@ jobs:
   e2e:
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

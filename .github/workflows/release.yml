@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: python
@@ -27,7 +27,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             asset: multihull-linux-amd64
           - os: ubuntu-24.04-arm
@@ -61,7 +61,7 @@ jobs:
 
   github-release:
     needs: [python, router]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -77,7 +77,7 @@ jobs:
   publish-pypi:
     needs: github-release
     if: vars.PUBLISH_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       id-token: write
@@ -93,7 +93,7 @@ jobs:
   publish-crates:
     needs: github-release
     if: vars.PUBLISH_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     defaults:
       run:
