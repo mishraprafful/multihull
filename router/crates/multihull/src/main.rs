@@ -23,12 +23,18 @@ use tokio::sync::watch;
 struct Args {
     #[arg(long, default_value = "router.toml")]
     config: PathBuf,
+    #[arg(long, help = "Validate the config file and exit")]
+    check_config: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = Config::load(&args.config)?;
+    if args.check_config {
+        println!("config ok: {}", args.config.display());
+        return Ok(());
+    }
     router_obs::init_tracing(&TracingConfig {
         format: match config.log.format {
             LogFormat::Text => TracingFormat::Text,
