@@ -14,7 +14,7 @@ Rules for entries
 - PR 29 merged: active health prober, `upstream_disconnected` terminal SSE event and HTTP/2 error trailer, `[circuit]`, `[admission]`, `[pressure]`, `[probe]` and `[retry]` tuning tables in `router.toml` and under `router.tuning` in the chart, controller scale-back after `Degraded` clears.
 - Branch `fix/live-run-blockers` (local, not pushed) fixes the four blockers the PR 29 review found: a config panic on huge durations plus a one-day backoff cap, the controller recording failed scale calls as successes, a truncated SSE event dispatched before the terminal event, and HTTP/2 truncation reported as a clean end. The other findings are under "TODO from the PR 29 review".
 - Docs live at https://multihull.pages.dev, deployed by `.github/workflows/docs.yml` on pushes to `main`. PRs touching `website/`, `docs/`, `python/` or the workflow get a preview deployment and one sticky comment; `docs-preview-sweep.yml` deletes previews older than 24 hours. Cloudflare secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are repository secrets.
-- CI runs path-filtered jobs for python, router, website, chart, mock-server and e2e. The e2e harness (`testing/e2e`, `make e2e`) runs on every PR touching `python/`, `router/`, `proto/` or `testing/`. Release workflow gated by the `release` environment and `PUBLISH_ENABLED`.
+- CI runs path-filtered jobs for python, router, website, chart, mock-server and e2e. The e2e harness (`testing/e2e`, `make e2e`) runs on every PR touching `python/`, `router/`, `proto/` or `testing/`. Release workflow gated by the `release` environment and `PUBLISH_ENABLED`. GitHub-hosted runners are pinned to `ubuntu-24.04`; `runner-canary.yml` runs the Python tests, Rust tests and docs build weekly on `ubuntu-26.04` (see `docs/runbooks/ci.md`).
 - Test counts on `fix/live-run-blockers`: Python 126 passed, 1 skipped; Rust 206; e2e 25 rows, 23 passed, recovery row xfailed non-streaming and xpassed streaming, 2 m 50 s. Mock server 40 (not rerun).
 - Logo explorations in progress on branch `design/logo-explorations`.
 - Not yet exercised against any real provider; only `docker` targets have run end to end. Modal log access uses private SDK internals.
@@ -40,6 +40,7 @@ Rules for entries
 | 2026-10-02 | Website refresh proposal dropped from the repo (PR 26) | The PR description carries the rationale next to the diff; a one-off proposal in `docs/design` would go stale |
 | 2026-10-07 | Only `ScaleRefused` (a `ValueError` subclass the docker provider raises) and `NotImplementedError` count as permanent scale refusals | A bare `ValueError` also covers transient errors such as `JSONDecodeError` from provider APIs, which must be retried, not recorded as intent |
 | 2026-10-07 | SSE hold-back falls back to passthrough when an incomplete event exceeds 1 MiB | Bounds router memory when an upstream labels a non-SSE body as an event stream |
+| 2026-10-07 | Pin runners to `ubuntu-24.04` and canary `ubuntu-26.04` weekly | `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19 (actions/runner-images#14748) with Python 3.14, Node 24, Docker 29 and Helm 4; pinning moves us on our schedule, the canary shows breakage first |
 
 ## Open questions
 
