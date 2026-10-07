@@ -94,6 +94,7 @@ impl PressureDetector {
         &mut self,
         service: &str,
         wait: Duration,
+        still_queued: usize,
         observed_concurrency: u32,
         now: Duration,
     ) {
@@ -103,7 +104,7 @@ impl PressureDetector {
         state.observed_concurrency = observed_concurrency;
         if wait > threshold {
             state.pressured_since.get_or_insert(now);
-        } else {
+        } else if still_queued == 0 {
             state.pressured_since = None;
             state.reported = false;
         }
@@ -205,27 +206,44 @@ mod tests {
     #[test]
     fn queue_pressure_reports_once_after_it_is_sustained() {
         let mut detector = PressureDetector::new(PressureConfig::default(), secs(5));
-        detector.record_queue_wait("llama", millis(2600), 7, secs(0));
+        detector.record_queue_wait("llama", millis(2600), 4, 7, secs(0));
         assert!(detector.tick(secs(1)).is_empty());
-        detector.record_queue_wait("llama", millis(3000), 8, secs(1));
+        detector.record_queue_wait("llama", millis(3000), 4, 8, secs(1));
         let reported = detector.tick(secs(2));
         assert_eq!(reported.len(), 1);
         assert_eq!(reported[0].service, "llama");
         assert_eq!(reported[0].reason, DegradedReason::QueueDepth);
         assert_eq!(reported[0].observed_concurrency, 8);
-        detector.record_queue_wait("llama", millis(3000), 8, secs(2));
+        detector.record_queue_wait("llama", millis(3000), 4, 8, secs(2));
         assert!(detector.tick(secs(3)).is_empty());
-        detector.record_queue_wait("llama", millis(100), 2, secs(3));
+        detector.record_queue_wait("llama", millis(100), 0, 2, secs(3));
         assert!(detector.tick(secs(4)).is_empty());
-        detector.record_queue_wait("llama", millis(4000), 9, secs(4));
+        detector.record_queue_wait("llama", millis(4000), 4, 9, secs(4));
         assert!(detector.tick(secs(5)).is_empty());
+        assert_eq!(detector.tick(secs(6)).len(), 1);
+    }
+
+    #[test]
+    fn short_waits_keep_queue_pressure_until_the_queue_drains() {
+        let mut detector = PressureDetector::new(PressureConfig::default(), secs(5));
+        detector.record_queue_wait("llama", millis(3100), 6, 3, secs(0));
+        detector.record_queue_wait("llama", millis(1500), 6, 3, millis(1500));
+        detector.record_queue_wait("llama", millis(1500), 5, 3, millis(1500));
+        assert!(detector.tick(millis(1600)).is_empty());
+        let reported = detector.tick(secs(2));
+        assert_eq!(reported.len(), 1);
+        assert_eq!(reported[0].reason, DegradedReason::QueueDepth);
+
+        detector.record_queue_wait("llama", millis(1500), 0, 1, secs(3));
+        detector.record_queue_wait("llama", millis(3000), 2, 3, secs(4));
+        assert!(detector.tick(millis(5500)).is_empty());
         assert_eq!(detector.tick(secs(6)).len(), 1);
     }
 
     #[test]
     fn stale_queue_pressure_clears_without_samples() {
         let mut detector = PressureDetector::new(PressureConfig::default(), secs(5));
-        detector.record_queue_wait("llama", millis(4000), 1, secs(0));
+        detector.record_queue_wait("llama", millis(4000), 0, 1, secs(0));
         assert!(detector.tick(secs(11)).is_empty());
         assert!(detector.tick(secs(12)).is_empty());
     }
@@ -291,8 +309,8 @@ mod tests {
     #[test]
     fn forget_except_drops_unknown_services_and_endpoints() {
         let mut detector = PressureDetector::new(PressureConfig::default(), secs(5));
-        detector.record_queue_wait("old", millis(1), 1, secs(0));
-        detector.record_queue_wait("kept", millis(1), 1, secs(0));
+        detector.record_queue_wait("old", millis(1), 0, 1, secs(0));
+        detector.record_queue_wait("kept", millis(1), 0, 1, secs(0));
         detector.record_ttft("kept", "p", "e-old", millis(1), 1);
         detector.record_ttft("kept", "p", "e-kept", millis(1), 1);
         detector.forget_except(&["kept"], &["e-kept"]);

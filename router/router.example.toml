@@ -54,7 +54,8 @@ max_wait = 5
 bound = 1024
 
 [pressure]
-# Queue waits above max_wait * queue_wait_fraction count as pressure.
+# Queue waits above max_wait * queue_wait_fraction count as pressure. A shorter
+# wait ends the pressure only once no other request is left in the queue.
 queue_wait_fraction = 0.5
 # Pressure sustained for this long sends one Degraded(QueueDepth) to the controller.
 sustained = 2

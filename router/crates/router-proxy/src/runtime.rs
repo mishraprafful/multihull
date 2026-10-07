@@ -309,7 +309,14 @@ impl Runtime {
         )
         .record(wait.as_secs_f64());
         let now = self.now();
-        lock(&self.pressure).record_queue_wait(&route.id, wait, self.route_outstanding(route), now);
+        let still_queued = self.admission.waiting(&route.id);
+        lock(&self.pressure).record_queue_wait(
+            &route.id,
+            wait,
+            still_queued,
+            self.route_outstanding(route),
+            now,
+        );
     }
 
     pub fn record_ttft(&self, route: &Route, endpoint: &Endpoint, ttft: Duration) {
@@ -679,7 +686,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use router_core::snapshot::Route;
+    use router_core::snapshot::{DegradedReason, Route};
 
     fn endpoint(id: &str) -> Endpoint {
         Endpoint {
@@ -1027,6 +1034,58 @@ mod tests {
         assert_eq!(rt.probe_status().consecutive_failures, 4);
         rt.record_outcome(Outcome::Transient, t0 + Duration::from_secs(21), &mut rng);
         assert!(rt.circuit_state(t0 + Duration::from_secs(21)).is_open());
+    }
+
+    #[tokio::test]
+    async fn a_short_wait_ends_queue_pressure_only_once_nothing_is_left_queued() {
+        let sustained = Duration::from_millis(50);
+        let runtime = Arc::new(Runtime::new(
+            CircuitConfig::default(),
+            AdmissionQueue::default(),
+            PressureConfig {
+                sustained,
+                ..PressureConfig::default()
+            },
+            ProbeConfig::default(),
+            RetryConfig::default(),
+        ));
+        let route = Route {
+            id: "llama".into(),
+            endpoints: vec![endpoint("a")],
+            ..Default::default()
+        };
+        let threshold = runtime
+            .admission
+            .config()
+            .max_wait
+            .mul_f64(PressureConfig::default().queue_wait_fraction);
+        let long_wait = threshold * 2;
+        let lucky_wait = threshold / 2;
+        let queued = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { runtime.admission.wait_for_slot("llama", || false).await })
+        };
+        while runtime.admission.waiting("llama") == 0 {
+            tokio::task::yield_now().await;
+        }
+
+        runtime.record_queue_wait(&route, long_wait);
+        runtime.record_queue_wait(&route, lucky_wait);
+        tokio::time::sleep(sustained * 2).await;
+        let signals = runtime.poll_degraded();
+        assert_eq!(signals.len(), 1, "{signals:?}");
+        assert_eq!(signals[0].service, "llama");
+        assert_eq!(signals[0].reason, DegradedReason::QueueDepth);
+
+        queued.abort();
+        let _ = queued.await;
+        assert_eq!(runtime.admission.waiting("llama"), 0);
+        runtime.record_queue_wait(&route, lucky_wait);
+        runtime.record_queue_wait(&route, long_wait);
+        assert!(runtime.poll_degraded().is_empty());
+        runtime.record_queue_wait(&route, lucky_wait);
+        tokio::time::sleep(sustained * 2).await;
+        assert!(runtime.poll_degraded().is_empty());
     }
 
     #[test]
