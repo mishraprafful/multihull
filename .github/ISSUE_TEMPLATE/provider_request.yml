@@ -1,0 +1,44 @@
+name: Provider request
+description: Ask for a new GPU provider to be supported.
+title: "provider: "
+labels: ["provider", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Multihull talks to each provider through its own SDK or API, with no shims. These details decide whether a provider can host always-warm containers behind the router.
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+    validations:
+      required: true
+  - type: input
+    id: interface
+    attributes:
+      label: Native interface
+      description: Link to the SDK or API docs for deploying a container with a GPU.
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Deployment model
+      options:
+        - Kubernetes
+        - Serverless container API
+        - VM API
+        - Model-only endpoints (no custom containers)
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Capabilities
+      description: Minimum warm replicas, health check semantics, authentication for traffic, GPU classes, regions, and how endpoint URLs are exposed.
+    validations:
+      required: true
+  - type: textarea
+    id: use
+    attributes:
+      label: Why you need it
