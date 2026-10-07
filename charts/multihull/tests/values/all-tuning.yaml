@@ -1,0 +1,40 @@
+router:
+  tuning:
+    timeouts:
+      connect: 1.5
+      first_byte: 45
+      idle: 90.25
+      total: 1200
+    circuit:
+      consecutive_failures: 7
+      error_ratio: 0.4
+      ratio_window: 20
+      min_samples: 30
+      base_backoff: 2.5
+      max_backoff: 600
+      jitter_fraction: 0.1
+      half_open_ramp: 45
+      probe_successes_to_close: 4
+      provider_open_ratio: 0.6
+      panic_threshold: 0.75
+    admission:
+      max_wait: 0.5
+      bound: 4096
+    pressure:
+      queue_wait_fraction: 0.75
+      sustained: 3
+      stale_after: 15
+      ttft_degrade_factor: 3.5
+      ttft_window: 100
+      ttft_baseline_smoothing: 0.1
+    probe:
+      enabled: false
+      interval: 10
+      timeout: 0.75
+      jitter_fraction: 0.3
+      failure_threshold: 5
+      success_threshold: 2
+    retry:
+      budget_ratio: 0.3
+      budget_window: 30
+      min_retries_per_second: 20

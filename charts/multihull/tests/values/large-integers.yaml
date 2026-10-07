@@ -1,0 +1,10 @@
+router:
+  tuning:
+    circuit:
+      min_samples: 10000000
+    admission:
+      bound: 1000000
+    pressure:
+      ttft_window: 2000000
+    retry:
+      min_retries_per_second: 123456789

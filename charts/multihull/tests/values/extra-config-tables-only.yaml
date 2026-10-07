@@ -1,0 +1,4 @@
+router:
+  extraConfig: |
+    [log]
+    format = "json"

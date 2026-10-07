@@ -1,0 +1,9 @@
+router:
+  extraConfig: |
+    upstream_ca = "/etc/multihull/upstream-ca.pem"
+    max_buffered_body_bytes = 4194304
+    node_id = "router-eu"
+
+    [log]
+    format = "json"
+    filter = "info,router_proxy=debug"

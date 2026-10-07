@@ -12,6 +12,8 @@ router:
     value: /var/lib/multihull/snapshot.json
   tls:
     secretName: ""
+  # router.toml tuning tables, see router/router.example.toml. Durations are
+  # seconds as numbers (1.5, not "1.5s"). Set to null to use the router defaults.
   tuning:
     timeouts:
       connect: 2
@@ -69,6 +71,18 @@ router:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # Raw TOML for router.toml settings the chart does not render, such as
+  # upstream_ca, max_buffered_body_bytes, node_id or a [log] table. Keys before
+  # the first [table] header are placed with the top-level keys; tables are
+  # appended after the generated ones. Do not repeat a key or table the chart
+  # already renders (listen, admin_listen, region, [snapshot], [tls], tuning
+  # tables): TOML rejects duplicates. Example:
+  #   extraConfig: |
+  #     max_buffered_body_bytes = 4194304
+  #     node_id = "router-eu"
+  #
+  #     [log]
+  #     format = "json"
   extraConfig: ""
 
 controller:
