@@ -13,6 +13,12 @@ impl RouteTable {
     pub fn build(snapshot: &Snapshot) -> Self {
         let mut table = Self::default();
         for route in &snapshot.routes {
+            if route.auth.required && route.auth.api_key_hashes.is_empty() {
+                tracing::warn!(
+                    route = %route.id,
+                    "route requires an API key but the snapshot carries no key hashes; rejecting every request"
+                );
+            }
             let index = table.routes.len();
             table.routes.push(Arc::new(route.clone()));
             let router = if route.hostname.is_empty() {
