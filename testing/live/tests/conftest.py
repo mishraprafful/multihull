@@ -173,6 +173,7 @@ def deployment(live: LiveDeployment, kind: Kind, recorder: Recorder) -> Iterator
         recorder.capture(AFTER_DEPLOY, kind, live)
         yield live
     finally:
+        recorder.capture_image_builds(live)
         if not recorder.summary.has_kube(BEFORE_DESTROY):
             recorder.capture(BEFORE_DESTROY, kind, live)
         result = live.destroy()

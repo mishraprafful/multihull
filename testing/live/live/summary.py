@@ -66,6 +66,12 @@ class ModalState(BaseModel):
     error: str = ""
 
 
+class ImageBuild(BaseModel):
+    image_id: str
+    log: str
+    tail: str
+
+
 class ModalInfo(BaseModel):
     app_name: str
     environment: str
@@ -73,6 +79,7 @@ class ModalInfo(BaseModel):
     web_url: str | None = None
     dashboard_url: str | None = None
     states: list[ModalState] = Field(default_factory=list)
+    image_builds: list[ImageBuild] = Field(default_factory=list)
 
 
 class RouterState(BaseModel):
@@ -310,6 +317,18 @@ def render_modal(info: ModalInfo, cleanup: list[str]) -> list[str]:
             for s in info.states
         ]
         lines.extend([*table(["When", "State", "Containers", "Detail"], rows), ""])
+    for build in info.image_builds:
+        count = len(build.tail.splitlines())
+        lines.extend(
+            [
+                f"**Image build `{build.image_id}` failed.** Last {count} lines of "
+                f"`modal image logs {build.image_id}`; the full log is `{build.log}` in the "
+                "artifact.",
+                "",
+                *fenced(build.tail),
+                "",
+            ]
+        )
     if cleanup:
         lines.extend(["**Cleanup**", "", *(f"- {line}" for line in cleanup), ""])
     return lines

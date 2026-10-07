@@ -10,6 +10,7 @@ from e2e.client import Outcome
 from e2e.harness import Router
 from live.harness import PRIMARY, Kind, LiveDeployment
 from live.summary import (
+    ImageBuild,
     KubeSnapshot,
     ModalInfo,
     ModalState,
@@ -27,6 +28,7 @@ AFTER_DEPLOY = "after deploy"
 AFTER_FAILOVER = "after failover"
 BEFORE_DESTROY = "before destroy"
 AFTER_DESTROY = "after destroy"
+IMAGE_LOG_TAIL_LINES = 60
 
 
 def kubectl_json(kind: Kind, *args: str) -> dict[str, Any]:
@@ -231,6 +233,25 @@ class Recorder:
         info.states.append(state)
         info.app_id = info.app_id or app_id
         self.summary.modal = info
+
+    def capture_image_builds(self, deployment: LiveDeployment) -> None:
+        if not deployment.image_builds:
+            return
+        info = self.summary.modal or self.modal_info(deployment)
+        known = {build.image_id for build in info.image_builds}
+        for image_id, path in deployment.image_builds.items():
+            if image_id in known:
+                continue
+            lines = path.read_text(errors="replace").splitlines()
+            info.image_builds.append(
+                ImageBuild(
+                    image_id=image_id,
+                    log=str(path.relative_to(deployment.workdir)),
+                    tail="\n".join(lines[-IMAGE_LOG_TAIL_LINES:]),
+                )
+            )
+        self.summary.modal = info
+        self.save()
 
     def modal_info(self, deployment: LiveDeployment) -> ModalInfo:
         ref = deployment.refs().get(deployment.secondary)

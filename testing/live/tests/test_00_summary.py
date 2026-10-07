@@ -6,7 +6,9 @@ from typing import Any
 
 import pytest
 
-from live.capture import events_from, modal_state, pods_from
+from live import harness
+from live.capture import Recorder, events_from, modal_state, pods_from
+from live.harness import LiveDeployment, Settings, image_ids
 from live.summary import (
     KubeSnapshot,
     ModalInfo,
@@ -173,6 +175,69 @@ def test_modal_without_dashboard_url_shows_logs_command() -> None:
     text = render(summary)
     assert "`modal app logs ap-1 --env main`" in text
     assert "| after deploy | not listed |" in text
+
+
+def test_image_ids_come_from_the_deploy_error() -> None:
+    output = (
+        "| modal | Image build for im-KHBz3oYMUiKTnGKkxUuJEQ failed. |\n"
+        "|       |   modal image logs im-KHBz3oYMUiKTnGKkxUuJEQ      |\n"
+    )
+    assert image_ids(output) == ["im-KHBz3oYMUiKTnGKkxUuJEQ"]
+    assert image_ids("deploy ok, sim-card im-short") == []
+
+
+def test_image_build_tail_lands_in_the_modal_section(tmp_path: Path) -> None:
+    log = tmp_path / "logs" / "modal-image-im-AbCdEfGhIj0123.log"
+    log.parent.mkdir()
+    log.write_text("\n".join(f"line {n}" for n in range(1, 101)))
+    summary = RunSummary(spec="kind-modal", service="live-42")
+    summary.modal = ModalInfo(app_name="multihull-live-42", environment="main")
+    deployment = SimpleNamespace(image_builds={"im-AbCdEfGhIj0123": log}, workdir=tmp_path)
+    recorder = Recorder(summary, tmp_path)
+    recorder.capture_image_builds(deployment)  # type: ignore[arg-type]
+    recorder.capture_image_builds(deployment)  # type: ignore[arg-type]
+
+    assert len(summary.modal.image_builds) == 1
+    text = render(summary)
+    assert "**Image build `im-AbCdEfGhIj0123` failed.** Last 60 lines" in text
+    assert "`logs/modal-image-im-AbCdEfGhIj0123.log`" in text
+    assert "line 41\n" in text and "line 100\n" in text and "line 40\n" not in text
+
+
+def test_image_logs_are_fetched_and_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GHCR_TOKEN", "ghcr-fixture-value")
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0, stdout="pull with ghcr-fixture-value\nboom\n", stderr=""
+        )
+
+    monkeypatch.setattr(harness.subprocess, "run", fake_run)
+    document = {
+        "targets": [
+            {"provider": "kind", "type": "kubernetes", "kubernetes": {"namespace": "ns"}},
+            {
+                "provider": "modal",
+                "type": "modal",
+                "modal": {
+                    "registrySecret": {"usernameEnv": "GHCR_USERNAME", "passwordEnv": "GHCR_TOKEN"}
+                },
+            },
+        ]
+    }
+    settings = Settings("kind-modal", "live-42", "multihull-live", None, tmp_path, None)
+    live = LiveDeployment(settings, tmp_path, document)
+    live.fetch_image_logs("Image build for im-AbCdEfGhIj0123 failed.")
+
+    assert calls == [
+        [harness.sys.executable, "-m", "modal", "image", "logs", "im-AbCdEfGhIj0123", "--all"]
+    ]
+    text = live.image_builds["im-AbCdEfGhIj0123"].read_text()
+    assert "ghcr-fixture-value" not in text and "<redacted>" in text and "boom" in text
 
 
 def test_pods_and_events_parse_kubectl_json() -> None:
