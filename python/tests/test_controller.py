@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
@@ -77,6 +78,21 @@ class FlakyProvider(FakeProvider):
         if self.failures > 0:
             self.failures -= 1
             raise RuntimeError("provider API timed out")
+        super().scale(ref, min, max)
+
+
+class GatedProvider(FakeProvider):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.armed = False
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def scale(self, ref: Ref, min: int, max: int) -> None:
+        if self.armed:
+            self.armed = False
+            self.entered.set()
+            assert self.release.wait(timeout=5)
         super().scale(ref, min, max)
 
 
@@ -176,6 +192,37 @@ def test_scale_back_steps_down_once_per_cooldown_after_degraded_clears(
         assert len(controller.scale_back_actions) == 6
 
     asyncio.run(scenario())
+
+
+def test_degraded_during_a_blocked_scale_back_step_wins(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    clock = FakeClock()
+    providers = {t.provider: GatedProvider() for t in llama_spec.targets}
+    controller, _ = make_controller(
+        llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=60)
+    )
+    asyncio.run(controller.reconcile_once())
+    asyncio.run(controller.handle_degraded(pb.Degraded(service="llama-8b", provider="gke-prod")))
+    assert controller.min_replicas == {"gke-prod": 2, "modal-main": 2, "runpod-eu": 2}
+
+    clock.advance(60)
+    providers["modal-main"].armed = True
+    scale_back = threading.Thread(target=controller.scale_back_sync)
+    scale_back.start()
+    assert providers["modal-main"].entered.wait(timeout=5)
+    controller.handle_degraded_sync("llama-8b", "gke-prod", "DEGRADED_REASON_QUEUE_DEPTH")
+    providers["modal-main"].release.set()
+    scale_back.join(timeout=5)
+    assert not scale_back.is_alive()
+
+    last_calls = {name: p.scaled[-1][1] for name, p in providers.items() if p.scaled}
+    assert last_calls == {"modal-main": 2, "runpod-eu": 3}
+    assert controller.min_replicas == {"gke-prod": 2, "modal-main": 2, "runpod-eu": 3}
+    assert controller.pre_degraded_min == {"modal-main": 1, "runpod-eu": 1}
+    assert [(a.provider, a.new_min) for a in controller.scale_back_actions] == [("modal-main", 1)]
+    clock.advance(59)
+    assert controller.scale_back_sync() == []
 
 
 def test_scale_back_keeps_the_warm_provider_floor(llama_raw: dict, tmp_path: Path) -> None:

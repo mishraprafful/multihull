@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
@@ -17,8 +18,8 @@ from multihull._proto import discovery_pb2 as pb
 from multihull._proto import discovery_pb2_grpc as pb_grpc
 from multihull.deploy import DEFAULT_SNAPSHOT_PATH
 from multihull.providers.base import Observed, Provider, Ref, ScaleRefused
-from multihull.spec import ServiceSpec
-from multihull.state.base import StateBackend
+from multihull.spec import ServiceSpec, TargetSpec
+from multihull.state.base import StateBackend, StateRecord, records_by_provider
 
 log = logging.getLogger("multihull.controller")
 
@@ -43,6 +44,23 @@ class ScaleAction:
     previous_min: int
     new_min: int
     max: int
+
+
+@dataclass
+class ScaleStep(ScaleAction):
+    ref: str
+    cause: str = ""
+
+    @property
+    def raising(self) -> bool:
+        return self.new_min > self.previous_min
+
+    @property
+    def verb(self) -> str:
+        return "scale" if self.raising else "scale back"
+
+    def action(self) -> ScaleAction:
+        return ScaleAction(self.provider, self.previous_min, self.new_min, self.max)
 
 
 @dataclass
@@ -81,7 +99,11 @@ class Controller:
         }
         self.pre_degraded_min: dict[str, int] = {}
         self.last_degraded_at: float | None = None
+        self.degraded_signals = 0
         self.last_scale_back_at: float | None = None
+        self.scaling = threading.Lock()
+        self.scaling_targets: set[str] = set()
+        self.owed_raises: dict[str, str] = {}
         self.subscribers: set[asyncio.Queue[pb.Snapshot | None]] = set()
         self.acked_versions: dict[str, int] = {}
         self.scale_actions: list[ScaleAction] = []
@@ -177,44 +199,125 @@ class Controller:
             log.warning("degraded signal for unknown service %s ignored", service)
             return []
         log.warning("degraded %s/%s: %s", service, provider, reason)
-        self.last_degraded_at = self.clock()
-        records = {r.provider: r for r in self.state.list(service)}
+        records = records_by_provider(self.state.list(service))
+        steps: list[ScaleStep] = []
+        with self.scaling:
+            self.last_degraded_at = self.clock()
+            self.degraded_signals += 1
+            for target in self.spec.targets:
+                if target.provider == provider:
+                    continue
+                if target.provider in self.scaling_targets:
+                    self.owed_raises[target.provider] = provider
+                    continue
+                step = self.plan_raise(target, records, provider)
+                if step is not None:
+                    steps.append(step)
+        return [action for step in steps if (action := self.execute(step, records))]
+
+    def plan_raise(
+        self, target: TargetSpec, records: Mapping[str, StateRecord], cause: str
+    ) -> ScaleStep | None:
+        record = records.get(target.provider)
+        if record is None:
+            return None
+        observed = self.observed.get(target.provider)
+        phase = observed.phase if observed else record.last_status
+        replicas = self.spec.effective_replicas(target)
+        current = self.min_replicas[target.provider]
+        scaled_to_zero = current == 0 and phase == "Pending"
+        if phase not in SCALABLE_PHASES and not scaled_to_zero:
+            return None
         floor = 0 if self.spec.reliability.fallbackScaleToZero else 1
-        actions: list[ScaleAction] = []
-        for target in self.spec.targets:
-            if target.provider == provider:
-                continue
-            record = records.get(target.provider)
-            if record is None:
-                continue
-            observed = self.observed.get(target.provider)
-            phase = observed.phase if observed else record.last_status
-            replicas = self.spec.effective_replicas(target)
-            current = self.min_replicas[target.provider]
-            scaled_to_zero = current == 0 and phase == "Pending"
-            if phase not in SCALABLE_PHASES and not scaled_to_zero:
-                continue
-            new_min = max(floor, min(current + 1, replicas.max))
-            if new_min == current:
-                continue
-            result = self.apply_scale("scale", target.provider, record.ref, new_min, replicas.max)
-            if result is ScaleResult.FAILED:
-                continue
+        new_min = max(floor, min(current + 1, replicas.max))
+        if new_min == current:
+            return None
+        return self.claim(
+            ScaleStep(target.provider, current, new_min, replicas.max, record.ref, cause)
+        )
+
+    def plan_step_down(
+        self, target: TargetSpec, records: Mapping[str, StateRecord]
+    ) -> ScaleStep | None:
+        remembered = self.pre_degraded_min.get(target.provider)
+        if remembered is None or target.provider in self.scaling_targets:
+            return None
+        replicas = self.spec.effective_replicas(target)
+        current = self.min_replicas[target.provider]
+        if current <= max(remembered, replicas.min):
+            del self.pre_degraded_min[target.provider]
+            return None
+        new_min = current - 1
+        if new_min < 1 and self.warm_targets() - 1 < self.spec.reliability.minWarmProviders:
+            log.info(
+                "keeping %s at min=%d: reliability.minWarmProviders is %d",
+                target.provider,
+                current,
+                self.spec.reliability.minWarmProviders,
+            )
+            del self.pre_degraded_min[target.provider]
+            return None
+        record = records.get(target.provider)
+        if record is None:
+            return None
+        return self.claim(ScaleStep(target.provider, current, new_min, replicas.max, record.ref))
+
+    def claim(self, step: ScaleStep) -> ScaleStep:
+        self.scaling_targets.add(step.provider)
+        return step
+
+    def execute(self, step: ScaleStep, records: Mapping[str, StateRecord]) -> ScaleAction | None:
+        committed, owed = self.apply_and_commit(step, records)
+        while owed is not None:
+            _, owed = self.apply_and_commit(owed, records)
+        return committed
+
+    def apply_and_commit(
+        self, step: ScaleStep, records: Mapping[str, StateRecord]
+    ) -> tuple[ScaleAction | None, ScaleStep | None]:
+        result = self.apply_scale(step.verb, step.provider, step.ref, step.new_min, step.max)
+        with self.scaling:
+            committed = None if result is ScaleResult.FAILED else self.commit(step, result)
+            self.scaling_targets.discard(step.provider)
+            cause = self.owed_raises.pop(step.provider, None)
+            if cause is None:
+                return committed, None
+            return committed, self.plan_raise(self.target(step.provider), records, cause)
+
+    def commit(self, step: ScaleStep, result: ScaleResult) -> ScaleAction:
+        action = step.action()
+        self.min_replicas[step.provider] = step.new_min
+        if step.raising:
             if result is ScaleResult.APPLIED:
                 log.info(
                     "scaled %s min replicas %d -> %d (max %d) after degraded %s",
-                    target.provider,
-                    current,
-                    new_min,
-                    replicas.max,
-                    provider,
+                    step.provider,
+                    step.previous_min,
+                    step.new_min,
+                    step.max,
+                    step.cause,
                 )
-            self.pre_degraded_min.setdefault(target.provider, current)
-            self.min_replicas[target.provider] = new_min
-            action = ScaleAction(target.provider, current, new_min, replicas.max)
-            actions.append(action)
+            self.pre_degraded_min.setdefault(step.provider, step.previous_min)
             self.scale_actions.append(action)
-        return actions
+            return action
+        if result is ScaleResult.APPLIED:
+            log.info(
+                "scaled back %s min replicas %d -> %d (max %d): no degraded for %s",
+                step.provider,
+                step.previous_min,
+                step.new_min,
+                step.max,
+                self.degraded_cooldown,
+            )
+        replicas = self.spec.effective_replicas(self.target(step.provider))
+        remembered = self.pre_degraded_min.get(step.provider, replicas.min)
+        if step.new_min <= max(remembered, replicas.min):
+            self.pre_degraded_min.pop(step.provider, None)
+        self.scale_back_actions.append(action)
+        return action
+
+    def target(self, provider: str) -> TargetSpec:
+        return next(t for t in self.spec.targets if t.provider == provider)
 
     def apply_scale(
         self, verb: str, provider: str, ref: str, new_min: int, maximum: int
@@ -262,54 +365,22 @@ class Controller:
 
     def scale_back_sync(self, now: float | None = None) -> list[ScaleAction]:
         now = self.clock() if now is None else now
-        if not self.scale_back_due(now):
-            return []
-        records = {r.provider: r for r in self.state.list(self.spec.name)}
+        with self.scaling:
+            if not self.scale_back_due(now):
+                return []
+            signals = self.degraded_signals
+        records = records_by_provider(self.state.list(self.spec.name))
         actions: list[ScaleAction] = []
         for target in self.spec.targets:
-            remembered = self.pre_degraded_min.get(target.provider)
-            if remembered is None:
-                continue
-            replicas = self.spec.effective_replicas(target)
-            floor = max(remembered, replicas.min)
-            current = self.min_replicas[target.provider]
-            if current <= floor:
-                del self.pre_degraded_min[target.provider]
-                continue
-            new_min = current - 1
-            if new_min < 1 and self.warm_targets() - 1 < self.spec.reliability.minWarmProviders:
-                log.info(
-                    "keeping %s at min=%d: reliability.minWarmProviders is %d",
-                    target.provider,
-                    current,
-                    self.spec.reliability.minWarmProviders,
-                )
-                del self.pre_degraded_min[target.provider]
-                continue
-            record = records.get(target.provider)
-            if record is None:
-                continue
-            result = self.apply_scale(
-                "scale back", target.provider, record.ref, new_min, replicas.max
-            )
-            if result is ScaleResult.FAILED:
-                continue
-            if result is ScaleResult.APPLIED:
-                log.info(
-                    "scaled back %s min replicas %d -> %d (max %d): no degraded for %s",
-                    target.provider,
-                    current,
-                    new_min,
-                    replicas.max,
-                    self.degraded_cooldown,
-                )
-            self.min_replicas[target.provider] = new_min
-            if new_min <= floor:
-                del self.pre_degraded_min[target.provider]
-            action = ScaleAction(target.provider, current, new_min, replicas.max)
-            actions.append(action)
-            self.scale_back_actions.append(action)
-        self.last_scale_back_at = now
+            with self.scaling:
+                if self.degraded_signals != signals:
+                    log.info("scale back stopped: a degraded signal arrived during the step")
+                    break
+                step = self.plan_step_down(target, records)
+            if step is not None and (action := self.execute(step, records)):
+                actions.append(action)
+        with self.scaling:
+            self.last_scale_back_at = now
         return actions
 
     async def scale_back_once(self) -> list[ScaleAction]:
