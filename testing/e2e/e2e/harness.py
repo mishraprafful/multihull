@@ -112,6 +112,9 @@ class Process:
     def log_tail(self, lines: int = 80) -> str:
         return "\n".join(self.log_text().splitlines()[-lines:])
 
+    def log_lines(self, needle: str) -> list[str]:
+        return [line for line in self.log_text().splitlines() if needle in line]
+
 
 @dataclass
 class TargetInfo:
@@ -309,9 +312,6 @@ class Controller(Process):
             return False
         endpoints = [e for route in document["routes"] for e in route["endpoints"]]
         return len(endpoints) == len(TARGETS)
-
-    def log_lines(self, needle: str) -> list[str]:
-        return [line for line in self.log_text().splitlines() if needle in line]
 
 
 TomlValue = bool | int | float | str

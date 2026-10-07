@@ -171,7 +171,7 @@ jobs:
       - run: docker build -t multihull-mock-server:e2e testing/mock-server
       - run: uv sync --locked --project testing/e2e
       - run: >
-          uv run --project testing/e2e pytest -q --timeout 600 -x
+          uv run --project testing/e2e pytest -q --timeout 600
           -c testing/e2e/pyproject.toml testing/e2e/tests
           --junitxml testing/e2e/e2e-results.xml --basetemp testing/e2e/e2e-tmp
         env:
