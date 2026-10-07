@@ -10,6 +10,9 @@ export default defineConfig({
       logo: { src: './src/assets/mark.svg', alt: 'Multihull' },
       favicon: '/favicon.svg',
       customCss: ['@fontsource-variable/jetbrains-mono/wght.css', './src/styles/theme.css'],
+      components: {
+        Hero: './src/components/Hero.astro',
+      },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/mishraprafful/multihull' },
       ],

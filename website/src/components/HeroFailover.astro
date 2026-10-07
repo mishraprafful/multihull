@@ -161,7 +161,7 @@
 
 <style>
   .hf {
-    margin: 2.5rem 0 1rem;
+    margin: 0;
     overflow: hidden;
     color: var(--sl-color-text);
     background: var(--mh-paper);
@@ -400,6 +400,13 @@
     .t1 { font-size: 24px; }
     .counter.t1 { font-size: 22px; }
     .hf-breaker { display: none; }
+  }
+
+  @media (min-width: 72rem) {
+    text { font-size: 11px; }
+    .t1, .url { font-size: 14px; }
+    .counter.t1 { font-size: 13px; }
+    .caption { font-size: 13px; }
   }
 
   @media (prefers-reduced-motion: no-preference) {
