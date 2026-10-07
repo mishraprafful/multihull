@@ -113,8 +113,7 @@ async fn sse_disconnect_mid_stream_ends_with_a_terminal_event_and_done() {
     );
 }
 
-#[tokio::test]
-async fn http2_binary_disconnect_ends_with_an_error_trailer() {
+async fn http2_binary_disconnect(headers: &[(&str, &str)]) -> hyper::body::Incoming {
     let upstream = MockUpstream::start(
         MockUpstreamConfig::default()
             .with_sse_chunks(chunks())
@@ -127,17 +126,59 @@ async fn http2_binary_disconnect_ends_with_an_error_trailer() {
     let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new())
         .http2_only(true)
         .build_http();
-    let request = Request::get(proxy.url("/v1/stream"))
-        .body(Empty::new())
+    let mut request = Request::get(proxy.url("/v1/stream"));
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    let response = client
+        .request(request.body(Empty::new()).unwrap())
+        .await
         .unwrap();
-    let response = client.request(request).await.unwrap();
     assert_eq!(response.version(), http::Version::HTTP_2);
     assert_eq!(response.status(), 200);
-    let (text, trailers) = collect_frames(response.into_body()).await;
+    response.into_body()
+}
+
+#[tokio::test]
+async fn http2_binary_disconnect_ends_with_an_error_trailer_when_the_client_opts_in() {
+    for headers in [
+        [("te", "trailers")],
+        [("content-type", "application/grpc+proto")],
+    ] {
+        let body = http2_binary_disconnect(&headers).await;
+        let (text, trailers) = collect_frames(body).await;
+        assert_eq!(text, "data: {\"id\":\"c\",\"n\":1}\n\n");
+        let trailers = trailers.expect("error trailer");
+        assert_eq!(trailers.get(ERROR_HEADER).unwrap(), UPSTREAM_DISCONNECTED);
+        assert_eq!(trailers.get(ERROR_REASON_HEADER).unwrap(), "disconnect");
+    }
+}
+
+#[tokio::test]
+async fn http2_binary_disconnect_resets_the_stream_without_trailers_opt_in() {
+    let mut body = http2_binary_disconnect(&[]).await;
+    let mut text = String::new();
+    let error = loop {
+        let frame = tokio::time::timeout(Duration::from_secs(5), body.frame())
+            .await
+            .expect("frame within timeout")
+            .expect("stream is reset, not ended cleanly");
+        match frame {
+            Ok(frame) => {
+                assert!(!frame.is_trailers(), "no trailer without te: trailers");
+                if let Ok(data) = frame.into_data() {
+                    text.push_str(&String::from_utf8_lossy(&data));
+                }
+            }
+            Err(error) => break error,
+        }
+    };
     assert_eq!(text, "data: {\"id\":\"c\",\"n\":1}\n\n");
-    let trailers = trailers.expect("error trailer");
-    assert_eq!(trailers.get(ERROR_HEADER).unwrap(), UPSTREAM_DISCONNECTED);
-    assert_eq!(trailers.get(ERROR_REASON_HEADER).unwrap(), "disconnect");
+    let described = format!("{error:?}");
+    assert!(
+        described.contains("Reset"),
+        "expected RST_STREAM, got {described}"
+    );
 }
 
 #[tokio::test]

@@ -1,5 +1,5 @@
 use http::header::HeaderName;
-use http::{header, HeaderValue, Method, Request, Response, Version};
+use http::{header, HeaderValue, Method, Request, Response};
 use http_body_util::{BodyExt, Limited};
 use hyper::body::Incoming;
 use router_auth::ApiKey;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::attempt::{response_headers, send, UpstreamResponse};
-use crate::body::{ProxyBody, StreamContext, Termination, TimedBody};
+use crate::body::{accepts_error_trailers, ProxyBody, StreamContext, Termination, TimedBody};
 use crate::error::ProxyError;
 use crate::runtime::{OutstandingGuard, ThreadRng};
 use crate::state::ProxyState;
@@ -44,7 +44,7 @@ async fn proxy(
     let started = Instant::now();
     let deadline = started + state.config.timeouts.total;
     let (parts, body) = request.into_parts();
-    let client_version = parts.version;
+    let error_trailers = accepts_error_trailers(parts.version, &parts.headers);
     let host = parts
         .headers
         .get(header::HOST)
@@ -153,7 +153,7 @@ async fn proxy(
                     let plan = Forward {
                         state: &state,
                         route: &route,
-                        client_version,
+                        error_trailers,
                         attempts,
                         deadline,
                     };
@@ -207,7 +207,7 @@ async fn proxy(
             let plan = Forward {
                 state: &state,
                 route: &route,
-                client_version,
+                error_trailers,
                 attempts,
                 deadline,
             };
@@ -257,7 +257,7 @@ async fn proxy(
                         let plan = Forward {
                             state: &state,
                             route: &route,
-                            client_version,
+                            error_trailers,
                             attempts,
                             deadline,
                         };
@@ -601,7 +601,7 @@ fn rng_index(rng: &mut ThreadRng, len: usize) -> usize {
 struct Forward<'a> {
     state: &'a Arc<ProxyState>,
     route: &'a Route,
-    client_version: Version,
+    error_trailers: bool,
     attempts: u32,
     deadline: Instant,
 }
@@ -624,7 +624,7 @@ fn forward(
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok());
     let termination =
-        Termination::for_response(forward.route, content_type, forward.client_version);
+        Termination::for_response(forward.route, content_type, forward.error_trailers);
     let timed = TimedBody::new(
         body,
         first_frame,

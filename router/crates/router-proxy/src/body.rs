@@ -1,5 +1,5 @@
 use bytes::{Bytes, BytesMut};
-use http::{HeaderMap, HeaderValue, Version};
+use http::{header, HeaderMap, HeaderValue, Version};
 use http_body_util::combinators::BoxBody;
 use hyper::body::{Body, Frame, Incoming};
 use router_core::outcome::Outcome;
@@ -49,7 +49,7 @@ pub enum Termination {
 }
 
 impl Termination {
-    pub fn for_response(route: &Route, content_type: Option<&str>, client: Version) -> Self {
+    pub fn for_response(route: &Route, content_type: Option<&str>, error_trailers: bool) -> Self {
         let sse = route.protocol == Protocol::Sse
             || content_type.is_some_and(|value| {
                 value
@@ -59,12 +59,35 @@ impl Termination {
             });
         if sse {
             Termination::SseEvent
-        } else if client == Version::HTTP_2 {
+        } else if error_trailers {
             Termination::Http2Trailers
         } else {
             Termination::Close
         }
     }
+}
+
+pub fn accepts_error_trailers(version: Version, headers: &HeaderMap) -> bool {
+    if version != Version::HTTP_2 {
+        return false;
+    }
+    let te_trailers = headers
+        .get_all(header::TE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .filter_map(|token| token.split(';').next())
+        .any(|token| token.trim().eq_ignore_ascii_case("trailers"));
+    let grpc = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("application/grpc")
+        });
+    te_trailers || grpc
 }
 
 pub struct StreamContext {
@@ -380,19 +403,15 @@ mod tests {
     fn sse_routes_and_event_stream_bodies_get_a_terminal_event() {
         let route = Route::default();
         assert_eq!(
-            Termination::for_response(
-                &route,
-                Some("text/event-stream; charset=utf-8"),
-                Version::HTTP_11
-            ),
+            Termination::for_response(&route, Some("text/event-stream; charset=utf-8"), false),
             Termination::SseEvent
         );
         assert_eq!(
-            Termination::for_response(&route, Some("application/json"), Version::HTTP_11),
+            Termination::for_response(&route, Some("application/json"), false),
             Termination::Close
         );
         assert_eq!(
-            Termination::for_response(&route, Some("application/octet-stream"), Version::HTTP_2),
+            Termination::for_response(&route, Some("application/octet-stream"), true),
             Termination::Http2Trailers
         );
         let sse_route = Route {
@@ -400,9 +419,52 @@ mod tests {
             ..Route::default()
         };
         assert_eq!(
-            Termination::for_response(&sse_route, None, Version::HTTP_2),
+            Termination::for_response(&sse_route, None, true),
             Termination::SseEvent
         );
+    }
+
+    fn request_headers(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
+        pairs
+            .iter()
+            .map(|(name, value)| {
+                (
+                    header::HeaderName::from_static(name),
+                    HeaderValue::from_static(value),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn error_trailers_need_http2_and_te_trailers_or_grpc() {
+        let opted_in = [
+            request_headers(&[("te", "trailers")]),
+            request_headers(&[("te", "gzip, Trailers;q=1")]),
+            request_headers(&[("content-type", "application/grpc")]),
+            request_headers(&[("content-type", "Application/gRPC+proto")]),
+        ];
+        for headers in &opted_in {
+            assert!(
+                accepts_error_trailers(Version::HTTP_2, headers),
+                "{headers:?}"
+            );
+            assert!(
+                !accepts_error_trailers(Version::HTTP_11, headers),
+                "{headers:?}"
+            );
+        }
+        let plain = [
+            request_headers(&[]),
+            request_headers(&[("te", "gzip")]),
+            request_headers(&[("content-type", "application/json")]),
+        ];
+        for headers in &plain {
+            assert!(
+                !accepts_error_trailers(Version::HTTP_2, headers),
+                "{headers:?}"
+            );
+        }
     }
 
     #[test]
