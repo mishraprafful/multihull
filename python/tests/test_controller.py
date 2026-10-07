@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from collections.abc import AsyncIterator
 from datetime import timedelta
@@ -13,10 +14,12 @@ import pytest
 
 from multihull._proto import discovery_pb2 as pb
 from multihull._proto import discovery_pb2_grpc as pb_grpc
+from multihull.apikeys import ApiKeyError
 from multihull.controller import Controller
 from multihull.providers.base import Ref, ScaleRefused
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
+from tests.conftest import no_keys_message
 from tests.fakes import FakeProvider
 
 
@@ -521,3 +524,50 @@ def test_grpc_stream_hello_snapshot_and_degraded(llama_spec: ServiceSpec, tmp_pa
         await server.stop(None)
 
     asyncio.run(scenario())
+
+
+def test_controller_never_publishes_a_route_whose_key_source_yields_no_keys(
+    empty_key_raw: dict[str, Any], empty_key_source: str, tmp_path: Path
+) -> None:
+    spec = ServiceSpec.model_validate(empty_key_raw)
+    controller, _ = make_controller(
+        spec, tmp_path, {t.provider: FakeProvider() for t in spec.targets}
+    )
+    queue = controller.subscribe()
+    with pytest.raises(ApiKeyError) as raised:
+        asyncio.run(controller.reconcile_once())
+    assert str(raised.value) == no_keys_message(empty_key_source)
+    assert controller.snapshot is None and controller.version == 0
+    assert not (tmp_path / "snapshot.json").exists()
+    assert queue.empty()
+
+
+def test_reconcile_loop_keeps_the_last_snapshot_and_logs_when_keys_run_out(
+    llama_raw: dict[str, Any], tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    keys = tmp_path / "route-keys"
+    keys.write_text("hull_fixture_one\n")
+    llama_raw["route"]["auth"]["apiKeys"]["from"] = f"file:{keys}"
+    spec = ServiceSpec.model_validate(llama_raw)
+    controller, _ = make_controller(
+        spec, tmp_path, {t.provider: FakeProvider() for t in spec.targets}
+    )
+    controller.interval = timedelta(milliseconds=10)
+    published = tmp_path / "snapshot.json"
+
+    async def scenario() -> None:
+        assert await controller.reconcile_once() is True
+        before = published.read_text()
+        keys.write_text("# all keys revoked\n")
+        loop = asyncio.create_task(controller.reconcile_loop())
+        await asyncio.sleep(0.2)
+        loop.cancel()
+        assert controller.version == 1
+        assert published.read_text() == before
+
+    with caplog.at_level(logging.ERROR, logger="multihull.controller"):
+        asyncio.run(scenario())
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert errors, "the controller must surface why it stopped publishing"
+    assert all(r.exc_info is None for r in errors)
+    assert f"snapshot not published: {no_keys_message(f'file:{keys}')}" in errors[0].getMessage()

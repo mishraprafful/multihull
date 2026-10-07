@@ -91,6 +91,7 @@ enum FailoverPolicy {
 
 message Auth {
   repeated string api_key_hashes = 1;
+  bool required = 2;
 }
 
 message Sticky {

@@ -108,6 +108,8 @@ pub enum FailoverPolicy {
 pub struct Auth {
     #[serde(default)]
     pub api_key_hashes: Vec<String>,
+    #[serde(default)]
+    pub required: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,6 +292,7 @@ mod tests {
                 },
                 auth: Auth {
                     api_key_hashes: vec!["abc".into()],
+                    required: true,
                 },
                 sticky: Some(Sticky {
                     key: "header:X-Session-Id".into(),

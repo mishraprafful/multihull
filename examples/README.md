@@ -13,4 +13,4 @@ hull plan
 hull deploy
 ```
 
-Credentials are never in the spec. Each target reads them from its native location (kubeconfig context, `~/.modal.toml` or `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET`, `RUNPOD_API_KEY`). The `hf-token` secret is referenced by name and mirrored into each provider's secret store.
+Credentials are never in the spec. Each target reads them from its native location (kubeconfig context, `~/.modal.toml` or `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET`, `RUNPOD_API_KEY`). The `hf-token` secret is referenced by name and mirrored into each provider's secret store. Set `LLAMA_API_KEYS` to comma-separated route keys (`hull_<id>_<secret>`) before `hull deploy`; it refuses a route whose key source yields no keys.

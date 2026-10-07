@@ -186,10 +186,12 @@ class Failover(_message.Message):
     def __init__(self, policy: _Optional[_Union[FailoverPolicy, str]] = ..., retry_on: _Optional[_Iterable[str]] = ..., max_retries: _Optional[int] = ...) -> None: ...
 
 class Auth(_message.Message):
-    __slots__ = ("api_key_hashes",)
+    __slots__ = ("api_key_hashes", "required")
     API_KEY_HASHES_FIELD_NUMBER: _ClassVar[int]
+    REQUIRED_FIELD_NUMBER: _ClassVar[int]
     api_key_hashes: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, api_key_hashes: _Optional[_Iterable[str]] = ...) -> None: ...
+    required: bool
+    def __init__(self, api_key_hashes: _Optional[_Iterable[str]] = ..., required: _Optional[bool] = ...) -> None: ...
 
 class Sticky(_message.Message):
     __slots__ = ("key", "ttl_seconds", "mode", "on_unhealthy", "fallback_key")

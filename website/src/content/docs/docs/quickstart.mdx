@@ -44,7 +44,10 @@ Five commands take a container from your laptop to two or more GPU providers beh
 
 5. **Deploy and watch**
 
+   The spec from `hull init` protects the route with keys from `<NAME>_API_KEYS`, where `<NAME>` is the service name in capitals with `-` as `_`. `hull deploy` stops while that variable holds no keys.
+
    ```sh
+   $ export LLAMA_8B_API_KEYS="hull_$(openssl rand -hex 4)_$(openssl rand -hex 32)"
    $ hull deploy
    $ hull status
    gke-prod    Ready  2/2  L4    https://gke.int/llama
