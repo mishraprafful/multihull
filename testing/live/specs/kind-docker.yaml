@@ -1,0 +1,37 @@
+apiVersion: multihull/v1
+name: live-local
+
+container:
+  image: multihull-mock-server:live
+  command: [/app/.venv/bin/python, -m, mock_server]
+  port: 8000
+  health: {path: /health, initialDelaySeconds: 2}
+  env: {MOCK_MODEL: mock-llm}
+
+resources:
+  gpu: []
+  memory: 256Mi
+
+scaling:
+  concurrency: 32
+  replicas: {min: 1, max: 1}
+
+targets:
+  - provider: kind
+    type: kubernetes
+    priority: 1
+    kubernetes:
+      context: kind-multihull-live
+      namespace: multihull-live
+      serviceType: NodePort
+      nodePort: 30080
+      endpoint: http://127.0.0.1:30080
+  - provider: docker
+    type: docker
+    priority: 2
+    docker: {pull: false, hostPort: 18201}
+
+route:
+  hostname: llama.local
+  protocol: openai
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}

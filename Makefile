@@ -1,7 +1,9 @@
 ROUTER_BIN ?= router/target/release/multihull
 E2E_ARGS ?= -q --timeout 600
+KIND_CLUSTER ?= multihull-live
+LIVE_ARGS ?= -q -x
 
-.PHONY: e2e e2e-quick router-release mock-image
+.PHONY: e2e e2e-quick e2e-kind kind-up kind-down router-release mock-image
 
 router-release:
 	cd router && cargo build --release -p multihull
@@ -18,3 +20,12 @@ e2e-quick:
 else
 e2e-quick: e2e
 endif
+
+kind-up:
+	kind create cluster --name $(KIND_CLUSTER) --config testing/live/kind-config.yaml
+
+kind-down:
+	kind delete cluster --name $(KIND_CLUSTER)
+
+e2e-kind: router-release
+	cd testing/live && LIVE_KIND_CLUSTER=$(KIND_CLUSTER) LIVE_ROUTER_BIN=$(abspath $(ROUTER_BIN)) uv run pytest $(LIVE_ARGS)
