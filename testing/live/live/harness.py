@@ -250,6 +250,18 @@ class LiveRouter(Router):
         )
 
 
+def probe_recovery_budget(config: dict[str, Any]) -> float:
+    probe = config["probe"]
+    rounds = int(probe["success_threshold"]) + 1
+    return rounds * float(probe["interval"]) * (1 + float(probe["jitter_fraction"])) + float(
+        probe["timeout"]
+    )
+
+
+def circuit_close_budget(config: dict[str, Any]) -> float:
+    return float(config["circuit"]["half_open_ramp"]) + float(config["probe"]["interval"])
+
+
 def modal_app_states(app_name: str, environment: str, log: Path) -> list[str]:
     command = [sys.executable, "-m", "modal", "app", "list", "--env", environment, "--json"]
     result = run_logged(command, log, timeout=120)
