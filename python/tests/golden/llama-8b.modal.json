@@ -18,7 +18,8 @@
   "max_inputs": 32,
   "web_server": {
     "port": 8000,
-    "startup_timeout": 120
+    "startup_timeout": 120,
+    "label": "multihull-llama-8b"
   },
   "command": [
     "vllm",

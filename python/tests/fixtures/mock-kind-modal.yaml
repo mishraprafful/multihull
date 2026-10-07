@@ -26,10 +26,12 @@ targets:
       serviceType: NodePort
       nodePort: 30080
       endpoint: http://127.0.0.1:30080
-  - provider: docker
-    type: docker
+  - provider: modal
+    type: modal
     priority: 2
-    docker: {pull: false, hostPort: 18201}
+    modal:
+      environment: main
+      registrySecret: {usernameEnv: GHCR_USERNAME, passwordEnv: GHCR_TOKEN}
 
 route:
   hostname: llama.local

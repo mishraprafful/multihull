@@ -83,10 +83,15 @@ class TargetFactory:
         *,
         environment: str = "main",
         region: str | None = None,
+        registry_secret: Mapping[str, str] | None = None,
         replicas: Mapping[str, int] | tuple[int, int] | None = None,
         weight: int = 1,
     ) -> TargetSpec:
-        block = {"environment": environment, "region": region}
+        block = {
+            "environment": environment,
+            "region": region,
+            "registrySecret": dict(registry_secret) if registry_secret else None,
+        }
         return self.build(provider, "modal", priority, block, replicas, weight)
 
     def runpod(

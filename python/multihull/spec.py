@@ -16,7 +16,8 @@ PROVIDER_TYPES: tuple[ProviderType, ...] = (
     "replicate",
     "docker",
 )
-GPU_OPTIONAL_TYPES: tuple[ProviderType, ...] = ("docker", "kubernetes")
+GPU_OPTIONAL_TYPES: tuple[ProviderType, ...] = ("docker", "kubernetes", "modal")
+ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
 
 class GPU(StrEnum):
@@ -109,9 +110,15 @@ class KubernetesBlock(SpecModel):
         return self
 
 
+class RegistrySecret(SpecModel):
+    usernameEnv: str = Field(pattern=ENV_NAME_PATTERN)
+    passwordEnv: str = Field(pattern=ENV_NAME_PATTERN)
+
+
 class ModalBlock(SpecModel):
     environment: str = "main"
     region: str | None = None
+    registrySecret: RegistrySecret | None = None
 
 
 class RunpodBlock(SpecModel):
