@@ -4,7 +4,9 @@ description: Multihull router and optional controller
 type: application
 version: 0.0.1
 appVersion: "0.0.1"
-home: https://github.com/mishraprafful/multihull
+home: https://multihull.pages.dev
+sources:
+  - https://github.com/mishraprafful/multihull
 keywords:
   - gpu
   - inference

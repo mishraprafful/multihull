@@ -221,13 +221,13 @@ Reliability principle applied: affinity is a performance preference, not a corre
 
 **Outcome taxonomy**: `Success | Capacity (429, queue depth, TTFT timeout) | Transient (connect fail, 502/503/504, reset) | Fatal (500 with body, 4xx) | ClientAbort`. Capacity never ejects; it lowers the adaptive limit. Transient and Fatal feed circuits.
 
-**Health**: active probes every 5 s with jitter, provider-specific (RunPod 204 means warming); optional 60 s warm check (`max_tokens=1`) yielding `Degraded`, not `Down`. Passive: ring of last 100 outcomes plus 10 s buckets. Circuits per endpoint and per provider (provider opens at 50% endpoints open or on 401/403). Envoy-style panic threshold: if more than 50% of all endpoints are open, route to all rather than none.
+**Health**: active probes every 5 s with jitter, provider-specific (RunPod 204 means warming); optional 60 s warm check (`max_tokens=1`) yielding `Degraded`, not `Down`. Passive: ring of last 100 outcomes plus 10 s buckets. Circuits per endpoint and per provider (provider opens at 50% endpoints open or on 401/403). Envoy-style panic threshold: if more than 50% of all endpoints are open, route to all rather than none. Probes can only take an endpoint out: a probe ejection holds its circuit open until the probe recovers, recovery moves it to half-open, and only real request successes close it, so a passing `/health` never restores traffic to a failing model.
 
 ```
         5 consecutive Transient/Fatal  OR  error ratio > 50% over 10s (min 20 samples)
 CLOSED ─────────────────────────────────────────────────────────────────► OPEN
   ▲                                                                       │
-  │ 3 consecutive probe successes                     wait 5s * 2^n (cap 5m) + jitter
+  │ 3 real request successes                          wait 5s * 2^n (cap 5m) + jitter
   │         ┌───────────┐  admit ramp 1 req → 5% → 25% → 100% over 30s     │
   └─────────│ HALF-OPEN │◄─────────────────────────────────────────────────┘
             └───────────┘  any failure → OPEN, n += 1

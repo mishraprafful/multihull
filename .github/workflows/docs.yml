@@ -33,12 +33,12 @@ jobs:
       PAGES_PROJECT: multihull
       PAGES_BRANCH: ${{ github.head_ref || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: python/uv.lock
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -71,7 +71,7 @@ jobs:
       - name: Deploy to Cloudflare Pages
         id: deploy
         if: env.CLOUDFLARE_CONFIGURED == 'true'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -81,7 +81,7 @@ jobs:
 
       - name: Comment preview URL
         if: env.CLOUDFLARE_CONFIGURED == 'true' && github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: docs-preview
           message: |

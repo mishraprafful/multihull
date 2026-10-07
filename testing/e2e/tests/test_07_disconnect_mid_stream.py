@@ -40,8 +40,8 @@ def test_mid_stream_disconnect_ends_with_a_terminal_event_and_no_splice(
 
     during = router.metrics()
     assert during.failovers() == before.failovers()
-    assert during.requests(endpoint=PRIMARY, outcome="success") == (
-        before.requests(endpoint=PRIMARY, outcome="success") + 1
+    assert during.requests(endpoint=PRIMARY, outcome="success") == before.requests(
+        endpoint=PRIMARY, outcome="success"
     )
     assert during.requests(endpoint=PRIMARY, outcome="upstream_disconnected") == (
         before.requests(endpoint=PRIMARY, outcome="upstream_disconnected") + 1

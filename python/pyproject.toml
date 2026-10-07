@@ -33,7 +33,8 @@ blake3 = ["blake3>=0.4"]
 hull = "multihull.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/mishraprafful/multihull"
+Homepage = "https://multihull.pages.dev"
+Documentation = "https://multihull.pages.dev"
 Repository = "https://github.com/mishraprafful/multihull"
 
 [dependency-groups]

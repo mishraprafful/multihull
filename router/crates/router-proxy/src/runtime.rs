@@ -95,10 +95,9 @@ impl EndpointRuntime {
             }
             (ProbeOutcome::Failure, _) => circuit.record(Outcome::Transient, now, rng),
             (ProbeOutcome::Success, ProbeTransition::CameUp) => {
-                circuit.restore();
+                circuit.release(now);
             }
-            (ProbeOutcome::Success, _) => circuit.record_probe_success(now, rng),
-            (ProbeOutcome::Warming, _) => {}
+            (ProbeOutcome::Success | ProbeOutcome::Warming, _) => {}
         }
         transition
     }
@@ -362,6 +361,26 @@ impl Runtime {
         }
         drop(circuit);
         self.publish_circuit_gauges(endpoint, now);
+    }
+
+    pub fn finish_attempt(
+        &self,
+        route_id: &str,
+        endpoint: &Endpoint,
+        outcome: Outcome,
+        label: &'static str,
+        status: Option<u16>,
+        rng: &mut impl Rng,
+    ) {
+        let now = self.now();
+        self.record_attempt(endpoint, outcome, status, now, rng);
+        metrics::counter!(
+            router_obs::metrics::REQUESTS_TOTAL,
+            router_obs::metrics::labels::ROUTE => route_id.to_string(),
+            router_obs::metrics::labels::ENDPOINT => endpoint.id.clone(),
+            router_obs::metrics::labels::OUTCOME => label
+        )
+        .increment(1);
     }
 
     pub fn record_probe(&self, endpoint: &Endpoint, outcome: ProbeOutcome, status: Option<u16>) {
@@ -811,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn probe_failures_eject_and_probe_successes_restore() {
+    fn probe_failures_eject_and_recovery_moves_to_half_open_not_closed() {
         let runtime = Runtime::default();
         let a = endpoint("a");
         let b = endpoint("b");
@@ -841,41 +860,173 @@ mod tests {
         runtime.record_probe(&a, ProbeOutcome::Success, Some(200));
         let now = runtime.now();
         assert!(!runtime.endpoint_circuit_open(&a, now));
-        assert!(runtime.endpoint_healthy(&a, now));
         let status = runtime.status(&a).unwrap();
-        assert_eq!(status.circuit, "closed");
+        assert_eq!(status.circuit, "half_open");
         assert_eq!(status.probe.state, ProbeState::Up);
         assert_eq!(status.probe.probes, 7);
         assert!(runtime.view(&excluded, None).available("a"));
     }
 
     #[test]
-    fn probe_failures_keep_reopening_a_circuit_closed_by_traffic() {
+    fn first_probe_success_streak_leaves_a_circuit_opened_by_traffic_open() {
+        let runtime = Runtime::default();
+        let rt = runtime.endpoint(&endpoint("a"));
+        let mut rng = ThreadRng;
+        let t0 = Duration::from_secs(100);
+        for _ in 0..5 {
+            rt.record_outcome(Outcome::Fatal, t0, &mut rng);
+        }
+        assert!(rt.circuit_state(t0).is_open());
+        let mut transitions = Vec::new();
+        for i in 1..=3 {
+            transitions.push(rt.record_probe(
+                ProbeOutcome::Success,
+                Some(200),
+                t0 + Duration::from_secs(i),
+                &mut rng,
+            ));
+        }
+        assert_eq!(transitions.last(), Some(&ProbeTransition::CameUp));
+        assert_eq!(rt.probe_status().state, ProbeState::Up);
+        assert!(rt.circuit_state(t0 + Duration::from_secs(3)).is_open());
+    }
+
+    #[test]
+    fn probe_successes_never_close_a_half_open_circuit() {
+        let runtime = Runtime::default();
+        let rt = runtime.endpoint(&endpoint("a"));
+        let mut rng = router_core::rng::ZeroRng;
+        let t0 = Duration::from_secs(100);
+        for i in 0..3 {
+            rt.record_probe(
+                ProbeOutcome::Success,
+                Some(200),
+                t0 + Duration::from_secs(i),
+                &mut rng,
+            );
+        }
+        assert_eq!(rt.probe_status().state, ProbeState::Up);
+        for _ in 0..5 {
+            rt.record_outcome(Outcome::Fatal, t0 + Duration::from_secs(3), &mut rng);
+        }
+        let trial = t0 + Duration::from_secs(10);
+        assert!(rt.admit(trial, &mut rng));
+        for i in 0..5 {
+            rt.record_probe(
+                ProbeOutcome::Success,
+                Some(200),
+                trial + Duration::from_secs(i),
+                &mut rng,
+            );
+            assert_eq!(
+                rt.circuit_state(trial + Duration::from_secs(i)).label(),
+                "half_open"
+            );
+        }
+        for i in 0..3 {
+            rt.record_outcome(
+                Outcome::Success,
+                trial + Duration::from_secs(5 + i),
+                &mut rng,
+            );
+        }
+        assert!(rt.circuit_state(trial + Duration::from_secs(8)).is_closed());
+    }
+
+    #[test]
+    fn probe_down_keeps_an_endpoint_out_of_every_gate_until_the_probe_recovers() {
+        let runtime = Runtime::new(
+            CircuitConfig {
+                base_backoff: Duration::from_millis(1),
+                max_backoff: Duration::from_millis(1),
+                jitter_fraction: 0.0,
+                ..CircuitConfig::default()
+            },
+            AdmissionQueue::default(),
+            PressureConfig::default(),
+            ProbeConfig::default(),
+            RetryConfig::default(),
+        );
+        let down = Endpoint {
+            provider: "pa".into(),
+            ..endpoint("down")
+        };
+        let traffic = Endpoint {
+            provider: "pb".into(),
+            ..endpoint("traffic")
+        };
+        let spare = Endpoint {
+            provider: "pc".into(),
+            ..endpoint("spare")
+        };
+        runtime.endpoint(&spare);
+        let mut rng = router_core::rng::ZeroRng;
+        for _ in 0..3 {
+            runtime.record_probe(&down, ProbeOutcome::Failure, Some(503));
+        }
+        let traffic_rt = runtime.endpoint(&traffic);
+        for _ in 0..5 {
+            runtime.record_attempt(&traffic, Outcome::Fatal, Some(500), runtime.now(), &mut rng);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+
+        let now = runtime.now();
+        let down_rt = runtime.get("down").unwrap();
+        assert_eq!(down_rt.probe_status().state, ProbeState::Down);
+        assert!(runtime.endpoint_circuit_open(&down, now));
+        assert!(runtime.endpoint_open(&down, now));
+        assert!(!runtime.endpoint_healthy(&down, now));
+        assert!(runtime.provider_open("pa", now));
+        let excluded = HashSet::new();
+        assert!(!runtime.view(&excluded, None).available("down"));
+        assert_eq!(runtime.status(&down).unwrap().circuit, "open");
+        assert!(!down_rt.admit(now, &mut rng));
+
+        assert_eq!(traffic_rt.probe_status().state, ProbeState::Unknown);
+        assert_eq!(runtime.status(&traffic).unwrap().circuit, "half_open");
+        assert!(runtime.view(&excluded, None).available("traffic"));
+        assert!(traffic_rt.admit(now, &mut rng));
+
+        for _ in 0..3 {
+            runtime.record_probe(&down, ProbeOutcome::Success, Some(200));
+        }
+        let now = runtime.now();
+        assert_eq!(runtime.status(&down).unwrap().circuit, "half_open");
+        assert!(runtime.view(&excluded, None).available("down"));
+        assert!(down_rt.admit(now, &mut rng));
+        for _ in 0..3 {
+            runtime.record_attempt(&down, Outcome::Success, Some(200), runtime.now(), &mut rng);
+        }
+        assert_eq!(runtime.status(&down).unwrap().circuit, "closed");
+    }
+
+    #[test]
+    fn probe_failures_while_down_reopen_after_the_backoff_expires() {
         let runtime = Runtime::default();
         let a = endpoint("a");
+        let rt = runtime.endpoint(&a);
         let mut rng = ThreadRng;
-        for _ in 0..3 {
-            runtime.record_probe(&a, ProbeOutcome::Failure, Some(503));
+        let t0 = Duration::from_secs(100);
+        for i in 0..3 {
+            rt.record_probe(
+                ProbeOutcome::Failure,
+                Some(503),
+                t0 + Duration::from_secs(i),
+                &mut rng,
+            );
         }
-        let rt = runtime.get("a").unwrap();
-        assert!(rt.circuit_state(runtime.now()).is_open());
-        assert!(lock(&rt.circuit).restore());
-        assert!(!runtime.endpoint_circuit_open(&a, runtime.now()));
-        runtime.record_probe(&a, ProbeOutcome::Failure, Some(503));
-        assert!(runtime.endpoint_circuit_open(&a, runtime.now()));
+        assert!(rt.circuit_state(t0 + Duration::from_secs(2)).is_open());
         assert!(rt.probe_down());
-        runtime.record_probe(&a, ProbeOutcome::Success, Some(200));
-        assert!(runtime.endpoint_circuit_open(&a, runtime.now()));
-        assert!(lock(&rt.circuit).restore());
-        runtime.record_probe(&a, ProbeOutcome::Success, Some(200));
-        assert!(!runtime.endpoint_circuit_open(&a, runtime.now()));
-        runtime.record_probe(&a, ProbeOutcome::Failure, Some(503));
-        let status = runtime.status(&a).unwrap();
-        assert_eq!(status.circuit, "open");
-        assert_eq!(status.probe.state, ProbeState::Down);
-        assert_eq!(status.probe.consecutive_failures, 1);
-        rt.record_outcome(Outcome::Transient, runtime.now(), &mut rng);
-        assert!(runtime.endpoint_circuit_open(&a, runtime.now()));
+        rt.record_probe(
+            ProbeOutcome::Failure,
+            Some(503),
+            t0 + Duration::from_secs(20),
+            &mut rng,
+        );
+        assert!(rt.circuit_state(t0 + Duration::from_secs(20)).is_open());
+        assert_eq!(rt.probe_status().consecutive_failures, 4);
+        rt.record_outcome(Outcome::Transient, t0 + Duration::from_secs(21), &mut rng);
+        assert!(rt.circuit_state(t0 + Duration::from_secs(21)).is_open());
     }
 
     #[test]

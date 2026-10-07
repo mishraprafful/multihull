@@ -4,16 +4,19 @@ import time
 
 import pytest
 
-from e2e.client import RouterClient, failures, load, providers_of
+from e2e.client import Outcome, RouterClient, failures, load, load_for, providers_of
 from e2e.harness import Controller, Deployment, Router, probe_ejection_budget
+from e2e.sampler import EndpointSampler
 from e2e.waiting import wait_until
 
 PROBE = {"interval": 2, "timeout": 1, "jitter_fraction": 0.2}
+CIRCUIT = {"base_backoff": 1, "max_backoff": 2, "jitter_fraction": 0.1, "half_open_ramp": 3}
 PRIMARY = "e2e-three/primary"
-MAX_HALF_OPEN_LEAK = 0.2
+SUCCESSES_TO_CLOSE = 3
+LOAD_SECONDS = 3 * CIRCUIT["max_backoff"]
 
 
-@pytest.mark.router_tuning(probe=PROBE)
+@pytest.mark.router_tuning(probe=PROBE, circuit=CIRCUIT)
 def test_failing_health_probe_opens_the_primary_circuit_through_the_router(
     deployment: Deployment,
     controller: Controller,
@@ -46,30 +49,52 @@ def test_failing_health_probe_opens_the_primary_circuit_through_the_router(
         assert ejected.total("router_probe_total", endpoint=PRIMARY, outcome="failure") >= 3
         assert ejected.circuit_state(PRIMARY) == 2
 
-        outcomes = load(client, 50, stream=stream, concurrency=4)
+        with EndpointSampler(router, "primary") as sampler:
+            outcomes = load_for(client, LOAD_SECONDS, stream=stream, concurrency=4)
         assert failures(outcomes) == []
         assert all(outcome.attempts == 1 for outcome in outcomes)
         by_provider = providers_of(outcomes)
-        assert by_provider.get("secondary", 0) + by_provider.get("tertiary", 0) >= len(outcomes) * (
-            1 - MAX_HALF_OPEN_LEAK
-        )
-        assert router.endpoint("primary")["probe"]["state"] == "down"
+        assert by_provider.get("primary", 0) == 0, by_provider
+        assert by_provider.get("secondary", 0) + by_provider.get("tertiary", 0) == len(outcomes)
+        samples = sampler.samples
+        assert samples[-1].at - samples[0].at >= LOAD_SECONDS - 1
+        assert {(sample.probe, sample.circuit) for sample in samples} == {("down", "open")}
         assert router.metrics().failovers() == ejected.failovers()
 
         deployment.mock("primary").control(health_status="200")
-        wait_until(
-            lambda: router.endpoint("primary")["probe"]["state"] == "up",
-            budget + 1,
-            message="router probes mark the primary up again",
-        )
-        wait_until(
-            lambda: router.endpoint("primary")["circuit"] == "closed",
-            5,
-            message="primary circuit closed after the probes recovered",
-        )
-        recovered = load(client, 10, stream=stream, concurrency=2)
+        with EndpointSampler(router, "primary") as sampler:
+            wait_until(
+                lambda: router.endpoint("primary")["probe"]["state"] == "up",
+                budget + 1,
+                message="router probes mark the primary up again",
+            )
+            wait_until(
+                lambda: router.endpoint("primary")["circuit"] == "half_open",
+                2,
+                message="probe recovery releases the primary into half-open",
+            )
+            time.sleep(PROBE["interval"] * 2)
+            idle = router.endpoint("primary")
+            assert idle["circuit"] == "half_open"
+            assert idle["probe"]["state"] == "up"
+
+            recovered: list[Outcome] = []
+            traffic_started = time.monotonic()
+            deadline = traffic_started + 20
+            while router.endpoint("primary")["circuit"] != "closed":
+                assert time.monotonic() < deadline, "primary circuit never closed under traffic"
+                recovered.extend(load(client, 8, stream=stream, concurrency=4))
+        assert "closed" not in {sample.circuit for sample in sampler.between(0, traffic_started)}
         assert failures(recovered) == []
-        assert providers_of(recovered) == {"primary": 10}
+        restored = router.metrics()
+        primary_successes = restored.requests(endpoint=PRIMARY, outcome="success") - (
+            ejected.requests(endpoint=PRIMARY, outcome="success")
+        )
+        assert primary_successes >= SUCCESSES_TO_CLOSE
+
+        after_close = load(client, 10, stream=stream, concurrency=2)
+        assert failures(after_close) == []
+        assert providers_of(after_close) == {"primary": 10}
         restored = router.metrics()
         assert restored.total("router_probe_total", endpoint=PRIMARY, outcome="success") >= 3
         assert restored.circuit_state(PRIMARY) == 0
