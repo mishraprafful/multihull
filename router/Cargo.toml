@@ -17,7 +17,8 @@ version = "0.0.1"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/mishraprafful/multihull"
-homepage = "https://github.com/mishraprafful/multihull"
+homepage = "https://multihull.pages.dev"
+documentation = "https://multihull.pages.dev"
 
 [workspace.dependencies]
 router-core = { path = "crates/router-core", version = "0.0.1" }
