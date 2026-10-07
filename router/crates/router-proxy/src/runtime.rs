@@ -97,8 +97,7 @@ impl EndpointRuntime {
             (ProbeOutcome::Success, ProbeTransition::CameUp) => {
                 circuit.release(now);
             }
-            (ProbeOutcome::Success, _) => circuit.record_probe_success(now, rng),
-            (ProbeOutcome::Warming, _) => {}
+            (ProbeOutcome::Success | ProbeOutcome::Warming, _) => {}
         }
         transition
     }
@@ -870,6 +869,48 @@ mod tests {
         assert_eq!(transitions.last(), Some(&ProbeTransition::CameUp));
         assert_eq!(rt.probe_status().state, ProbeState::Up);
         assert!(rt.circuit_state(t0 + Duration::from_secs(3)).is_open());
+    }
+
+    #[test]
+    fn probe_successes_never_close_a_half_open_circuit() {
+        let runtime = Runtime::default();
+        let rt = runtime.endpoint(&endpoint("a"));
+        let mut rng = router_core::rng::ZeroRng;
+        let t0 = Duration::from_secs(100);
+        for i in 0..3 {
+            rt.record_probe(
+                ProbeOutcome::Success,
+                Some(200),
+                t0 + Duration::from_secs(i),
+                &mut rng,
+            );
+        }
+        assert_eq!(rt.probe_status().state, ProbeState::Up);
+        for _ in 0..5 {
+            rt.record_outcome(Outcome::Fatal, t0 + Duration::from_secs(3), &mut rng);
+        }
+        let trial = t0 + Duration::from_secs(10);
+        assert!(rt.admit(trial, &mut rng));
+        for i in 0..5 {
+            rt.record_probe(
+                ProbeOutcome::Success,
+                Some(200),
+                trial + Duration::from_secs(i),
+                &mut rng,
+            );
+            assert_eq!(
+                rt.circuit_state(trial + Duration::from_secs(i)).label(),
+                "half_open"
+            );
+        }
+        for i in 0..3 {
+            rt.record_outcome(
+                Outcome::Success,
+                trial + Duration::from_secs(5 + i),
+                &mut rng,
+            );
+        }
+        assert!(rt.circuit_state(trial + Duration::from_secs(8)).is_closed());
     }
 
     #[test]

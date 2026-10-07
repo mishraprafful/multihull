@@ -117,7 +117,7 @@ pub enum State {
     HalfOpen {
         admitted: u32,
         started: Duration,
-        probe_successes: u32,
+        successes: u32,
         backoff_n: u32,
     },
 }
@@ -198,7 +198,7 @@ impl Circuit {
             } if now >= since + wait => State::HalfOpen {
                 admitted: 0,
                 started: now,
-                probe_successes: 0,
+                successes: 0,
                 backoff_n,
             },
             other => other,
@@ -235,10 +235,10 @@ impl Circuit {
             State::Closed => self.record_closed(outcome, now, rng),
             State::Open { .. } => {}
             State::HalfOpen {
-                probe_successes,
+                successes,
                 backoff_n,
                 ..
-            } => self.record_half_open(outcome, now, rng, probe_successes, backoff_n),
+            } => self.record_half_open(outcome, now, rng, successes, backoff_n),
         }
     }
 
@@ -258,18 +258,6 @@ impl Circuit {
         }
     }
 
-    pub fn record_probe_success(&mut self, now: Duration, rng: &mut impl Rng) {
-        self.advance(now);
-        if let State::HalfOpen {
-            probe_successes,
-            backoff_n,
-            ..
-        } = self.state
-        {
-            self.record_half_open(Outcome::Success, now, rng, probe_successes, backoff_n);
-        }
-    }
-
     pub fn ejected_by_probe(&self) -> bool {
         self.ejected_by_probe
     }
@@ -284,7 +272,7 @@ impl Circuit {
         self.state = State::HalfOpen {
             admitted: 0,
             started: now,
-            probe_successes: 0,
+            successes: 0,
             backoff_n,
         };
         true
@@ -301,7 +289,7 @@ impl Circuit {
                 self.state = State::HalfOpen {
                     admitted: 0,
                     started: now,
-                    probe_successes: 0,
+                    successes: 0,
                     backoff_n,
                 };
             }
@@ -332,19 +320,20 @@ impl Circuit {
         outcome: Outcome,
         now: Duration,
         rng: &mut impl Rng,
-        probe_successes: u32,
+        successes: u32,
         backoff_n: u32,
     ) {
         match outcome {
             Outcome::Success => {
-                let successes = probe_successes + 1;
+                let successes = successes + 1;
                 if successes >= self.config.probe_successes_to_close {
                     self.close();
                 } else if let State::HalfOpen {
-                    probe_successes, ..
+                    successes: recorded,
+                    ..
                 } = &mut self.state
                 {
-                    *probe_successes = successes;
+                    *recorded = successes;
                 }
             }
             outcome if outcome.counts_toward_ejection() => {
@@ -625,7 +614,7 @@ mod tests {
             circuit.state(),
             State::HalfOpen {
                 admitted: 1,
-                probe_successes: 0,
+                successes: 0,
                 backoff_n: 0,
                 ..
             }
@@ -652,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn three_probe_successes_close_the_circuit() {
+    fn three_request_successes_close_the_circuit() {
         let mut circuit = Circuit::default();
         let mut rng = ZeroRng;
         for i in 0..5 {
@@ -663,10 +652,7 @@ mod tests {
         circuit.record(Outcome::Success, secs(7), &mut rng);
         assert!(matches!(
             circuit.state(),
-            State::HalfOpen {
-                probe_successes: 2,
-                ..
-            }
+            State::HalfOpen { successes: 2, .. }
         ));
         circuit.record(Outcome::Success, secs(8), &mut rng);
         assert!(circuit.state().is_closed());
@@ -836,7 +822,7 @@ mod tests {
             State::HalfOpen {
                 admitted: 0,
                 started: secs(8),
-                probe_successes: 0,
+                successes: 0,
                 backoff_n: 1
             }
         );
@@ -854,31 +840,6 @@ mod tests {
         assert!(!circuit.release(secs(1)));
         assert!(circuit.state().is_open());
         assert!(!circuit.release(secs(1)));
-    }
-
-    #[test]
-    fn probe_successes_count_only_while_half_open() {
-        let mut circuit = Circuit::default();
-        let mut rng = ZeroRng;
-        for i in 0..4 {
-            circuit.record(Outcome::Transient, millis(i), &mut rng);
-        }
-        circuit.record_probe_success(millis(5), &mut rng);
-        circuit.record(Outcome::Transient, millis(6), &mut rng);
-        assert!(circuit.state().is_open());
-        circuit.record_probe_success(secs(1), &mut rng);
-        assert!(circuit.state().is_open());
-        circuit.record_probe_success(secs(6), &mut rng);
-        circuit.record_probe_success(secs(7), &mut rng);
-        assert!(matches!(
-            circuit.state(),
-            State::HalfOpen {
-                probe_successes: 2,
-                ..
-            }
-        ));
-        circuit.record_probe_success(secs(8), &mut rng);
-        assert!(circuit.state().is_closed());
     }
 
     #[test]

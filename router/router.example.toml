@@ -39,7 +39,8 @@ max_backoff = 300
 jitter_fraction = 0.25
 # Half-open admission ramps 1 request, 5 percent, 25 percent, 100 percent across this window.
 half_open_ramp = 30
-# Successes in half-open that close the circuit again.
+# Successes of real requests admitted in half-open that close the circuit again.
+# Probe successes never count.
 probe_successes_to_close = 3
 # A provider circuit opens when this share of its endpoint circuits is open.
 provider_open_ratio = 0.5
