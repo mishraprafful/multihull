@@ -1,10 +1,83 @@
 mod common;
 
-use common::{closed_port_url, endpoint, post, start_proxy};
+use common::{
+    closed_port_url, endpoint, post, single_route, start_proxy, start_proxy_configured,
+    RunningProxy,
+};
 use hyper::StatusCode;
+use router_core::snapshot::Endpoint;
+use router_proxy::{PhaseTimeouts, ProxyConfig};
 use router_testkit::{MockUpstream, MockUpstreamConfig};
+use std::time::{Duration, Instant};
 
 const COMPLETIONS: &str = "/v1/chat/completions";
+
+async fn open_circuit_of(proxy: &RunningProxy, primary: &Endpoint) {
+    for _ in 0..20 {
+        let reply = post(proxy, COMPLETIONS, &[], b"{}").await;
+        assert_eq!(reply.status, 200, "{:?}", reply.body);
+        let now = proxy.state.runtime.now();
+        if proxy.state.runtime.endpoint_open(primary, now) {
+            return;
+        }
+    }
+    panic!("circuit of {} never opened", primary.id);
+}
+
+async fn primary_down_and_fallback(config: ProxyConfig) -> (RunningProxy, MockUpstream) {
+    let fallback = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let primary = endpoint("kind", "kind", closed_port_url().await, 1);
+    let proxy = start_proxy_configured(
+        single_route(vec![
+            primary.clone(),
+            endpoint("modal", "modal", fallback.url(), 2),
+        ]),
+        config,
+    )
+    .await;
+    open_circuit_of(&proxy, &primary).await;
+    (proxy, fallback)
+}
+
+#[tokio::test]
+async fn first_byte_timeout_on_the_last_healthy_provider_is_retried_there() {
+    let config = ProxyConfig {
+        timeouts: PhaseTimeouts {
+            first_byte: Duration::from_millis(300),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let (proxy, fallback) = primary_down_and_fallback(config).await;
+    fallback.reconfigure(MockUpstreamConfig::default().stalling_first(1, Duration::from_secs(3)));
+    let before = fallback.request_count();
+
+    let started = Instant::now();
+    let reply = post(&proxy, COMPLETIONS, &[], b"{}").await;
+
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.header("x-hull-provider"), Some("modal"));
+    assert_eq!(reply.header("x-hull-attempts"), Some("2"));
+    assert_eq!(fallback.request_count() - before, 2);
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn request_timeout_from_the_last_healthy_provider_is_retried_there() {
+    let (proxy, fallback) = primary_down_and_fallback(ProxyConfig::default()).await;
+    fallback
+        .reconfigure(MockUpstreamConfig::default().failing_first(2, StatusCode::REQUEST_TIMEOUT));
+    let before = fallback.request_count();
+
+    let reply = post(&proxy, COMPLETIONS, &[], b"{}").await;
+
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.header("x-hull-provider"), Some("modal"));
+    assert_eq!(reply.header("x-hull-attempts"), Some("3"));
+    assert_eq!(fallback.request_count() - before, 3);
+}
 
 #[tokio::test]
 async fn request_timeout_fails_over_to_an_untried_healthy_provider_first() {
