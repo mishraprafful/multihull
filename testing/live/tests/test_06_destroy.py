@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import docker
 
+from e2e.harness import Controller
 from e2e.waiting import wait_until
 from live.capture import AFTER_DESTROY, BEFORE_DESTROY, Recorder, ScenarioProbe
 from live.harness import (
@@ -18,12 +19,14 @@ from multihull.providers.base import SERVICE_LABEL
 def test_destroy_leaves_nothing_behind(
     deployment: LiveDeployment,
     kind: Kind,
+    controller: Controller,
     router: LiveRouter,
     scenario: ScenarioProbe,
     recorder: Recorder,
 ) -> None:
     refs = deployment.refs()
     recorder.capture(BEFORE_DESTROY, kind, deployment, router=router)
+    controller.stop()
     result = deployment.destroy()
     left = sorted(deployment.records())
     recorder.summary.destroy = (
