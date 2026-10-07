@@ -14,7 +14,7 @@ import pytest
 from multihull import deploy as deploymod
 from multihull import engine
 from multihull.providers import create
-from multihull.providers.base import Ref, Target
+from multihull.providers.base import Ref, ScaleRefused, Target
 from multihull.providers.docker import (
     CONFIG_HASH_LABEL,
     OWNER_LABEL,
@@ -342,7 +342,7 @@ def test_scale_only_accepts_single_replica(mock_docker_spec: ServiceSpec) -> Non
     provider, _ = provider_with()
     ref = provider.apply(docker_target(mock_docker_spec, "docker-a"), None)
     provider.scale(ref, 1, 1)
-    with pytest.raises(ValueError, match="exactly one container"):
+    with pytest.raises(ScaleRefused, match="exactly one container"):
         provider.scale(ref, 2, 4)
     with pytest.raises(ValueError, match="min=0 max=1"):
         provider.scale(ref, 0, 1)

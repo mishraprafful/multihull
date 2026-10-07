@@ -5,13 +5,15 @@ import json
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import grpc
+import pytest
 
 from multihull._proto import discovery_pb2 as pb
 from multihull._proto import discovery_pb2_grpc as pb_grpc
 from multihull.controller import Controller
-from multihull.providers.base import Ref
+from multihull.providers.base import Ref, ScaleRefused
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
 from tests.fakes import FakeProvider
@@ -57,9 +59,25 @@ def make_controller(
 
 
 class RefusingProvider(FakeProvider):
+    def __init__(self, refusal: Exception, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.refusal = refusal
+
     def scale(self, ref: Ref, min: int, max: int) -> None:
         self.scaled.append((ref.provider, min, max))
-        raise ValueError("exactly one container")
+        raise self.refusal
+
+
+class FlakyProvider(FakeProvider):
+    def __init__(self, failures: int = 0, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.failures = failures
+
+    def scale(self, ref: Ref, min: int, max: int) -> None:
+        if self.failures > 0:
+            self.failures -= 1
+            raise RuntimeError("provider API timed out")
+        super().scale(ref, min, max)
 
 
 def test_reconcile_tick_updates_state_and_versions(llama_spec: ServiceSpec, tmp_path: Path) -> None:
@@ -189,11 +207,16 @@ def test_scale_back_keeps_the_warm_provider_floor(llama_raw: dict, tmp_path: Pat
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize(
+    "refusal",
+    [ScaleRefused("runs exactly one container"), NotImplementedError("lands in v0.2")],
+    ids=["refused", "not-implemented"],
+)
 def test_refused_scale_still_records_intent_and_scales_back(
-    llama_spec: ServiceSpec, tmp_path: Path, caplog
+    llama_spec: ServiceSpec, tmp_path: Path, caplog: pytest.LogCaptureFixture, refusal: Exception
 ) -> None:
     clock = FakeClock()
-    providers = {t.provider: RefusingProvider() for t in llama_spec.targets}
+    providers = {t.provider: RefusingProvider(refusal) for t in llama_spec.targets}
     controller, _ = make_controller(
         llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=5)
     )
@@ -212,8 +235,108 @@ def test_refused_scale_still_records_intent_and_scales_back(
         }
         assert controller.pre_degraded_min == {}
         messages = [record.getMessage() for record in caplog.records]
-        assert any(m.startswith("scale gke-prod to min=3 failed") for m in messages)
-        assert any(m.startswith("scale back gke-prod to min=2 failed") for m in messages)
+        refused_up = [m for m in messages if m.startswith("scale gke-prod to min=3 failed")]
+        refused_back = [m for m in messages if m.startswith("scale back gke-prod to min=2 failed")]
+        assert refused_up and all("refused" in m and str(refusal) in m for m in refused_up)
+        assert refused_back and all("refused" in m for m in refused_back)
+
+    asyncio.run(scenario())
+
+
+def test_transient_scale_failure_keeps_min_and_retries_on_next_degraded(
+    llama_spec: ServiceSpec, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    flaky = FlakyProvider(failures=1)
+    providers["modal-main"] = flaky
+    controller, _ = make_controller(llama_spec, tmp_path, providers)
+    signal = pb.Degraded(service="llama-8b", provider="gke-prod")
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        with caplog.at_level("INFO", logger="multihull.controller"):
+            actions = await controller.handle_degraded(signal)
+        assert [(a.provider, a.new_min) for a in actions] == [("runpod-eu", 2)]
+        assert controller.min_replicas == {"gke-prod": 2, "modal-main": 1, "runpod-eu": 2}
+        assert controller.pre_degraded_min == {"runpod-eu": 1}
+        assert flaky.scaled == []
+        failed = [
+            record.getMessage()
+            for record in caplog.records
+            if record.getMessage().startswith("scale modal-main to min=2 failed")
+        ]
+        assert failed and all("refused" not in m for m in failed)
+
+        retried = await controller.handle_degraded(signal)
+        assert ("modal-main", 1, 2) in {(a.provider, a.previous_min, a.new_min) for a in retried}
+        assert flaky.scaled == [("modal-main", 2, 8)]
+        assert controller.min_replicas["modal-main"] == 2
+        assert controller.pre_degraded_min["modal-main"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_transient_scale_back_failure_keeps_min_and_retries_next_cooldown(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    clock = FakeClock()
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    flaky = FlakyProvider()
+    providers["modal-main"] = flaky
+    controller, _ = make_controller(
+        llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=60)
+    )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        await controller.handle_degraded(pb.Degraded(service="llama-8b", provider="gke-prod"))
+        assert controller.min_replicas == {"gke-prod": 2, "modal-main": 2, "runpod-eu": 2}
+        flaky.failures = 1
+        clock.advance(60)
+        actions = await controller.scale_back_once()
+        assert [(a.provider, a.new_min) for a in actions] == [("runpod-eu", 1)]
+        assert controller.min_replicas["modal-main"] == 2
+        assert controller.pre_degraded_min == {"modal-main": 1}
+        clock.advance(60)
+        actions = await controller.scale_back_once()
+        assert [(a.provider, a.new_min) for a in actions] == [("modal-main", 1)]
+        assert flaky.scaled[-1] == ("modal-main", 1, 8)
+        assert controller.pre_degraded_min == {}
+
+    asyncio.run(scenario())
+
+
+def test_failed_raise_never_scales_the_warm_fallback_to_zero(
+    llama_raw: dict, tmp_path: Path
+) -> None:
+    llama_raw["reliability"]["fallbackScaleToZero"] = True
+    llama_raw["reliability"]["minWarmProviders"] = 2
+    llama_raw["targets"][1]["replicas"] = {"min": 0, "max": 2}
+    llama_raw["targets"][2]["replicas"] = {"min": 0, "max": 2}
+    spec = ServiceSpec.model_validate(llama_raw)
+    clock = FakeClock()
+    runpod = FlakyProvider(failures=1, phases=["Pending"])
+    providers = {
+        "gke-prod": FakeProvider(),
+        "modal-main": FakeProvider(phases=["Pending"]),
+        "runpod-eu": runpod,
+    }
+    controller, _ = make_controller(
+        spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=10)
+    )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        await controller.handle_degraded(pb.Degraded(service="llama-8b", provider="gke-prod"))
+        assert providers["modal-main"].scaled == [("modal-main", 1, 2)]
+        assert runpod.scaled == []
+        assert controller.min_replicas == {"gke-prod": 2, "modal-main": 1, "runpod-eu": 0}
+        for _ in range(5):
+            clock.advance(10)
+            await controller.scale_back_once()
+        assert ("modal-main", 0, 2) not in providers["modal-main"].scaled
+        assert controller.min_replicas == {"gke-prod": 2, "modal-main": 1, "runpod-eu": 0}
+        assert controller.warm_targets() == 2
 
     asyncio.run(scenario())
 

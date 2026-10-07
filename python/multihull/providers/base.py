@@ -121,6 +121,10 @@ class Plan:
     notes: list[str] = field(default_factory=list)
 
 
+class ScaleRefused(ValueError):
+    pass
+
+
 @runtime_checkable
 class Provider(Protocol):
     type: ClassVar[ProviderType]

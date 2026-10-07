@@ -18,6 +18,7 @@ from multihull.providers.base import (
     Observed,
     Plan,
     Ref,
+    ScaleRefused,
     Target,
     resolve_secret_values,
     secret_env_name,
@@ -275,7 +276,7 @@ class DockerProvider:
 
     def scale(self, ref: Ref, min: int, max: int) -> None:
         if min != 1 or max != 1:
-            raise ValueError(
+            raise ScaleRefused(
                 f"docker target {ref.provider} runs exactly one container; "
                 f"cannot scale to min={min} max={max}"
             )
