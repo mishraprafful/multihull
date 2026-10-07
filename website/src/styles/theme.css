@@ -248,32 +248,51 @@ h1#_top:not([data-page-title]),
   margin-top: 1.75rem;
 }
 
-.sl-markdown-content .mh-split {
+.sl-markdown-content :is(.mh-split, .mh-spec) {
   display: grid;
   gap: 1.75rem 4rem;
+}
+
+.sl-markdown-content .mh-split {
   align-items: center;
 }
 
-.sl-markdown-content .mh-split > * {
+.sl-markdown-content :is(.mh-split, .mh-spec) > * {
   min-width: 0;
   margin: 0;
 }
 
-.sl-markdown-content .mh-split + * {
-  margin-top: 2.5rem;
+.sl-markdown-content .mh-spec > .mh-split-visual {
+  max-width: 40rem;
+}
+
+@media (min-width: 72rem) {
+  .sl-markdown-content .mh-spec {
+    grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
+    grid-template-areas:
+      'code text'
+      'code diagram';
+  }
+
+  .sl-markdown-content .mh-spec > .mh-split-text {
+    grid-area: text;
+    align-self: end;
+  }
+
+  .sl-markdown-content .mh-spec > .mh-split-visual {
+    grid-area: code;
+  }
+
+  .sl-markdown-content .mh-spec > .sp {
+    grid-area: diagram;
+    align-self: start;
+    margin: 0;
+  }
 }
 
 @media (min-width: 64rem) {
   .sl-markdown-content .mh-split {
     grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-  }
-
-  .sl-markdown-content .mh-split--flip {
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-  }
-
-  .sl-markdown-content .mh-split--flip > .mh-split-text {
-    order: 2;
   }
 
   .sl-markdown-content .mh-status table {
