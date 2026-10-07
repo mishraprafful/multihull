@@ -123,6 +123,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
       - run: helm lint charts/multihull
       - run: helm template multihull charts/multihull > /dev/null
       - run: >
