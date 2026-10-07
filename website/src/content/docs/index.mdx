@@ -11,17 +11,12 @@ hero:
       variant: primary
     - text: Read the design
       link: /docs/design/architecture/
-      variant: minimal
+      variant: secondary
 ---
 
 import Horizon from '../../components/Horizon.astro';
 import StatusPill from '../../components/StatusPill.astro';
-import HeroFailover from '../../components/HeroFailover.astro';
 import SpecToProviders from '../../components/SpecToProviders.astro';
-
-<section class="mh-section">
-  <HeroFailover />
-</section>
 
 <section class="mh-section mh-value-props not-content">
   <div>
@@ -40,11 +35,15 @@ import SpecToProviders from '../../components/SpecToProviders.astro';
 
 <Horizon />
 
-<section class="mh-section">
+<section class="mh-section mh-spec">
+<div class="mh-split-text">
 
 ## A minimal spec
 
 <p class="mh-lead">Two targets, one hostname. The control plane turns this into a Kubernetes Deployment and a Modal app.</p>
+
+</div>
+<div class="mh-split-visual">
 
 ```yaml title="multihull.yaml"
 apiVersion: multihull/v1
@@ -71,15 +70,21 @@ route:
   protocol: openai
 ```
 
+</div>
+
 <SpecToProviders />
 
 </section>
 
-<section class="mh-section">
+<section class="mh-section mh-split">
+<div class="mh-split-text">
 
 ## What `hull status` shows
 
 <p class="mh-lead">The router owns liveness. The CLI prints what it sees.</p>
+
+</div>
+<div class="mh-split-visual mh-status">
 
 | Target | State | Replicas | GPU |
 |---|---|---|---|
@@ -87,6 +92,7 @@ route:
 | modal-main | <StatusPill state="degraded" /> | 1/1 | A10G |
 | runpod-eu | <StatusPill state="failover" label="Serving failover" /> | 1/1 | L4 |
 
+</div>
 </section>
 
 <div class="mh-section mh-closing">
