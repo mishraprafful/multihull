@@ -43,7 +43,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-h1[data-page-title],
+h1#_top:not([data-page-title]),
 .sl-markdown-content h1 {
   line-height: 1.05;
   letter-spacing: -0.04em;
