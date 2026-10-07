@@ -18,7 +18,7 @@ Env: `E2E_ROUTER_BIN` (skip the cargo build), `E2E_MOCK_IMAGE` (skip the docker 
 |---|---|---|
 | `mock_image`, `router_binary` | session | build once or read from env |
 | `sweeper` | session | removes containers labelled `multihull.dev/service=e2e-three` left by a crashed run |
-| `workdir` | session | temp dir with `multihull.yaml`, `multihull-sticky.yaml`, `.multihull/` |
+| `workdir` | session | temp dir with `multihull.yaml`, `multihull-sticky.yaml`, `multihull-auth.yaml` (route keys from `file:route-api-keys`, written by `test_14` with fake keys), `.multihull/` |
 | `deployment` | session | `hull deploy --apply --wait`, yields targets and mock handles, `hull destroy --yes` at teardown |
 | `controller` | session | `hull controller --interval 2s --degraded-cooldown 5s`, restartable with another spec |
 | `reset_faults` | function, autouse | restarts stopped containers, resets every knob, waits for docker health before and after each test |

@@ -27,6 +27,8 @@ DEPLOY_SNAPSHOT_PATH = Path(".multihull") / "snapshot.json"
 CONTROLLER_SNAPSHOT_PATH = Path("snapshot.json")
 SPEC_NAME = "multihull.yaml"
 STICKY_SPEC_NAME = "multihull-sticky.yaml"
+AUTH_SPEC_NAME = "multihull-auth.yaml"
+ROUTE_KEYS_NAME = "route-api-keys"
 READY_HEALTH = {"ready"}
 DEGRADED_COOLDOWN = "5s"
 DEGRADED_COOLDOWN_SECONDS = 5.0
@@ -154,6 +156,14 @@ class Deployment:
     @property
     def sticky_spec_path(self) -> Path:
         return self.workdir / STICKY_SPEC_NAME
+
+    @property
+    def auth_spec_path(self) -> Path:
+        return self.workdir / AUTH_SPEC_NAME
+
+    @property
+    def route_keys_path(self) -> Path:
+        return self.workdir / ROUTE_KEYS_NAME
 
     def deploy(self) -> subprocess.CompletedProcess[str]:
         result = hull(

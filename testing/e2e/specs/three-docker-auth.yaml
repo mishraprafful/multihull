@@ -1,0 +1,38 @@
+apiVersion: multihull/v1
+name: e2e-three
+
+container:
+  image: multihull-mock-server:e2e
+  port: 8000
+  health: {path: /health, initialDelaySeconds: 1}
+  env: {MOCK_MODEL: mock-llm}
+
+resources:
+  gpu: []
+
+scaling:
+  concurrency: 32
+  replicas: {min: 1, max: 2}
+
+reliability:
+  minWarmProviders: 3
+
+targets:
+  - provider: primary
+    type: docker
+    priority: 1
+    docker: {pull: false}
+  - provider: secondary
+    type: docker
+    priority: 2
+    docker: {pull: false}
+  - provider: tertiary
+    type: docker
+    priority: 3
+    docker: {pull: false}
+
+route:
+  hostname: llama.local
+  protocol: openai
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}
+  auth: {apiKeys: {from: file:route-api-keys}}

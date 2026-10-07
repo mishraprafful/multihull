@@ -13,6 +13,7 @@ import openai
 
 ROUTE_HOST = "llama.local"
 MODEL = "mock-llm"
+NO_AUTH_KEY = "e2e-no-auth"
 KeySource = str | Callable[[int], str] | None
 
 
@@ -75,11 +76,11 @@ def resolve_key(source: KeySource, index: int) -> str | None:
 
 
 class RouterClient:
-    def __init__(self, base_url: str, timeout: float = 120.0) -> None:
+    def __init__(self, base_url: str, timeout: float = 120.0, api_key: str = NO_AUTH_KEY) -> None:
         self.base_url = base_url
         self.openai = openai.OpenAI(
             base_url=f"{base_url}/v1",
-            api_key="e2e-no-auth",
+            api_key=api_key,
             max_retries=0,
             timeout=httpx.Timeout(timeout),
             default_headers={"Host": ROUTE_HOST},
@@ -179,7 +180,7 @@ def stream_raw(
     max_tokens: int = 8,
     timeout: float = 120.0,
 ) -> RawStream:
-    headers = {"Host": ROUTE_HOST, "Authorization": "Bearer e2e-no-auth"}
+    headers = {"Host": ROUTE_HOST, "Authorization": f"Bearer {NO_AUTH_KEY}"}
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key
     body = {
