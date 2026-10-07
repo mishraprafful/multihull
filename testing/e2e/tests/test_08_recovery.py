@@ -3,8 +3,6 @@ from __future__ import annotations
 import threading
 import time
 
-import pytest
-
 from e2e.client import Outcome, RouterClient, failures, fresh_keys, load
 from e2e.harness import Deployment, Router
 from e2e.sampler import EndpointSampler
@@ -13,14 +11,6 @@ from e2e.waiting import wait_until
 STOP_AFTER = 10
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "a stopped container's published port may keep accepting and hang on Docker Desktop, "
-        "which the router classifies as Capacity; the circuit then never opens before the "
-        "controller marks the endpoint down"
-    ),
-)
 def test_traffic_returns_to_primary_only_after_the_circuit_closes(
     deployment: Deployment, router: Router, client: RouterClient, stream: bool
 ) -> None:
