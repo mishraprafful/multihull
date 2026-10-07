@@ -143,6 +143,27 @@ def test_snapshot_command(tmp_path: Path, monkeypatch) -> None:
     assert snapshot["routes"][0]["endpoints"][0]["provider"] == "modal-main"
 
 
+def test_snapshot_command_rejects_a_malformed_route_key(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LLAMA_API_KEYS", "hull_fixture_one,hull_bad-id_leakedsecretvalue")
+    out = tmp_path / "snapshot.json"
+    result = runner.invoke(
+        app,
+        [
+            "snapshot",
+            str(copy_fixture(tmp_path)),
+            "--out",
+            str(out),
+            "--state",
+            str(tmp_path / "state.db"),
+        ],
+        env={"COLUMNS": "200"},
+    )
+    assert result.exit_code == 1, result.output
+    assert "entry 2 of env:LLAMA_API_KEYS" in result.output
+    assert "leakedsecretvalue" not in result.output
+    assert not out.exists()
+
+
 def copy_docker_fixture(tmp_path: Path) -> Path:
     dest = tmp_path / "multihull.yaml"
     shutil.copy(FIXTURES / "mock-three-docker.yaml", dest)

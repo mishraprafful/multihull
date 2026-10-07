@@ -1054,6 +1054,7 @@ name = "multihull"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "blake3" },
     { name = "docker" },
     { name = "grpcio" },
     { name = "httpx" },
@@ -1066,9 +1067,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-blake3 = [
-    { name = "blake3" },
-]
 modal = [
     { name = "modal" },
 ]
@@ -1082,7 +1080,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "blake3", marker = "extra == 'blake3'", specifier = ">=0.4" },
+    { name = "blake3", specifier = ">=1.0" },
     { name = "docker", specifier = ">=7.2.0" },
     { name = "grpcio", specifier = ">=1.66" },
     { name = "httpx", specifier = ">=0.27" },
@@ -1094,7 +1092,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["modal", "blake3"]
+provides-extras = ["modal"]
 
 [package.metadata.requires-dev]
 dev = [
