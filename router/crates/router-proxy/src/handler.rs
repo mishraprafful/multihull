@@ -213,7 +213,6 @@ async fn proxy(
             body_buffered: true,
             idempotent,
             server_error,
-            request_not_received: attempt.status() == Some(408),
             retries_used: attempts.saturating_sub(1),
             max_retries: route.failover.max_retries,
         };

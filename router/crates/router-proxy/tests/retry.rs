@@ -65,13 +65,13 @@ async fn first_byte_timeout_on_the_last_healthy_provider_is_retried_there() {
 }
 
 #[tokio::test]
-async fn request_timeout_from_the_last_healthy_provider_is_retried_there() {
+async fn keyed_request_timeout_from_the_last_healthy_provider_is_retried_there() {
     let (proxy, fallback) = primary_down_and_fallback(ProxyConfig::default()).await;
     fallback
         .reconfigure(MockUpstreamConfig::default().failing_first(2, StatusCode::REQUEST_TIMEOUT));
     let before = fallback.request_count();
 
-    let reply = post(&proxy, COMPLETIONS, &[], b"{}").await;
+    let reply = post(&proxy, COMPLETIONS, &[("idempotency-key", "k-408")], b"{}").await;
 
     assert_eq!(reply.status, 200, "{:?}", reply.body);
     assert_eq!(reply.header("x-hull-provider"), Some("modal"));
@@ -79,8 +79,7 @@ async fn request_timeout_from_the_last_healthy_provider_is_retried_there() {
     assert_eq!(fallback.request_count() - before, 3);
 }
 
-#[tokio::test]
-async fn request_timeout_fails_over_to_an_untried_healthy_provider_first() {
+async fn request_timeout_then_healthy() -> (RunningProxy, MockUpstream, MockUpstream) {
     let primary = MockUpstream::start(
         MockUpstreamConfig::default().failing_first(1, StatusCode::REQUEST_TIMEOUT),
     )
@@ -94,14 +93,33 @@ async fn request_timeout_fails_over_to_an_untried_healthy_provider_first() {
         endpoint("modal", "modal", secondary.url(), 2),
     ])
     .await;
+    (proxy, primary, secondary)
+}
 
-    let reply = post(&proxy, COMPLETIONS, &[], b"{}").await;
+#[tokio::test]
+async fn keyed_request_timeout_is_retried_on_an_untried_healthy_provider_first() {
+    let (proxy, primary, secondary) = request_timeout_then_healthy().await;
+
+    let reply = post(&proxy, COMPLETIONS, &[("idempotency-key", "k-408")], b"{}").await;
 
     assert_eq!(reply.status, 200, "{:?}", reply.body);
     assert_eq!(reply.header("x-hull-provider"), Some("modal"));
     assert_eq!(reply.header("x-hull-attempts"), Some("2"));
     assert_eq!(primary.request_count(), 1);
     assert_eq!(secondary.request_count(), 1);
+}
+
+#[tokio::test]
+async fn keyless_post_request_timeout_is_not_retried() {
+    let (proxy, primary, secondary) = request_timeout_then_healthy().await;
+
+    let reply = post(&proxy, COMPLETIONS, &[], b"{}").await;
+
+    assert_eq!(reply.status, 408, "{:?}", reply.body);
+    assert_eq!(reply.header("x-hull-provider"), Some("kind"));
+    assert_eq!(reply.header("x-hull-attempts"), Some("1"));
+    assert_eq!(primary.request_count(), 1);
+    assert_eq!(secondary.request_count(), 0);
 }
 
 #[tokio::test]
