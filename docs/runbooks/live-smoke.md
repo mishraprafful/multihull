@@ -47,6 +47,8 @@ Locally, `hull doctor multihull.yaml` makes the same call and exits 1 when Modal
 
 When `hull deploy` reports `Image build for im-... failed`, the suite saves `modal image logs <id> --all` as `logs/modal-image-<id>.log` in the `live-smoke-logs` artifact and puts the last 60 lines under the job summary's Modal section.
 
+`No module named pip` at `RUN python -m pip install --upgrade pip` means a legacy image builder ran (the workspace default may be `2023.12`): it pip-installs Modal's client into the image's `python`, here the mock server's uv venv. `hull deploy` pins `2025.06`, which mounts the client at runtime, so check that `MODAL_IMAGE_BUILDER_VERSION` is not set to an older version.
+
 ## If cleanup fails
 
 1. Re-run only the failed job; `Destroy` and `Stop Modal apps left by this run` are `if: always()` steps.
