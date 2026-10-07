@@ -382,6 +382,8 @@ def destroy_line(text: str) -> str:
 
 
 def backstop_line(text: str) -> str:
+    if text.startswith("skipped, credentials"):
+        return text.strip()
     match = BACKSTOP_RESULT.search(text)
     if match is None:
         return "did not report a result; see logs/backstop.log"

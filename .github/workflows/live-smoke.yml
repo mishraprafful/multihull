@@ -62,16 +62,21 @@ jobs:
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
     steps:
       - uses: actions/checkout@v7
-      - uses: helm/kind-action@v1.15.1
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER }}
-          config: testing/live/kind-config.yaml
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Modal credential preflight
+        id: preflight
+        working-directory: testing/live
+        run: uv run python -m live.preflight
+      - uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER }}
+          config: testing/live/kind-config.yaml
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -80,7 +85,6 @@ jobs:
         working-directory: router
       - run: docker build -t "$MOCK_IMAGE" testing/mock-server
       - run: kind load docker-image "$MOCK_IMAGE" --name "$KIND_CLUSTER"
-      - run: uv sync --locked --project testing/live
       - name: Doctor, deploy, baseline, failover to Modal, recovery, logs, destroy
         timeout-minutes: 22
         run: >
@@ -109,9 +113,17 @@ jobs:
       - name: Stop Modal apps left by this run
         if: always()
         working-directory: testing/live
-        run: >
-          uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}"
-          --env "$MODAL_ENVIRONMENT" | tee "$RUNNER_TEMP/live/logs/backstop.log"
+        env:
+          CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
+        run: |
+          log="$RUNNER_TEMP/live/logs/backstop.log"
+          mkdir -p "$(dirname "$log")"
+          if [ "$CREDENTIALS" != accepted ]; then
+            echo "skipped, credentials ${CREDENTIALS:-unchecked}" | tee "$log"
+            exit 0
+          fi
+          uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" \
+            --env "$MODAL_ENVIRONMENT" | tee "$log"
       - name: Job summary
         if: always()
         working-directory: testing/live
@@ -150,8 +162,19 @@ jobs:
             testing/live/uv.lock
             python/uv.lock
       - run: uv sync --locked --project testing/live
-      - name: Stop live apps older than two hours
+      - name: Modal credential preflight
+        id: preflight
         working-directory: testing/live
-        run: >
-          uv run python -m live.sweep --prefix "$APP_PREFIX" --older-than 7200
-          --env "$MODAL_ENVIRONMENT" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: uv run python -m live.preflight
+      - name: Stop live apps older than two hours
+        if: ${{ !cancelled() }}
+        working-directory: testing/live
+        env:
+          CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
+        run: |
+          if [ "$CREDENTIALS" != accepted ]; then
+            echo "skipped, credentials ${CREDENTIALS:-unchecked}" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          uv run python -m live.sweep --prefix "$APP_PREFIX" --older-than 7200 \
+            --env "$MODAL_ENVIRONMENT" | tee -a "$GITHUB_STEP_SUMMARY"

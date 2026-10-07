@@ -227,6 +227,7 @@ def test_cleanup_lines_say_whether_the_backstop_had_to_act() -> None:
     acted = "ap-1 multihull-live-42 stopped\n1 app(s) matched multihull-live-42, 0 failed\n"
     assert backstop_line(acted) == ("had to act: stopped 1 of 1 app(s) matching multihull-live-42")
     assert backstop_line("Traceback: boom") == "did not report a result; see logs/backstop.log"
+    assert backstop_line("skipped, credentials rejected\n") == "skipped, credentials rejected"
     assert destroy_line("nothing to destroy for live-42").startswith("nothing left in state")
     assert destroy_line("modal | modal | failed | Unauthorized").startswith("failed")
     assert destroy_line("modal | modal | destroyed |") == (
