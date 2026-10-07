@@ -90,13 +90,29 @@ def test_block_must_match_type(llama_raw: dict[str, Any]) -> None:
         ServiceSpec.model_validate(raw)
 
 
-def test_empty_gpu_rejected_unless_all_targets_docker(llama_raw: dict[str, Any]) -> None:
+def test_empty_gpu_rejected_for_gpu_only_targets(llama_raw: dict[str, Any]) -> None:
     raw = copy.deepcopy(llama_raw)
     raw["resources"]["gpu"] = []
-    with pytest.raises(ValidationError, match="gke-prod \\(kubernetes\\), modal-main \\(modal\\)"):
+    with pytest.raises(ValidationError, match="need a GPU class: modal-main \\(modal\\), runpod"):
         ServiceSpec.model_validate(raw)
-    raw["targets"].append({"provider": "local", "type": "docker", "priority": 4})
-    with pytest.raises(ValidationError, match="only when every target is of type docker"):
+    raw["targets"] = [t for t in raw["targets"] if t["type"] == "kubernetes"]
+    raw["targets"].append({"provider": "local", "type": "docker", "priority": 2})
+    spec = ServiceSpec.model_validate(raw)
+    assert [t.type for t in spec.targets] == ["kubernetes", "docker"]
+
+
+def test_kubernetes_service_options(llama_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(llama_raw)
+    block = raw["targets"][0]["kubernetes"]
+    block.update(serviceType="NodePort", nodePort=30080, endpoint="http://127.0.0.1:30080")
+    kubernetes = ServiceSpec.model_validate(raw).target("gke-prod").kubernetes
+    assert kubernetes is not None
+    assert (kubernetes.serviceType, kubernetes.nodePort) == ("NodePort", 30080)
+    block["serviceType"] = "ClusterIP"
+    with pytest.raises(ValidationError, match="nodePort needs serviceType"):
+        ServiceSpec.model_validate(raw)
+    block.update(serviceType="NodePort", endpoint="127.0.0.1:30080")
+    with pytest.raises(ValidationError, match="endpoint"):
         ServiceSpec.model_validate(raw)
 
 

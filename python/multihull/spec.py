@@ -16,7 +16,7 @@ PROVIDER_TYPES: tuple[ProviderType, ...] = (
     "replicate",
     "docker",
 )
-GPU_OPTIONAL_TYPES: frozenset[str] = frozenset({"docker"})
+GPU_OPTIONAL_TYPES: tuple[ProviderType, ...] = ("docker", "kubernetes")
 
 
 class GPU(StrEnum):
@@ -98,6 +98,15 @@ class KubernetesBlock(SpecModel):
     namespace: str = "default"
     keda: bool = False
     prometheusUrl: str = "http://prometheus-operated.monitoring.svc:9090"
+    serviceType: Literal["LoadBalancer", "NodePort", "ClusterIP"] = "LoadBalancer"
+    nodePort: int | None = Field(default=None, ge=1, le=65535)
+    endpoint: str | None = Field(default=None, pattern=r"^https?://\S+$")
+
+    @model_validator(mode="after")
+    def node_port_needs_node_ports(self) -> KubernetesBlock:
+        if self.nodePort is not None and self.serviceType == "ClusterIP":
+            raise ValueError("kubernetes.nodePort needs serviceType NodePort or LoadBalancer")
+        return self
 
 
 class ModalBlock(SpecModel):
@@ -228,9 +237,10 @@ class ServiceSpec(SpecModel):
         needing_gpu = [t for t in self.targets if t.type not in GPU_OPTIONAL_TYPES]
         if needing_gpu:
             names = ", ".join(f"{t.provider} ({t.type})" for t in needing_gpu)
+            optional = ", ".join(GPU_OPTIONAL_TYPES)
             raise ValueError(
                 f"resources.gpu is empty but these targets need a GPU class: {names}; "
-                "an empty gpu list is allowed only when every target is of type docker"
+                f"an empty gpu list runs on CPU and is allowed only for target types {optional}"
             )
         return self
 

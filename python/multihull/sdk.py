@@ -59,6 +59,9 @@ class TargetFactory:
         context: str | None = None,
         keda: bool = False,
         prometheus_url: str | None = None,
+        service_type: str | None = None,
+        node_port: int | None = None,
+        endpoint: str | None = None,
         replicas: Mapping[str, int] | tuple[int, int] | None = None,
         weight: int = 1,
     ) -> TargetSpec:
@@ -67,6 +70,9 @@ class TargetFactory:
             "context": context,
             "keda": keda,
             "prometheusUrl": prometheus_url,
+            "serviceType": service_type,
+            "nodePort": node_port,
+            "endpoint": endpoint,
         }
         return self.build(provider, "kubernetes", priority, block, replicas, weight)
 

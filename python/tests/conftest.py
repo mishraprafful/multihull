@@ -40,6 +40,11 @@ def mock_docker_raw() -> dict[str, Any]:
 
 
 @pytest.fixture
+def mock_kind_modal_spec() -> ServiceSpec:
+    return specmod.load(FIXTURES / "mock-kind-modal.yaml")
+
+
+@pytest.fixture
 def target_for(llama_spec: ServiceSpec):
     def build(provider: str) -> Target:
         return Target(llama_spec, llama_spec.target(provider))
