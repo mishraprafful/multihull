@@ -53,7 +53,7 @@ Scenario matrix, each run for streaming and non-streaming requests:
 | 429 above concurrency ceiling | no ejection; adaptive limit shrinks; overflow spills to secondary; `Capacity` outcomes, not `Transient` |
 | TTFT above the first-byte timeout | retry before first byte lands on secondary; no duplicate completion |
 | 500 with body | retry only for idempotent requests or those with `Idempotency-Key`; otherwise the 500 reaches the client |
-| Disconnect after 3 SSE chunks | stream drops after the delivered chunks (the terminal `upstream_disconnected` event is planned); no mid-stream failover; retry with the same key succeeds |
+| Disconnect after 3 SSE chunks | the delivered chunks are followed by a terminal `upstream_disconnected` event (`retryable: true`) and `data: [DONE]`; no mid-stream failover; retry with the same key succeeds |
 | Flapping every 2 s | circuit opens, half-open ramp admits gradually, retry budget caps upstream load at 1.2x |
 | Primary recovers | traffic returns only after 3 probe successes and the ramp; sticky sessions stay on secondary until TTL |
 | Sustained queue wait | controller receives `Degraded` and raises min replicas on the healthy targets |
