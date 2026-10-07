@@ -108,3 +108,40 @@ jobs:
       - run: cargo publish --workspace --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
+
+  publish-chart:
+    needs: github-release
+    if: vars.PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+    env:
+      ROUTER_IMAGE: ghcr.io/mishraprafful/multihull-router
+      CHART_REGISTRY: oci://ghcr.io/mishraprafful/charts
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - run: charts/package.sh "$GITHUB_REF_NAME" dist
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Wait for the router image this chart defaults to
+        run: |
+          image="$ROUTER_IMAGE:${GITHUB_REF_NAME#v}"
+          for _ in $(seq 60); do
+            if docker buildx imagetools inspect "$image" > /dev/null 2>&1; then exit 0; fi
+            sleep 30
+          done
+          echo "$image was not published within 30 minutes" >&2
+          exit 1
+      - run: printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: helm push "dist/multihull-${GITHUB_REF_NAME#v}.tgz" "$CHART_REGISTRY"

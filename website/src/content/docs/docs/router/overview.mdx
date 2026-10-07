@@ -58,3 +58,19 @@ Set `route.auth.apiKeys.from` in the spec to `env:NAME` (comma-separated keys) o
 ## Deploying
 
 The Helm chart in `charts/multihull` runs the router as a Deployment with a Service, ConfigMap for `router.toml`, and an optional PodDisruptionBudget and controller.
+
+### Install from OCI
+
+Each `v*` release pushes the chart to `oci://ghcr.io/mishraprafful/charts/multihull`. The chart `version` and `appVersion` are the release version without the `v`, and the router image defaults to `ghcr.io/mishraprafful/multihull-router:<appVersion>`, which the same release publishes.
+
+The chart and images stay private until the public launch. Keep a GitHub token with `read:packages` in an environment variable such as `GHCR_TOKEN`, log in, give the cluster a pull secret for the router image, then install:
+
+```sh
+printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username <github-user> --password-stdin
+kubectl create secret docker-registry ghcr --docker-server=ghcr.io \
+  --docker-username=<github-user> --docker-password="$GHCR_TOKEN"
+helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0 \
+  --set 'imagePullSecrets[0].name=ghcr'
+```
+
+`helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` lists every value.
