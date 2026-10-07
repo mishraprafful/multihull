@@ -2,45 +2,15 @@ from __future__ import annotations
 
 import threading
 import time
-from bisect import bisect_right
 
 import pytest
 
 from e2e.client import Outcome, RouterClient, failures, fresh_keys, load
 from e2e.harness import Deployment, Router
+from e2e.sampler import EndpointSampler
 from e2e.waiting import wait_until
 
 STOP_AFTER = 10
-
-
-class CircuitSampler:
-    def __init__(self, router: Router, provider: str) -> None:
-        self.router = router
-        self.provider = provider
-        self.samples: list[tuple[float, str | None]] = []
-        self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=self.run, daemon=True)
-
-    def run(self) -> None:
-        while not self.stop_event.is_set():
-            self.samples.append((time.monotonic(), self.router.endpoint(self.provider)["circuit"]))
-            time.sleep(0.1)
-
-    def start(self) -> CircuitSampler:
-        self.thread.start()
-        return self
-
-    def stop(self) -> None:
-        self.stop_event.set()
-        self.thread.join(timeout=5)
-
-    def state_after(self, moment: float) -> str | None:
-        times = [sample[0] for sample in self.samples]
-        position = min(bisect_right(times, moment), len(self.samples) - 1)
-        return self.samples[position][1]
-
-    def states(self) -> set[str | None]:
-        return {state for _, state in self.samples}
 
 
 @pytest.mark.xfail(
@@ -54,7 +24,7 @@ class CircuitSampler:
 def test_traffic_returns_to_primary_only_after_the_circuit_closes(
     deployment: Deployment, router: Router, client: RouterClient, stream: bool
 ) -> None:
-    sampler = CircuitSampler(router, "primary").start()
+    sampler = EndpointSampler(router, "primary", interval=0.1).start()
     completed = 0
     lock = threading.Lock()
 
