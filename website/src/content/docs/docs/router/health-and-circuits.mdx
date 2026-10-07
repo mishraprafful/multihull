@@ -21,7 +21,13 @@ Capacity outcomes feed the limiter and admission queue, never the circuit. A col
 
 ## Probes
 
-The router probes every endpoint's health path (`container.health.path` from the spec, carried in the snapshot, default `/health`) every `probe.interval` (5 s, 20 percent jitter) with `probe.timeout` (2 s). 2xx is a success; 5xx, 4xx, connect failures and timeouts are failures; RunPod 204 (warming) and 429 count as neither. Probe outcomes feed the endpoint circuit, which stays the only selection gate: each failure counts as `Transient`, the third consecutive failure opens the circuit (`router_failovers_total{reason="probe"}` increments) and later failures re-open it whenever traffic or the half-open ramp closed it, so a probe-down endpoint only sees the half-open trickle between probe rounds. Successes count as half-open probe successes, and three consecutive successes close the circuit outright. Probe state is on `/debug/endpoints` and `router_probe_total{endpoint,outcome}`. The optional warm check (`max_tokens=1`) is not implemented yet. Passive: ring of the last 100 outcomes plus 10 s buckets.
+The router probes every endpoint's health path (`container.health.path` from the spec, carried in the snapshot, default `/health`) every `probe.interval` (5 s, 20 percent jitter) with `probe.timeout` (2 s). 2xx is a success; 5xx, 4xx, connect failures and timeouts are failures; RunPod 204 (warming) and 429 count as neither. Probes can take an endpoint out quickly and let it be retried, but only real requests can close its circuit:
+
+- Each failure counts as `Transient` in the endpoint circuit. The third consecutive failure marks the probe down and ejects the endpoint: its circuit opens (`router_failovers_total{reason="probe"}` increments) and is held open past every backoff while the probe reports down, so admission, selection, sticky placement and the provider circuit all treat it as open. An endpoint whose probe never recovers stays unavailable; the panic threshold still applies.
+- Three consecutive successes after an ejection mark the probe up and release the circuit into half-open. Real requests then decide: `circuit.probe_successes_to_close` (3) admitted-request successes close it, any failure reopens it with a doubled backoff.
+- Probe successes never count toward closing a circuit, and the first success streak after startup leaves the circuit alone, so a passing `/health` cannot route traffic back to an endpoint whose inference is failing.
+
+Probe state is on `/debug/endpoints` and `router_probe_total{endpoint,outcome}`. The optional warm check (`max_tokens=1`) is not implemented yet. Passive: ring of the last 100 outcomes plus 10 s buckets.
 
 ## Mid-stream failures
 
@@ -35,13 +41,17 @@ data: [DONE]
 
 and ends the response cleanly, so SDKs never parse truncated JSON and can retry with the same `Idempotency-Key`. A clean upstream end flushes any trailing bytes unchanged. Non-SSE streams never end as if complete: HTTP/2 requests with `te: trailers` or a gRPC content type get an `x-hull-error: upstream_disconnected` trailer, other HTTP/2 streams are reset (`RST_STREAM`) and HTTP/1 connections are closed. Each case counts as `router_requests_total{outcome="upstream_disconnected"}` and feeds the endpoint circuit as `Transient`.
 
+A response whose body is still open after its first frame settles its outcome once, when the body ends: `success` on a clean end, `upstream_disconnected` (`Transient`) when the upstream drops. A caller that leaves after bytes reached it also counts as `success`, since the upstream had not failed (OpenAI SDKs close right after `data: [DONE]`); one that leaves before the first byte counts as `client_abort`, which the circuit ignores. Time to first token is still measured at the first byte, and complete responses are recorded as soon as they arrive.
+
 ## Circuit per endpoint
 
 ```
         5 consecutive Transient/Fatal  OR  error ratio > 50% over 10s (min 20 samples)
+        OR  probe down (held open while the probe stays down)
 CLOSED ──────────────────────────────────────────────────────────────► OPEN
   ▲                                                                     │
-  │ 3 consecutive probe successes                   wait 5s * 2^n (cap 5m) + jitter
+  │ 3 admitted-request successes        wait 5s * 2^n (cap 5m) + jitter,
+  │ (probe successes never count)       or probe up again after an ejection
   │         ┌───────────┐  admit ramp 1 req → 5% → 25% → 100% over 30s  │
   └─────────│ HALF-OPEN │◄───────────────────────────────────────────────┘
             └───────────┘  any failure → OPEN, n += 1

@@ -1,10 +1,12 @@
 mod common;
 
-use common::{endpoint, start_proxy};
+use common::{endpoint, get, single_route, start_proxy, start_proxy_configured};
 use http::StatusCode;
+use router_core::circuit::CircuitConfig;
 use router_core::probe::ProbeOutcome;
 use router_core::snapshot::EndpointType;
 use router_proxy::probe::{probe_all, probe_once};
+use router_proxy::ProxyConfig;
 use router_testkit::{MockUpstream, MockUpstreamConfig};
 use std::time::Duration;
 
@@ -53,7 +55,7 @@ async fn probe_classifies_status_connect_failure_and_runpod_warming() {
 }
 
 #[tokio::test]
-async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_close_it() {
+async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_allow_a_half_open_trial() {
     let upstream = MockUpstream::start(
         MockUpstreamConfig::default().with_status(StatusCode::SERVICE_UNAVAILABLE),
     )
@@ -88,10 +90,69 @@ async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_close_it() {
     }
     probe_all(&proxy.state).await;
     let status = proxy.state.runtime.status(&target).unwrap();
-    assert_eq!(status.circuit, "closed");
+    assert_eq!(status.circuit, "half_open");
     assert_eq!(status.probe.probes, 6);
     assert!(proxy
         .state
         .runtime
         .endpoint_healthy(&target, proxy.state.runtime.now()));
+
+    for _ in 0..3 {
+        assert_eq!(get(&proxy, "/v1/x", &[]).await.status, 200);
+    }
+    assert_eq!(
+        proxy.state.runtime.status(&target).unwrap().circuit,
+        "closed"
+    );
+}
+
+#[tokio::test]
+async fn a_probe_down_endpoint_gets_no_traffic_after_its_backoff_until_the_probe_recovers() {
+    let primary = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let secondary = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let a = endpoint("a", "pa", primary.url(), 1);
+    let b = endpoint("b", "pb", secondary.url(), 2);
+    let config = ProxyConfig {
+        circuit: CircuitConfig {
+            base_backoff: Duration::from_millis(50),
+            jitter_fraction: 0.0,
+            half_open_ramp: Duration::from_millis(30),
+            ..CircuitConfig::default()
+        },
+        ..ProxyConfig::default()
+    };
+    let proxy = start_proxy_configured(single_route(vec![a.clone(), b.clone()]), config).await;
+    for _ in 0..3 {
+        proxy
+            .state
+            .runtime
+            .record_probe(&a, ProbeOutcome::Failure, Some(503));
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    for _ in 0..20 {
+        let reply = get(&proxy, "/v1/x", &[]).await;
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.endpoint(), "b");
+    }
+    assert_eq!(primary.request_count(), 0);
+    assert_eq!(proxy.state.runtime.status(&a).unwrap().circuit, "open");
+
+    for _ in 0..3 {
+        proxy
+            .state
+            .runtime
+            .record_probe(&a, ProbeOutcome::Success, Some(200));
+    }
+    assert_eq!(proxy.state.runtime.status(&a).unwrap().circuit, "half_open");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    for _ in 0..10 {
+        assert_eq!(get(&proxy, "/v1/x", &[]).await.status, 200);
+    }
+    assert_eq!(proxy.state.runtime.status(&a).unwrap().circuit, "closed");
+    assert!(primary.request_count() >= 3);
 }

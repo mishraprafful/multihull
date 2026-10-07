@@ -7,8 +7,11 @@ use hyper::body::Frame;
 use hyper::Request;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
+use router_obs::prometheus::PrometheusHandle;
 use router_proxy::body::{ERROR_HEADER, ERROR_REASON_HEADER, UPSTREAM_DISCONNECTED};
 use router_testkit::{MockUpstream, MockUpstreamConfig};
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 fn chunks() -> Vec<String> {
@@ -274,4 +277,116 @@ async fn sse_clean_end_flushes_a_trailing_event_without_a_blank_line() {
     let chunks = ["data: {\"n\":1}\n\ndata: tail"];
     let frames = sse_frames_through_proxy(raw_upstream(&chunks)).await;
     assert_eq!(frames.concat(), chunks.concat());
+}
+
+fn metrics() -> &'static PrometheusHandle {
+    static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
+    HANDLE.get_or_init(|| router_obs::prometheus::install_prometheus().expect("recorder"))
+}
+
+fn requests_by_outcome(endpoint_id: &str) -> BTreeMap<String, u64> {
+    let needle = format!("endpoint=\"{endpoint_id}\"");
+    metrics()
+        .render()
+        .lines()
+        .filter(|line| line.starts_with("router_requests_total{") && line.contains(&needle))
+        .map(|line| {
+            let outcome = line
+                .split("outcome=\"")
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .unwrap()
+                .to_string();
+            let value = line.rsplit(' ').next().unwrap().parse().unwrap();
+            (outcome, value)
+        })
+        .collect()
+}
+
+async fn stream_once(proxy: &common::RunningProxy) -> String {
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    let request = Request::get(proxy.url("/v1/chat/completions"))
+        .body(Empty::new())
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    collect_frames(response.into_body()).await.0
+}
+
+#[tokio::test]
+async fn repeated_mid_stream_disconnects_open_the_circuit() {
+    let upstream = MockUpstream::start(
+        MockUpstreamConfig::default()
+            .with_sse_chunks(chunks())
+            .dropping_sse_after(2),
+    )
+    .await
+    .unwrap();
+    let target = endpoint("flaky", "modal", upstream.url(), 1);
+    let proxy = start_proxy(vec![target.clone()]).await;
+    for _ in 0..5 {
+        let text = stream_once(&proxy).await;
+        assert!(text.contains(UPSTREAM_DISCONNECTED), "{text}");
+    }
+    assert_eq!(proxy.state.runtime.status(&target).unwrap().circuit, "open");
+}
+
+#[tokio::test]
+async fn each_streamed_request_counts_once_with_its_final_outcome() {
+    metrics();
+    let upstream = MockUpstream::start(MockUpstreamConfig::default().with_sse_chunks(chunks()))
+        .await
+        .unwrap();
+    let target = endpoint("counted", "modal", upstream.url(), 1);
+    let proxy = start_proxy(vec![target.clone()]).await;
+
+    let clean = stream_once(&proxy).await;
+    assert!(clean.ends_with("data: [DONE]\n\n"), "{clean}");
+    assert_eq!(
+        requests_by_outcome("counted"),
+        BTreeMap::from([("success".to_string(), 1)])
+    );
+
+    upstream.reconfigure(
+        MockUpstreamConfig::default()
+            .with_sse_chunks(chunks())
+            .dropping_sse_after(2),
+    );
+    let dropped = stream_once(&proxy).await;
+    assert!(dropped.contains(UPSTREAM_DISCONNECTED), "{dropped}");
+    assert_eq!(
+        requests_by_outcome("counted"),
+        BTreeMap::from([
+            ("success".to_string(), 1),
+            (UPSTREAM_DISCONNECTED.to_string(), 1),
+        ])
+    );
+
+    upstream.reconfigure(MockUpstreamConfig {
+        sse_chunk_interval: Duration::from_millis(100),
+        ..MockUpstreamConfig::default().with_sse_chunks(chunks())
+    });
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    let request = Request::get(proxy.url("/v1/chat/completions"))
+        .body(Empty::new())
+        .unwrap();
+    let mut body = client.request(request).await.unwrap().into_body();
+    body.frame().await.unwrap().unwrap();
+    drop(body);
+    drop(client);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while proxy.state.runtime.status(&target).unwrap().outstanding > 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "abandoned stream never released"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        requests_by_outcome("counted"),
+        BTreeMap::from([
+            ("success".to_string(), 2),
+            (UPSTREAM_DISCONNECTED.to_string(), 1),
+        ])
+    );
 }
