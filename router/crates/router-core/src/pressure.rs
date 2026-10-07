@@ -27,8 +27,8 @@ impl PressureConfig {
         if self.stale_after <= self.sustained {
             return Err("pressure.stale_after must exceed pressure.sustained".into());
         }
-        if self.ttft_degrade_factor <= 1.0 {
-            return Err("pressure.ttft_degrade_factor must exceed 1".into());
+        if !(self.ttft_degrade_factor.is_finite() && self.ttft_degrade_factor > 1.0) {
+            return Err("pressure.ttft_degrade_factor must be finite and greater than 1".into());
         }
         if self.ttft_window < 2 {
             return Err("pressure.ttft_window must be at least 2".into());
@@ -281,14 +281,19 @@ mod tests {
             ..PressureConfig::default()
         };
         assert!(stale.validate().unwrap_err().contains("stale_after"));
-        let factor = PressureConfig {
-            ttft_degrade_factor: 1.0,
-            ..PressureConfig::default()
-        };
-        assert!(factor
-            .validate()
-            .unwrap_err()
-            .contains("ttft_degrade_factor"));
+        for ttft_degrade_factor in [1.0, f64::NAN, f64::INFINITY] {
+            let factor = PressureConfig {
+                ttft_degrade_factor,
+                ..PressureConfig::default()
+            };
+            assert!(
+                factor
+                    .validate()
+                    .unwrap_err()
+                    .contains("ttft_degrade_factor"),
+                "{ttft_degrade_factor}"
+            );
+        }
         let window = PressureConfig {
             ttft_window: 1,
             ..PressureConfig::default()

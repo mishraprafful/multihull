@@ -83,6 +83,15 @@ def test_image_xor_build(llama_raw: dict[str, Any]) -> None:
         ServiceSpec.model_validate(raw)
 
 
+def test_health_path_must_start_with_a_slash(llama_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(llama_raw)
+    raw["container"]["health"]["path"] = "healthz"
+    with pytest.raises(ValidationError, match="health.path must start with '/', got 'healthz'"):
+        ServiceSpec.model_validate(raw)
+    raw["container"]["health"]["path"] = "/healthz"
+    assert ServiceSpec.model_validate(raw).container.health.path == "/healthz"
+
+
 def test_block_must_match_type(llama_raw: dict[str, Any]) -> None:
     raw = copy.deepcopy(llama_raw)
     raw["targets"][1]["runpod"] = {"dataCenters": ["EU-RO-1"]}

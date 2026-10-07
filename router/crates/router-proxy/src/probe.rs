@@ -32,7 +32,7 @@ async fn fetch_status(
     endpoint: &Endpoint,
     timeout: Duration,
 ) -> Option<u16> {
-    let uri = upstream_uri(endpoint, endpoint.health_path()).ok()?;
+    let uri = upstream_uri(endpoint, &endpoint.health_path()).ok()?;
     let mut builder = Request::builder().method(Method::GET).uri(&uri);
     if let Some(headers) = builder.headers_mut() {
         if let Some(authority) = uri.authority() {

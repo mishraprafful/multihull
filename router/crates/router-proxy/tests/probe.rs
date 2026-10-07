@@ -55,6 +55,21 @@ async fn probe_classifies_status_connect_failure_and_runpod_warming() {
 }
 
 #[tokio::test]
+async fn health_path_without_a_leading_slash_probes_the_endpoint_host() {
+    let upstream = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let mut target = endpoint("a", "pa", upstream.url(), 1);
+    target.health_path = "healthz".into();
+    let proxy = start_proxy(vec![target.clone()]).await;
+
+    let result = probe_once(&proxy.state.client, &target, Duration::from_secs(1)).await;
+    assert_eq!(result.outcome, ProbeOutcome::Success);
+    assert_eq!(result.status, Some(200));
+    assert_eq!(upstream.request_count(), 1);
+}
+
+#[tokio::test]
 async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_allow_a_half_open_trial() {
     let upstream = MockUpstream::start(
         MockUpstreamConfig::default().with_status(StatusCode::SERVICE_UNAVAILABLE),

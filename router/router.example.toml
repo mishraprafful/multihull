@@ -15,8 +15,9 @@ key = "/etc/multihull/tls/tls.key"
 format = "json"
 filter = "info,router_proxy=debug"
 
-# Every duration below is in seconds (floats allowed). Each table is optional;
-# the values shown are the defaults. Unknown keys are rejected on load.
+# Every duration below is in seconds (floats allowed, except the whole-second
+# windows ratio_window and budget_window). Each table is optional; the values
+# shown are the defaults. Unknown keys are rejected on load.
 
 [timeouts]
 # Phase timeouts per upstream attempt.
@@ -44,7 +45,8 @@ half_open_ramp = 30
 probe_successes_to_close = 3
 # A provider circuit opens when this share of its endpoint circuits is open.
 provider_open_ratio = 0.5
-# Panic threshold: with more than this share of endpoints open, route to all of them.
+# Panic threshold in (0, 1]: with more than this share of endpoints open, route to
+# all of them. 1 disables panic routing.
 panic_threshold = 0.5
 
 [admission]
@@ -62,6 +64,7 @@ sustained = 2
 # Pressure forgotten after this long without samples.
 stale_after = 10
 # TTFT p95 above baseline * factor over ttft_window samples sends Degraded(TtftP95).
+# The factor must be finite and greater than 1.
 ttft_degrade_factor = 2.0
 ttft_window = 50
 ttft_baseline_smoothing = 0.2

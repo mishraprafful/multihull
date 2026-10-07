@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ProviderType = Literal["kubernetes", "modal", "runpod", "baseten", "replicate", "docker"]
 PROVIDER_TYPES: tuple[ProviderType, ...] = (
@@ -43,6 +43,13 @@ class Build(SpecModel):
 class Health(SpecModel):
     path: str = "/health"
     initialDelaySeconds: int = Field(default=30, ge=0)
+
+    @field_validator("path")
+    @classmethod
+    def path_starts_with_slash(cls, path: str) -> str:
+        if not path.startswith("/"):
+            raise ValueError(f"health.path must start with '/', got {path!r}")
+        return path
 
 
 class Container(SpecModel):

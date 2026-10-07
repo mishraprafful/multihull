@@ -1,5 +1,6 @@
 use crate::outcome::Outcome;
 use crate::rng::Rng;
+use crate::serde_secs::is_whole_seconds_at_least_one;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -50,8 +51,10 @@ impl CircuitConfig {
         if !(self.error_ratio > 0.0 && self.error_ratio <= 1.0) {
             return Err("circuit.error_ratio must be in (0, 1]".into());
         }
-        if self.ratio_window < Duration::from_secs(1) {
-            return Err("circuit.ratio_window must be at least 1 second".into());
+        if !is_whole_seconds_at_least_one(self.ratio_window) {
+            return Err(
+                "circuit.ratio_window must be a whole number of seconds, at least 1".into(),
+            );
         }
         if self.min_samples == 0 {
             return Err("circuit.min_samples must be at least 1".into());
@@ -85,8 +88,8 @@ impl CircuitConfig {
         if !(self.provider_open_ratio > 0.0 && self.provider_open_ratio <= 1.0) {
             return Err("circuit.provider_open_ratio must be in (0, 1]".into());
         }
-        if !(0.0..1.0).contains(&self.panic_threshold) {
-            return Err("circuit.panic_threshold must be in [0, 1)".into());
+        if !(self.panic_threshold > 0.0 && self.panic_threshold <= 1.0) {
+            return Err("circuit.panic_threshold must be in (0, 1]".into());
         }
         Ok(())
     }
@@ -749,10 +752,24 @@ mod tests {
             ),
             (
                 CircuitConfig {
-                    panic_threshold: 1.0,
+                    panic_threshold: 0.0,
                     ..CircuitConfig::default()
                 },
                 "panic_threshold",
+            ),
+            (
+                CircuitConfig {
+                    panic_threshold: f64::NAN,
+                    ..CircuitConfig::default()
+                },
+                "panic_threshold",
+            ),
+            (
+                CircuitConfig {
+                    ratio_window: millis(10_500),
+                    ..CircuitConfig::default()
+                },
+                "ratio_window",
             ),
             (
                 CircuitConfig {
@@ -770,6 +787,17 @@ mod tests {
             CircuitConfig::default().provider_circuit(),
             ProviderCircuit::default()
         );
+    }
+
+    #[test]
+    fn panic_threshold_of_one_is_valid_and_disables_panic_routing() {
+        let config = CircuitConfig {
+            panic_threshold: 1.0,
+            ..CircuitConfig::default()
+        };
+        assert!(config.validate().is_ok());
+        let all_open = [("a", true), ("b", true)];
+        assert!(apply_panic_threshold(&all_open, |e| e.1, config.panic_threshold).is_empty());
     }
 
     #[test]

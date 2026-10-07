@@ -1,4 +1,5 @@
 use crate::outcome::{AttemptError, Outcome};
+use crate::serde_secs::is_whole_seconds_at_least_one;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -27,8 +28,8 @@ impl RetryConfig {
         if !(0.0..=1.0).contains(&self.budget_ratio) {
             return Err("retry.budget_ratio must be in [0, 1]".into());
         }
-        if self.budget_window < Duration::from_secs(1) {
-            return Err("retry.budget_window must be at least 1 second".into());
+        if !is_whole_seconds_at_least_one(self.budget_window) {
+            return Err("retry.budget_window must be a whole number of seconds, at least 1".into());
         }
         Ok(())
     }
@@ -265,11 +266,13 @@ mod tests {
             ..RetryConfig::default()
         };
         assert!(ratio.validate().unwrap_err().contains("budget_ratio"));
-        let window = RetryConfig {
-            budget_window: Duration::from_millis(10),
-            ..RetryConfig::default()
-        };
-        assert!(window.validate().unwrap_err().contains("budget_window"));
+        for budget_window in [Duration::from_millis(10), Duration::from_millis(10_500)] {
+            let window = RetryConfig {
+                budget_window,
+                ..RetryConfig::default()
+            };
+            assert!(window.validate().unwrap_err().contains("budget_window"));
+        }
         let parsed: RetryConfig = serde_json::from_str(r#"{"budget_window":30}"#).unwrap();
         assert_eq!(parsed.budget_window, Duration::from_secs(30));
     }

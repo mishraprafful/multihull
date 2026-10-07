@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 pub type EndpointId = String;
@@ -198,11 +199,13 @@ fn default_max_concurrency() -> u32 {
 }
 
 impl Endpoint {
-    pub fn health_path(&self) -> &str {
+    pub fn health_path(&self) -> Cow<'_, str> {
         if self.health_path.is_empty() {
-            DEFAULT_HEALTH_PATH
+            Cow::Borrowed(DEFAULT_HEALTH_PATH)
+        } else if self.health_path.starts_with('/') {
+            Cow::Borrowed(&self.health_path)
         } else {
-            &self.health_path
+            Cow::Owned(format!("/{}", self.health_path))
         }
     }
 
@@ -329,6 +332,18 @@ mod tests {
         assert_eq!(endpoint.max_concurrency, 32);
         assert_eq!(endpoint.health_path(), "/health");
         assert!(endpoint.accepts_traffic());
+    }
+
+    #[test]
+    fn health_path_without_a_leading_slash_gets_one() {
+        let mut endpoint = Endpoint {
+            url: "https://x.modal.run".into(),
+            health_path: "healthz".into(),
+            ..Default::default()
+        };
+        assert_eq!(endpoint.health_path(), "/healthz");
+        endpoint.health_path = "/ready".into();
+        assert_eq!(endpoint.health_path(), "/ready");
     }
 
     #[test]
