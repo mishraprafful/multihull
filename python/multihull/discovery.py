@@ -57,7 +57,7 @@ def auth_block(spec: ServiceSpec) -> dict[str, Any] | None:
     auth = spec.route.auth
     if auth is None or auth.apiKeys is None:
         return None
-    return {"api_key_hashes": api_key_hashes(auth.apiKeys.from_)}
+    return {"api_key_hashes": api_key_hashes(spec.name, auth.apiKeys.from_)}
 
 
 def sticky_block(spec: ServiceSpec) -> dict[str, Any] | None:

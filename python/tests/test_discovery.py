@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -12,6 +13,7 @@ from multihull.providers import PROVIDERS, create
 from multihull.providers.base import Observed, Ref
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
+from tests.conftest import no_keys_message
 from tests.fakes import FakeProvider
 
 
@@ -135,7 +137,6 @@ def test_router_document_without_auth_or_sticky(
 def test_snapshot_skips_unreachable_endpoint(
     llama_spec: ServiceSpec, tmp_path: Path, monkeypatch
 ) -> None:
-    monkeypatch.delenv("LLAMA_API_KEYS", raising=False)
     state = LocalState(tmp_path / "state.db")
     ref = Ref(
         "gke-prod",
@@ -147,7 +148,7 @@ def test_snapshot_skips_unreachable_endpoint(
     providers = {t.provider: create(t.type) for t in llama_spec.targets}
     snapshot = discovery.build_snapshot(llama_spec, state, providers)
     assert snapshot["routes"][0]["endpoints"] == []
-    assert snapshot["routes"][0]["auth"] == {"api_key_hashes": []}
+    assert snapshot["routes"][0]["auth"] == {"api_key_hashes": [hash_api_key("hull_fixture_one")]}
 
 
 def test_snapshot_docker_endpoints(mock_docker_spec: ServiceSpec, tmp_path: Path) -> None:
@@ -206,3 +207,21 @@ def test_snapshot_refuses_a_malformed_route_key(
     with pytest.raises(ApiKeyError, match="entry 2 of env:LLAMA_API_KEYS") as raised:
         discovery.build_snapshot(llama_spec, state, {})
     assert "notahullkey" not in str(raised.value)
+
+
+def test_snapshot_refuses_a_route_whose_key_source_yields_no_keys(
+    empty_key_raw: dict[str, Any], empty_key_source: str, tmp_path: Path
+) -> None:
+    spec = ServiceSpec.model_validate(empty_key_raw)
+    state = LocalState(tmp_path / "state.db")
+    with pytest.raises(ApiKeyError) as raised:
+        discovery.build_snapshot(spec, state, {})
+    assert str(raised.value) == no_keys_message(empty_key_source)
+
+
+def test_comment_lines_in_a_key_file_are_skipped(llama_raw: dict[str, Any], tmp_path: Path) -> None:
+    keys = tmp_path / "keys"
+    keys.write_text("# team one\nhull_a1_first\n  # retired key\n")
+    llama_raw["route"]["auth"]["apiKeys"]["from"] = f"file:{keys}"
+    block = discovery.auth_block(ServiceSpec.model_validate(llama_raw))
+    assert block == {"api_key_hashes": [hash_api_key("hull_a1_first")]}

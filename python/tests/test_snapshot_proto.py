@@ -99,7 +99,6 @@ def test_dict_and_proto_snapshot_share_fields(
 def test_snapshot_without_auth_or_sticky(
     llama_spec: ServiceSpec, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("LLAMA_API_KEYS", raising=False)
     snapshot = seeded_snapshot(llama_spec, tmp_path)
     snapshot["routes"][0]["auth"] = None
     message = discovery.snapshot_to_proto(snapshot)
