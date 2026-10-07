@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a new capability or an improvement.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should Multihull do? Show a spec snippet or CLI usage if it helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Router
+        - Control plane or CLI
+        - Spec (multihull.yaml)
+        - Provider support
+        - Helm chart
+        - Docs
+        - Testing or CI
+    validations:
+      required: true
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Project principles
+      description: Multihull favours reliability over cost and uses each provider's native interface.
+      options:
+        - label: This does not lower the configured redundancy floor, or it is opt-in and says so.
+          required: true

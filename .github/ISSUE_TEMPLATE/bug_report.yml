@@ -1,0 +1,77 @@
+name: Bug report
+description: Something in Multihull behaves wrongly or breaks.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Security vulnerabilities go through the security policy, not this form. Remove tokens, API keys and provider credentials from everything you paste.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Router (Rust data plane)
+        - Control plane or hull CLI
+        - Controller (hull controller)
+        - Provider translator
+        - Helm chart
+        - Python SDK
+        - CI or release workflows
+        - Docs site
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, including the exact error text.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Minimal steps. Include the relevant part of `multihull.yaml` with secrets removed.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "0.0.1, or a commit SHA from main"
+    validations:
+      required: true
+  - type: dropdown
+    id: providers
+    attributes:
+      label: Providers involved
+      multiple: true
+      options:
+        - Kubernetes
+        - Modal
+        - RunPod
+        - Baseten
+        - Replicate
+        - docker (local)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Router logs, `hull controller` output, or `/debug/endpoints`. Redact secrets.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed tokens, API keys and provider credentials from this report.
+          required: true
