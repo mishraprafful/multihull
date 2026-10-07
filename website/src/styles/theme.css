@@ -13,8 +13,44 @@
   --sl-nav-height: 3.5rem;
   --sl-sidebar-width: 17rem;
 
-  --sl-font: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --sl-font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --sl-font: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --sl-font-mono: var(--sl-font);
+
+  --sl-text-body: 0.9375rem;
+  --sl-line-height: 1.65;
+  --sl-line-height-headings: 1.2;
+  --sl-text-h1: 2.25rem;
+  --sl-text-h2: 1.625rem;
+  --sl-text-h3: 1.3125rem;
+  --sl-text-h4: 1.125rem;
+}
+
+@media (min-width: 50em) {
+  :root {
+    --sl-text-h1: 3rem;
+    --sl-text-h2: 2rem;
+    --sl-text-h3: 1.5rem;
+    --sl-text-h4: 1.1875rem;
+  }
+}
+
+body {
+  font-size: var(--sl-text-body);
+  text-rendering: optimizeLegibility;
+}
+
+h1[data-page-title],
+.sl-markdown-content h1 {
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.sl-markdown-content h2 {
+  letter-spacing: -0.03em;
+}
+
+.sl-markdown-content :is(h3, h4, h5) {
+  letter-spacing: -0.015em;
 }
 
 :root,
@@ -118,7 +154,8 @@
 .hero h1 {
   font-size: clamp(2.25rem, 1.25rem + 3.5vw, 3.5rem);
   font-weight: 600;
-  letter-spacing: -0.025em;
+  line-height: 1;
+  letter-spacing: -0.04em;
   text-wrap: balance;
 }
 

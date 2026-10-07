@@ -9,7 +9,7 @@ export default defineConfig({
       description: 'Deploy hot GPU containers to many providers. One URL. Automatic failover.',
       logo: { src: './src/assets/mark.svg', alt: 'Multihull' },
       favicon: '/favicon.svg',
-      customCss: ['./src/styles/theme.css'],
+      customCss: ['@fontsource-variable/jetbrains-mono/wght.css', './src/styles/theme.css'],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/mishraprafful/multihull' },
       ],
@@ -18,21 +18,6 @@ export default defineConfig({
           tag: 'script',
           content:
             "try{if(!localStorage.getItem('starlight-theme'))localStorage.setItem('starlight-theme','dark')}catch(e){}",
-        },
-        {
-          tag: 'link',
-          attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
-        },
-        {
-          tag: 'link',
-          attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: true },
-        },
-        {
-          tag: 'link',
-          attrs: {
-            rel: 'stylesheet',
-            href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap',
-          },
         },
       ],
       sidebar: [
