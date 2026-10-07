@@ -63,7 +63,7 @@ Opens when 50% of a provider's endpoints are open, or on 401/403 (credentials ar
 
 ## Panic threshold
 
-If more than 50% of all endpoints are open, the router routes to all of them rather than none. A retry first goes back to a healthy provider it already tried before it uses the panic pool.
+If more than 50% of all endpoints are open, the router routes to all of them rather than none. `circuit.panic_threshold` takes a share in (0, 1]; 1 disables panic routing. A retry first goes back to a healthy provider it already tried before it uses the panic pool.
 
 ## Cold-start masking
 
@@ -71,4 +71,4 @@ Gradient2 adaptive concurrency per endpoint on time-to-first-token. A bounded pe
 
 ## Tuning
 
-Every threshold above is a `router.toml` table: `[timeouts]`, `[circuit]`, `[admission]`, `[pressure]`, `[probe]` and `[retry]`, documented with their defaults in `router/router.example.toml` and mirrored under `router.tuning` in the Helm chart. Durations are seconds, unknown keys and out-of-range values are rejected on start, and `/debug/config` on the admin listener shows the effective values.
+Every threshold above is a `router.toml` table: `[timeouts]`, `[circuit]`, `[admission]`, `[pressure]`, `[probe]` and `[retry]`, documented with their defaults in `router/router.example.toml` and mirrored under `router.tuning` in the Helm chart. Durations are seconds (`circuit.ratio_window` and `retry.budget_window` whole seconds only), unknown keys and out-of-range values are rejected on start, and `/debug/config` on the admin listener shows the effective values.

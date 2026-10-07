@@ -16,6 +16,10 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duratio
         .map_err(|_| serde::de::Error::custom(format!("duration of {secs} seconds is too large")))
 }
 
+pub fn is_whole_seconds_at_least_one(value: Duration) -> bool {
+    value.as_secs() >= 1 && value.subsec_nanos() == 0
+}
+
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};

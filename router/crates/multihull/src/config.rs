@@ -184,6 +184,37 @@ mod tests {
     }
 
     #[test]
+    fn invalid_tuning_values_are_rejected_with_the_key_named() {
+        let cases = [
+            (
+                "[circuit]\npanic_threshold = 0.0\n",
+                "circuit.panic_threshold",
+            ),
+            (
+                "[pressure]\nttft_degrade_factor = nan\n",
+                "pressure.ttft_degrade_factor",
+            ),
+            (
+                "[pressure]\nttft_degrade_factor = inf\n",
+                "pressure.ttft_degrade_factor",
+            ),
+            ("[circuit]\nratio_window = 10.5\n", "circuit.ratio_window"),
+            ("[retry]\nbudget_window = 2.5\n", "retry.budget_window"),
+        ];
+        for (table, key) in cases {
+            let text = format!("[snapshot]\nsource = \"x\"\n{table}");
+            let error = Config::parse(&text).unwrap_err().to_string();
+            assert!(error.contains(key), "{table}: {error}");
+        }
+        let config = Config::parse(
+            "[snapshot]\nsource = \"x\"\n[circuit]\npanic_threshold = 1.0\nratio_window = 20.0\n",
+        )
+        .unwrap();
+        assert_eq!(config.circuit.panic_threshold, 1.0);
+        assert_eq!(config.circuit.ratio_window, Duration::from_secs(20));
+    }
+
+    #[test]
     fn huge_durations_are_rejected_with_the_key_named() {
         let error = Config::parse("[snapshot]\nsource = \"x\"\n[circuit]\nmax_backoff = 1e20\n")
             .unwrap_err();
