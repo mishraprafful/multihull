@@ -33,6 +33,16 @@ def test_validate_ok(tmp_path: Path) -> None:
     assert "llama-8b" in result.output
 
 
+def test_validate_warns_when_fallbacks_cannot_absorb_the_primary(tmp_path: Path) -> None:
+    path = tmp_path / "multihull.yaml"
+    shutil.copy(FIXTURES / "mock-kind-modal.yaml", path)
+    result = runner.invoke(app, ["validate", str(path)], env={"COLUMNS": "200"})
+    assert result.exit_code == 0, result.output
+    assert "warning" in result.output and "raise replicas.max on a fallback" in result.output
+    clean = runner.invoke(app, ["validate", str(copy_fixture(tmp_path))])
+    assert "warning" not in clean.output
+
+
 def test_validate_rejects_bad_spec(tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text("apiVersion: multihull/v1\nname: x\n")

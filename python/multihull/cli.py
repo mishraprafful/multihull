@@ -57,6 +57,13 @@ def load_or_exit(path: Path) -> specmod.ServiceSpec:
         raise typer.Exit(1) from None
 
 
+def load_and_warn(path: Path) -> specmod.ServiceSpec:
+    service = load_or_exit(path)
+    for warning in service.capacity_warnings():
+        errors.print(f"[yellow]warning[/yellow] {warning}")
+    return service
+
+
 def provider_for(target: specmod.TargetSpec, live: bool = False) -> Provider:
     return engine.provider_for(target, live)
 
@@ -178,7 +185,7 @@ def init(
 
 @app.command()
 def validate(path: SpecArg = DEFAULT_SPEC) -> None:
-    service = load_or_exit(path)
+    service = load_and_warn(path)
     console.print(f"[green]ok[/green] {service.name}: {len(service.targets)} targets")
 
 
@@ -202,7 +209,7 @@ def plan(
     ] = engine.DEFAULT_PLAN_DIR,
     state_path: StateOpt = DEFAULT_STATE,
 ) -> None:
-    service = load_or_exit(path)
+    service = load_and_warn(path)
     state = LocalState(state_path)
     plans = engine.plan(service, state, factory=provider_for)
     written = engine.write_plan_dir(plans, out)
@@ -286,7 +293,7 @@ def deploy(
     state_path: StateOpt = DEFAULT_STATE,
     image_digest: Annotated[str | None, typer.Option(help="Pin the image to this digest")] = None,
 ) -> None:
-    service = load_or_exit(path)
+    service = load_and_warn(path)
     unknown = unknown_targets(service, target)
     if unknown:
         errors.print(f"[red]unknown targets: {', '.join(unknown)}[/red]")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
@@ -212,6 +213,24 @@ class ServiceSpec(SpecModel):
         minimum = base.min if target.replicas.min is None else target.replicas.min
         maximum = base.max if target.replicas.max is None else target.replicas.max
         return Replicas(min=minimum, max=max(minimum, maximum))
+
+    def capacity_warnings(self) -> list[str]:
+        primary = min(self.targets, key=lambda t: t.priority)
+        fallbacks = [t for t in self.targets if t is not primary]
+        if not fallbacks:
+            return []
+        primary_max = self.effective_replicas(primary).max
+        factor = self.reliability.overprovision
+        needed = math.ceil(round(primary_max * factor, 9))
+        available = sum(self.effective_replicas(t).max for t in fallbacks)
+        if available >= needed:
+            return []
+        names = ", ".join(t.provider for t in fallbacks)
+        return [
+            f"fallback targets ({names}) can run {available} replicas in total, fewer than "
+            f"{needed} ({factor:g} x the {primary_max} of primary {primary.provider}); "
+            "a primary outage would leave them no headroom, so raise replicas.max on a fallback"
+        ]
 
     def target(self, provider: str) -> TargetSpec:
         for target in self.targets:

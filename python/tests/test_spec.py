@@ -212,3 +212,33 @@ def test_json_schema_shape() -> None:
         "network",
         "pull",
     }
+
+
+def test_single_replica_fallback_warns_it_cannot_absorb_the_primary(
+    mock_kind_modal_spec: ServiceSpec,
+) -> None:
+    warnings = mock_kind_modal_spec.capacity_warnings()
+    assert len(warnings) == 1
+    assert "fallback targets (modal) can run 1 replicas" in warnings[0]
+    assert "fewer than 2 (1.4 x the 1 of primary kind)" in warnings[0]
+
+
+def test_fallbacks_at_the_overprovision_factor_do_not_warn(
+    llama_spec: ServiceSpec,
+    mock_docker_spec: ServiceSpec,
+    mock_kind_modal_spec: ServiceSpec,
+) -> None:
+    assert llama_spec.capacity_warnings() == []
+    assert mock_docker_spec.capacity_warnings() == []
+    raw = mock_kind_modal_spec.model_dump(mode="json", exclude_none=True)
+    raw["targets"][1]["replicas"] = {"max": 2}
+    assert ServiceSpec.model_validate(raw).capacity_warnings() == []
+
+
+def test_capacity_warning_rounds_the_overprovision_product_exactly(
+    mock_kind_modal_spec: ServiceSpec,
+) -> None:
+    raw = mock_kind_modal_spec.model_dump(mode="json", exclude_none=True)
+    raw["scaling"]["replicas"] = {"min": 1, "max": 5}
+    raw["targets"][1]["replicas"] = {"max": 7}
+    assert ServiceSpec.model_validate(raw).capacity_warnings() == []
