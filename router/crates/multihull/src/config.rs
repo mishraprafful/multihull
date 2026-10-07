@@ -184,6 +184,21 @@ mod tests {
     }
 
     #[test]
+    fn huge_durations_are_rejected_with_the_key_named() {
+        let error = Config::parse("[snapshot]\nsource = \"x\"\n[circuit]\nmax_backoff = 1e20\n")
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("max_backoff"), "{message}");
+        assert!(message.contains("too large"), "{message}");
+        let error = Config::parse(
+            "[snapshot]\nsource = \"x\"\n[circuit]\nbase_backoff = 1e19\nmax_backoff = 1e19\n",
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("circuit.base_backoff"), "{message}");
+    }
+
+    #[test]
     fn upstream_ca_is_optional_and_independent_of_listener_tls() {
         let config = Config::parse(
             "upstream_ca = \"/etc/multihull/upstream-ca.pem\"\n[snapshot]\nsource = \"x\"\n",

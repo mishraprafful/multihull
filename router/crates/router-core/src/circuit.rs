@@ -59,6 +59,17 @@ impl CircuitConfig {
         if self.base_backoff.is_zero() {
             return Err("circuit.base_backoff must be positive".into());
         }
+        let max_allowed = Duration::from_secs(MAX_BACKOFF_SECS);
+        if self.base_backoff > max_allowed {
+            return Err(format!(
+                "circuit.base_backoff must be at most {MAX_BACKOFF_SECS} seconds"
+            ));
+        }
+        if self.max_backoff > max_allowed {
+            return Err(format!(
+                "circuit.max_backoff must be at most {MAX_BACKOFF_SECS} seconds"
+            ));
+        }
         if self.max_backoff < self.base_backoff {
             return Err("circuit.max_backoff must be at least circuit.base_backoff".into());
         }
@@ -443,6 +454,7 @@ impl ProviderCircuit {
 }
 
 pub const PANIC_THRESHOLD: f64 = 0.5;
+pub const MAX_BACKOFF_SECS: u64 = 86_400;
 
 pub fn apply_panic_threshold<T>(
     candidates: &[T],
@@ -717,6 +729,21 @@ mod tests {
             ),
             (
                 CircuitConfig {
+                    base_backoff: secs(MAX_BACKOFF_SECS + 1),
+                    max_backoff: secs(MAX_BACKOFF_SECS + 1),
+                    ..CircuitConfig::default()
+                },
+                "base_backoff",
+            ),
+            (
+                CircuitConfig {
+                    max_backoff: secs(MAX_BACKOFF_SECS + 1),
+                    ..CircuitConfig::default()
+                },
+                "max_backoff",
+            ),
+            (
+                CircuitConfig {
                     panic_threshold: 1.0,
                     ..CircuitConfig::default()
                 },
@@ -738,6 +765,19 @@ mod tests {
             CircuitConfig::default().provider_circuit(),
             ProviderCircuit::default()
         );
+    }
+
+    #[test]
+    fn largest_valid_backoff_with_full_jitter_does_not_overflow() {
+        let config = CircuitConfig {
+            base_backoff: secs(MAX_BACKOFF_SECS),
+            max_backoff: secs(MAX_BACKOFF_SECS),
+            jitter_fraction: 1.0,
+            ..CircuitConfig::default()
+        };
+        assert!(config.validate().is_ok());
+        let mut full = || 1.0;
+        assert_eq!(config.backoff(30, &mut full), secs(2 * MAX_BACKOFF_SECS));
     }
 
     #[test]
