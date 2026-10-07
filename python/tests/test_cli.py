@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
 import yaml
@@ -14,6 +15,7 @@ from multihull.providers.base import Ref
 from multihull.state import LocalState, StateRecord
 from tests.conftest import FIXTURES
 from tests.fake_docker import FakeDockerClient
+from tests.fake_modal import FakeAuthError, FakeModal
 from tests.fakes import FakeProvider
 
 runner = CliRunner()
@@ -179,6 +181,38 @@ def test_doctor_docker_pings_daemon(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["doctor", str(path)])
     assert result.exit_code == 1
     assert "FAIL" in result.output and "unreachable" in result.output
+
+
+KIND_KUBECONFIG = """apiVersion: v1
+kind: Config
+clusters: [{name: kind, cluster: {server: 'https://127.0.0.1:6443'}}]
+users: [{name: kind, user: {token: fixture}}]
+contexts: [{name: kind-multihull-live, context: {cluster: kind, user: kind}}]
+current-context: kind-multihull-live
+"""
+
+
+def test_doctor_fails_when_modal_rejects_credentials(tmp_path: Path, monkeypatch) -> None:
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text(KIND_KUBECONFIG)
+    monkeypatch.setenv("KUBECONFIG", str(kubeconfig))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MODAL_TOKEN_ID", "ak-fixture-token-id")
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", "as-fixture-token-secret")
+    fake = FakeModal()
+    monkeypatch.setitem(sys.modules, "modal", fake)
+    path = tmp_path / "multihull.yaml"
+    shutil.copy(FIXTURES / "mock-kind-modal.yaml", path)
+
+    accepted = runner.invoke(app, ["doctor", str(path)])
+    assert accepted.exit_code == 0, accepted.output
+    assert "FAIL" not in accepted.output and fake.client.hellos == 1
+
+    fake.client.error = FakeAuthError("Token validation failed")
+    rejected = runner.invoke(app, ["doctor", str(path)], env={"COLUMNS": "200"})
+    assert rejected.exit_code == 1
+    assert "FAIL" in rejected.output and "Token validation failed" in rejected.output
+    assert "fixture-token" not in rejected.output
 
 
 def test_doctor_tolerates_missing_credentials(tmp_path: Path, monkeypatch) -> None:

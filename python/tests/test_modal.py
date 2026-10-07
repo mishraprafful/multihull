@@ -11,7 +11,9 @@ from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref, Target
 from multihull.providers.modal import (
     MISSING_COMMAND_NOTE,
+    CredentialStatus,
     ModalProvider,
+    check_credentials,
     deploy_with_sdk,
     derive_web_url,
     modal_gpu,
@@ -21,9 +23,11 @@ from multihull.providers.modal import (
 )
 from multihull.spec import GPU, ServiceSpec
 from tests.conftest import assert_golden
-from tests.fake_modal import FakeLogEntry, FakeModal
+from tests.fake_modal import FakeAuthError, FakeLogEntry, FakeModal
 
 REGISTRY_ENV = {"GHCR_USERNAME": "fixture-user", "GHCR_TOKEN": "fixture-registry-value"}
+FAKE_TOKEN_ID = "ak-fixture-token-id"
+FAKE_TOKEN_SECRET = "as-fixture-token-secret"
 
 
 def test_golden_app_spec(target_for) -> None:
@@ -79,17 +83,81 @@ def test_endpoint_derives_web_url(monkeypatch: pytest.MonkeyPatch) -> None:
     assert provider.endpoint(ref).url == "https://custom.modal.run"
 
 
-def test_credentials_health_reports_presence_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    monkeypatch.setenv("MODAL_TOKEN_ID", "fixture")
-    monkeypatch.setenv("MODAL_TOKEN_SECRET", "fixture")
-    health = ModalProvider().credentials_health()
-    assert health.ok and "fixture" not in health.message
-    monkeypatch.delenv("MODAL_TOKEN_ID")
-    monkeypatch.delenv("MODAL_TOKEN_SECRET")
+@pytest.fixture
+def modal_tokens(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MODAL_TOKEN_ID", FAKE_TOKEN_ID)
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", FAKE_TOKEN_SECRET)
+
+
+def assert_no_token_values(message: str) -> None:
+    assert FAKE_TOKEN_ID not in message and FAKE_TOKEN_SECRET not in message
+
+
+def test_credentials_accepted_after_authenticated_call(modal_tokens, fake_modal) -> None:
+    health = ModalProvider().credentials_health()
+    assert health.ok
+    assert health.message == "Modal accepted MODAL_TOKEN_ID/MODAL_TOKEN_SECRET"
+    assert fake_modal.client.hellos == 1
+
+
+def test_credentials_rejected_reports_modal_error(modal_tokens, fake_modal) -> None:
+    fake_modal.client.error = FakeAuthError("Token validation failed")
+    check = check_credentials()
+    assert check.status is CredentialStatus.REJECTED and not check.ok
+    assert check.message == (
+        "Modal rejected MODAL_TOKEN_ID/MODAL_TOKEN_SECRET: Token validation failed"
+    )
     assert not ModalProvider().credentials_health().ok
+
+
+def test_credentials_error_never_echoes_token_values(
+    modal_tokens, fake_modal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret_with_newline = FAKE_TOKEN_SECRET + "\n"
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", secret_with_newline)
+    fake_modal.client.error = ValueError(f"Invalid metadata value: {secret_with_newline!r}")
+    check = check_credentials()
+    assert check.status is CredentialStatus.INVALID
+    assert "Invalid metadata value" in check.message and "<redacted>" in check.message
+    assert_no_token_values(check.message)
+
+
+def test_credentials_network_error_is_not_ok(modal_tokens, fake_modal) -> None:
+    fake_modal.client.error = OSError("connection refused")
+    check = check_credentials()
+    assert check.status is CredentialStatus.UNREACHABLE
+    assert check.message == (
+        "could not verify MODAL_TOKEN_ID/MODAL_TOKEN_SECRET: OSError: connection refused"
+    )
+
+
+def test_credentials_check_times_out(modal_tokens, fake_modal) -> None:
+    fake_modal.client.delay = 5
+    check = check_credentials(timeout=0.05)
+    assert check.status is CredentialStatus.UNREACHABLE
+    assert check.message == "no answer from Modal within 0.05 s"
+
+
+def test_credentials_without_sdk_say_so(modal_tokens, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "modal", None)
+    check = check_credentials()
+    assert check.status is CredentialStatus.SDK_MISSING
+    assert "modal SDK is not installed" in check.message
+    assert not ModalProvider().credentials_health().ok
+
+
+def test_credentials_missing_skips_the_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, fake_modal
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+    check = check_credentials()
+    assert check.status is CredentialStatus.MISSING
+    assert fake_modal.client.hellos == 0
+    (tmp_path / ".modal.toml").write_text("[default]\n")
+    assert check_credentials().message == "Modal accepted ~/.modal.toml"
 
 
 @pytest.fixture

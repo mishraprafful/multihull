@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -41,6 +44,93 @@ APP_GONE_MARKERS = ("already stopped", "no app with name")
 MISSING_COMMAND_NOTE = (
     "container.command is empty; Modal does not run the image CMD, so set the server command"
 )
+TOKEN_ID_ENV = "MODAL_TOKEN_ID"
+TOKEN_SECRET_ENV = "MODAL_TOKEN_SECRET"
+ENV_CREDENTIALS = f"{TOKEN_ID_ENV}/{TOKEN_SECRET_ENV}"
+CONFIG_CREDENTIALS = "~/.modal.toml"
+CREDENTIALS_TIMEOUT_SECONDS = 10.0
+REDACTED = "<redacted>"
+
+
+class CredentialStatus(StrEnum):
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    INVALID = "invalid"
+    UNREACHABLE = "unreachable"
+    SDK_MISSING = "sdk-missing"
+    MISSING = "missing"
+
+
+@dataclass(frozen=True)
+class CredentialCheck:
+    status: CredentialStatus
+    message: str
+
+    @property
+    def ok(self) -> bool:
+        return self.status is CredentialStatus.ACCEPTED
+
+
+def credentials_source() -> str | None:
+    if os.environ.get(TOKEN_ID_ENV) and os.environ.get(TOKEN_SECRET_ENV):
+        return ENV_CREDENTIALS
+    if (Path.home() / ".modal.toml").exists():
+        return CONFIG_CREDENTIALS
+    return None
+
+
+def secret_fragments() -> list[str]:
+    fragments: set[str] = set()
+    for name in (TOKEN_ID_ENV, TOKEN_SECRET_ENV):
+        value = os.environ.get(name, "")
+        fragments.update({value, value.strip(), repr(value)[1:-1], *value.split()})
+    return sorted((f for f in fragments if f), key=len, reverse=True)
+
+
+def redact(text: str) -> str:
+    for fragment in secret_fragments():
+        text = text.replace(fragment, REDACTED)
+    return text
+
+
+async def hello_from_env(modal: Any) -> None:
+    client = await modal.Client.from_env.aio()
+    await client.hello.aio()
+
+
+def check_credentials(timeout: float = CREDENTIALS_TIMEOUT_SECONDS) -> CredentialCheck:
+    source = credentials_source()
+    if source is None:
+        return CredentialCheck(
+            CredentialStatus.MISSING, f"no {ENV_CREDENTIALS} and no {CONFIG_CREDENTIALS}"
+        )
+    try:
+        import modal
+    except ImportError:
+        return CredentialCheck(
+            CredentialStatus.SDK_MISSING,
+            f"{source} found but the modal SDK is not installed; "
+            "install multihull[modal] to verify them",
+        )
+    try:
+        asyncio.run(asyncio.wait_for(hello_from_env(modal), timeout))
+    except TimeoutError:
+        return CredentialCheck(
+            CredentialStatus.UNREACHABLE, f"no answer from Modal within {timeout:g} s"
+        )
+    except modal.exception.AuthError as exc:
+        return CredentialCheck(CredentialStatus.REJECTED, redact(f"Modal rejected {source}: {exc}"))
+    except (ValueError, modal.exception.InvalidError) as exc:
+        return CredentialCheck(
+            CredentialStatus.INVALID,
+            redact(f"the modal SDK refused {source} before sending: {exc}"),
+        )
+    except Exception as exc:
+        return CredentialCheck(
+            CredentialStatus.UNREACHABLE,
+            redact(f"could not verify {source}: {type(exc).__name__}: {exc}"),
+        )
+    return CredentialCheck(CredentialStatus.ACCEPTED, f"Modal accepted {source}")
 
 
 def modal_block(desired: Target) -> ModalBlock:
@@ -223,13 +313,8 @@ class ModalProvider:
         return [GPUOffer(gpu=gpu, region=None, available=True) for gpu in MODAL_GPU]
 
     def credentials_health(self) -> CredHealth:
-        if os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET"):
-            return CredHealth(ok=True, message="MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are set")
-        if (Path.home() / ".modal.toml").exists():
-            return CredHealth(ok=True, message="~/.modal.toml present")
-        return CredHealth(
-            ok=False, message="no MODAL_TOKEN_ID/MODAL_TOKEN_SECRET and no ~/.modal.toml"
-        )
+        check = check_credentials()
+        return CredHealth(ok=check.ok, message=check.message)
 
     def rediscover(self, service: str) -> Ref | None:
         if self.dry_run:

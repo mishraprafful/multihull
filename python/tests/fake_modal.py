@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +29,28 @@ class FakeLogEntry:
     context_ids: list[str]
 
 
+class FakeAuthError(Exception):
+    pass
+
+
+class FakeInvalidError(Exception):
+    pass
+
+
+class FakeModalClient:
+    def __init__(self) -> None:
+        self.error: BaseException | None = None
+        self.delay = 0.0
+        self.hellos = 0
+        self.hello = SimpleNamespace(aio=self._hello)
+
+    async def _hello(self) -> None:
+        self.hellos += 1
+        await asyncio.sleep(self.delay)
+        if self.error is not None:
+            raise self.error
+
+
 class FakeModal:
     def __init__(self) -> None:
         self.images: list[FakeImage] = []
@@ -43,6 +66,12 @@ class FakeModal:
         self.Image = SimpleNamespace(from_registry=self._from_registry)
         self.Secret = SimpleNamespace(from_dict=FakeSecret)
         self.Cls = SimpleNamespace(from_name=self._cls_from_name)
+        self.client = FakeModalClient()
+        self.Client = SimpleNamespace(from_env=SimpleNamespace(aio=self._client_from_env))
+        self.exception = SimpleNamespace(AuthError=FakeAuthError, InvalidError=FakeInvalidError)
+
+    async def _client_from_env(self) -> FakeModalClient:
+        return self.client
 
     def _from_registry(self, ref: str, secret: FakeSecret | None = None) -> FakeImage:
         image = FakeImage(ref, secret)
