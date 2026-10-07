@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation.workspace = true
 description = "Stateless request router for multi-provider GPU inference with automatic failover."
 readme = "README.md"
 keywords = ["gpu", "inference", "proxy", "failover", "router"]
