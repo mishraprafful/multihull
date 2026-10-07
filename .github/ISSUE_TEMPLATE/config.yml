@@ -1,8 +1,1 @@
 blank_issues_enabled: false
-contact_links:
-  - name: Report a security vulnerability
-    url: https://github.com/mishraprafful/multihull/security/policy
-    about: Do not open a public issue. Follow the security policy to report privately.
-  - name: Documentation
-    url: https://multihull.pages.dev
-    about: Concepts, provider guides, router behaviour and the CLI reference.
