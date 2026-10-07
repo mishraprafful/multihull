@@ -24,6 +24,7 @@ pub struct MockUpstreamConfig {
     pub sse_chunk_interval: Duration,
     pub sse_first_chunk_delay: Duration,
     pub sse_drop_after_chunks: usize,
+    pub sse_raw: bool,
     pub stream_content_type: String,
     pub drop_connection: bool,
     pub etag: Option<String>,
@@ -39,6 +40,7 @@ impl Default for MockUpstreamConfig {
             sse_chunk_interval: Duration::from_millis(5),
             sse_first_chunk_delay: Duration::ZERO,
             sse_drop_after_chunks: 0,
+            sse_raw: false,
             stream_content_type: "text/event-stream".to_string(),
             drop_connection: false,
             etag: None,
@@ -79,6 +81,11 @@ impl MockUpstreamConfig {
 
     pub fn dropping_sse_after(mut self, chunks: usize) -> Self {
         self.sse_drop_after_chunks = chunks;
+        self
+    }
+
+    pub fn sending_raw_chunks(mut self) -> Self {
+        self.sse_raw = true;
         self
     }
 
@@ -255,6 +262,7 @@ async fn respond(
     let interval = config.sse_chunk_interval;
     let first_chunk_delay = config.sse_first_chunk_delay;
     let drop_after = config.sse_drop_after_chunks;
+    let raw = config.sse_raw;
     let chunks = config.sse_chunks.clone();
     tokio::spawn(async move {
         tokio::time::sleep(first_chunk_delay).await;
@@ -268,11 +276,19 @@ async fn respond(
                     .await;
                 return;
             }
-            let frame = Frame::data(Bytes::from(format!("data: {chunk}\n\n")));
+            let bytes = if raw {
+                Bytes::from(chunk)
+            } else {
+                Bytes::from(format!("data: {chunk}\n\n"))
+            };
+            let frame = Frame::data(bytes);
             if tx.send(Ok(frame)).await.is_err() {
                 return;
             }
             tokio::time::sleep(interval).await;
+        }
+        if raw {
+            return;
         }
         let _ = tx
             .send(Ok(Frame::data(Bytes::from_static(b"data: [DONE]\n\n"))))
