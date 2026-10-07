@@ -403,7 +403,7 @@ impl Body for TimedBody {
 
 impl Drop for TimedBody {
     fn drop(&mut self) {
-        let outcome = if self.is_end_stream() {
+        let outcome = if self.committed {
             Outcome::Success
         } else {
             Outcome::ClientAbort

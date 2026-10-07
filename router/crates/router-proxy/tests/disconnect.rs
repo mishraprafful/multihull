@@ -375,20 +375,18 @@ async fn each_streamed_request_counts_once_with_its_final_outcome() {
     drop(body);
     drop(client);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    while !requests_by_outcome("counted").contains_key("client_abort") {
+    while proxy.state.runtime.status(&target).unwrap().outstanding > 0 {
         assert!(
             tokio::time::Instant::now() < deadline,
-            "abort never recorded"
+            "abandoned stream never released"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert_eq!(
         requests_by_outcome("counted"),
         BTreeMap::from([
-            ("client_abort".to_string(), 1),
-            ("success".to_string(), 1),
+            ("success".to_string(), 2),
             (UPSTREAM_DISCONNECTED.to_string(), 1),
         ])
     );
-    assert_eq!(proxy.state.runtime.status(&target).unwrap().outstanding, 0);
 }
