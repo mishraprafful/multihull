@@ -151,7 +151,7 @@ def test_scale_back_steps_down_once_per_cooldown_after_degraded_clears(
 ) -> None:
     clock = FakeClock()
     providers = {t.provider: FakeProvider() for t in llama_spec.targets}
-    controller, _ = make_controller(
+    controller, state = make_controller(
         llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=60)
     )
 
@@ -187,6 +187,7 @@ def test_scale_back_steps_down_once_per_cooldown_after_degraded_clears(
         assert {(a.provider, a.new_min) for a in last} == {("modal-main", 1), ("runpod-eu", 1)}
         assert controller.pre_degraded_min == {}
         assert controller.min_replicas == {"gke-prod": 2, "modal-main": 1, "runpod-eu": 1}
+        assert state.list_floors("llama-8b") == []
         clock.advance(600)
         assert await controller.scale_back_once() == []
         assert len(controller.scale_back_actions) == 6
@@ -225,6 +226,54 @@ def test_degraded_during_a_blocked_scale_back_step_wins(
     assert controller.scale_back_sync() == []
 
 
+def test_raised_floors_survive_a_controller_restart(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    controller, _ = make_controller(llama_spec, tmp_path, providers)
+    signal = pb.Degraded(service="llama-8b", provider="gke-prod")
+    raised = {"gke-prod": 2, "modal-main": 3, "runpod-eu": 3}
+
+    def restart(clock: FakeClock) -> Controller:
+        return Controller(
+            llama_spec,
+            LocalState(tmp_path / "state.db"),
+            providers,
+            snapshot_out=tmp_path / "snapshot.json",
+            degraded_cooldown=timedelta(seconds=60),
+            clock=clock,
+        )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        await controller.handle_degraded(signal)
+        await controller.handle_degraded(signal)
+        assert controller.min_replicas == raised
+
+        clock = FakeClock()
+        quiet = restart(clock)
+        assert quiet.min_replicas == raised
+        assert quiet.pre_degraded_min == {"modal-main": 1, "runpod-eu": 1}
+        clock.advance(59)
+        assert await quiet.scale_back_once() == []
+        clock.advance(1)
+        stepped = await quiet.scale_back_once()
+        assert {(a.provider, a.previous_min, a.new_min) for a in stepped} == {
+            ("modal-main", 3, 2),
+            ("runpod-eu", 3, 2),
+        }
+
+        busy = restart(FakeClock())
+        await busy.reconcile_once()
+        calls = {name: len(p.scaled) for name, p in providers.items()}
+        await busy.handle_degraded(signal)
+        fresh = [call for name, p in providers.items() for call in p.scaled[calls[name] :]]
+        assert fresh == [("modal-main", 3, 8), ("runpod-eu", 3, 8)]
+        assert busy.pre_degraded_min == {"modal-main": 1, "runpod-eu": 1}
+
+    asyncio.run(scenario())
+
+
 def test_scale_back_keeps_the_warm_provider_floor(llama_raw: dict, tmp_path: Path) -> None:
     llama_raw["reliability"]["fallbackScaleToZero"] = True
     llama_raw["reliability"]["minWarmProviders"] = 3
@@ -236,7 +285,7 @@ def test_scale_back_keeps_the_warm_provider_floor(llama_raw: dict, tmp_path: Pat
         "modal-main": FakeProvider(),
         "runpod-eu": FakeProvider(phases=["Pending"]),
     }
-    controller, _ = make_controller(
+    controller, state = make_controller(
         spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=10)
     )
 
@@ -250,6 +299,10 @@ def test_scale_back_keeps_the_warm_provider_floor(llama_raw: dict, tmp_path: Pat
         assert controller.min_replicas["runpod-eu"] == 1
         assert controller.pre_degraded_min == {}
         assert providers["runpod-eu"].scaled == [("runpod-eu", 1, 2)]
+        floors = [
+            (f.provider, f.min_replicas, f.pre_degraded_min) for f in state.list_floors(spec.name)
+        ]
+        assert floors == [("runpod-eu", 1, None)]
 
     asyncio.run(scenario())
 

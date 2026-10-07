@@ -19,7 +19,7 @@ from multihull._proto import discovery_pb2_grpc as pb_grpc
 from multihull.deploy import DEFAULT_SNAPSHOT_PATH
 from multihull.providers.base import Observed, Provider, Ref, ScaleRefused
 from multihull.spec import ServiceSpec, TargetSpec
-from multihull.state.base import StateBackend, StateRecord, records_by_provider
+from multihull.state.base import Floor, StateBackend, StateRecord, records_by_provider
 
 log = logging.getLogger("multihull.controller")
 
@@ -104,6 +104,7 @@ class Controller:
         self.scaling = threading.Lock()
         self.scaling_targets: set[str] = set()
         self.owed_raises: dict[str, str] = {}
+        self.restore_floors()
         self.subscribers: set[asyncio.Queue[pb.Snapshot | None]] = set()
         self.acked_versions: dict[str, int] = {}
         self.scale_actions: list[ScaleAction] = []
@@ -194,6 +195,36 @@ class Controller:
     async def check_health_once(self) -> list[HealthReport]:
         return await asyncio.to_thread(self.check_health_sync)
 
+    def restore_floors(self) -> None:
+        for floor in self.state.list_floors(self.spec.name):
+            if floor.provider not in self.min_replicas:
+                continue
+            replicas = self.spec.effective_replicas(self.target(floor.provider))
+            self.min_replicas[floor.provider] = min(
+                max(floor.min_replicas, replicas.min), replicas.max
+            )
+            if floor.pre_degraded_min is not None:
+                self.pre_degraded_min[floor.provider] = floor.pre_degraded_min
+        if self.pre_degraded_min:
+            self.last_degraded_at = self.clock()
+            log.info(
+                "restored raised floors %s; scale-back resumes after %s without degraded",
+                self.min_replicas,
+                self.degraded_cooldown,
+            )
+
+    def persist_floor(self, provider: str) -> None:
+        minimum = self.min_replicas[provider]
+        remembered = self.pre_degraded_min.get(provider)
+        spec_min = self.spec.effective_replicas(self.target(provider)).min
+        try:
+            if remembered is None and minimum == spec_min:
+                self.state.delete_floor(self.spec.name, provider)
+            else:
+                self.state.put_floor(Floor(self.spec.name, provider, minimum, remembered))
+        except Exception as exc:
+            log.error("saving the min replicas floor of %s failed: %s", provider, exc)
+
     def handle_degraded_sync(self, service: str, provider: str, reason: str) -> list[ScaleAction]:
         if service != self.spec.name:
             log.warning("degraded signal for unknown service %s ignored", service)
@@ -246,6 +277,7 @@ class Controller:
         current = self.min_replicas[target.provider]
         if current <= max(remembered, replicas.min):
             del self.pre_degraded_min[target.provider]
+            self.persist_floor(target.provider)
             return None
         new_min = current - 1
         if new_min < 1 and self.warm_targets() - 1 < self.spec.reliability.minWarmProviders:
@@ -256,6 +288,7 @@ class Controller:
                 self.spec.reliability.minWarmProviders,
             )
             del self.pre_degraded_min[target.provider]
+            self.persist_floor(target.provider)
             return None
         record = records.get(target.provider)
         if record is None:
@@ -298,6 +331,7 @@ class Controller:
                     step.cause,
                 )
             self.pre_degraded_min.setdefault(step.provider, step.previous_min)
+            self.persist_floor(step.provider)
             self.scale_actions.append(action)
             return action
         if result is ScaleResult.APPLIED:
@@ -313,6 +347,7 @@ class Controller:
         remembered = self.pre_degraded_min.get(step.provider, replicas.min)
         if step.new_min <= max(remembered, replicas.min):
             self.pre_degraded_min.pop(step.provider, None)
+        self.persist_floor(step.provider)
         self.scale_back_actions.append(action)
         return action
 
