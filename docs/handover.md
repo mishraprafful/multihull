@@ -49,6 +49,7 @@ Rules for entries
 | 2026-10-07 | Modal deploys pin image builder `2025.06`; `MODAL_IMAGE_BUILDER_VERSION` overrides | The workspace default 2023.12 builder runs pip inside the image, and uv-based images have no pip |
 | 2026-10-07 | Placeholders published by hand from `fbdf211`; real releases go through trusted publishing | Publishing `main` would expose private source, and the crate depends on internal crates that cannot be published |
 | 2026-10-07 | An upstream 408 is Transient, retried only for idempotent or keyed requests; when every untried provider is open, a retry returns to a tried provider that answered and is still closed, before the panic pool | Live run 37678680863: Modal's 408s were forwarded as Fatal, yet Modal logged about 5 s of execution for them, so a keyless POST may already have reached the model; retries spent on kind (circuit open, probe down) turned recoverable Modal timeouts into 502s |
+| 2026-10-08 | The TTFT baseline adapts only from healthy windows; a slowdown lasting `pressure.ttft_rebaseline_after` (default 3600 s) becomes the new baseline | Issue 91: adapting on degraded windows silenced a sustained 3x slowdown after about three windows and let the controller scale back mid-incident. A time bound, not a window count, lets a permanent latency change stop the signal independent of traffic rate; one hour favours reliability over cost |
 
 ## Open questions
 
@@ -83,7 +84,7 @@ Rules for entries
 
 **Controller:**
 - [ ] `python/multihull/controller.py:277`: scale-back and Degraded handling run in parallel `to_thread` workers with no lock. Serialise both with one lock and re-check `last_degraded_at` before each step down.
-- [ ] `python/multihull/controller.py:231`: scale-back treats silence as recovery, but the router sends Degraded once per pressure episode (`router-core/src/pressure.rs:162`). Re-send while pressure holds, or gate scale-back on the degraded provider's health.
+- [x] `python/multihull/controller.py:231`: scale-back treats silence as recovery, but the router sends Degraded once per pressure episode (`router-core/src/pressure.rs:162`). Re-send while pressure holds, or gate scale-back on the degraded provider's health. Queue pressure re-sends since PR 85, TTFT since issue 91.
 - [ ] `python/multihull/controller.py:74`: raised floors live only in memory and are lost on restart. Persist them in the state backend or seed from observed desired replicas.
 
 **Chart:**
@@ -98,6 +99,9 @@ Rules for entries
 Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some of them in `body.rs`, `handler.rs` and `controller.py`.
 
 ## Session log
+
+### 2026-10-08
+- Issue 91 on `fix/ttft-degraded-baseline`: degraded TTFT windows no longer move the baseline, TTFT `Degraded` is re-sent every `pressure.resend_every` until a healthy window, and new key `pressure.ttft_rebaseline_after` (default 3600 s) accepts a lasting slowdown as the baseline. New router-core tests and e2e row `test_sustained_ttft_slowdown_keeps_raised_floors_until_it_ends` failed on `main` first (main sent two `Degraded` and scaled back 5 s later while the primary was still 4x slower).
 
 ### 2026-10-07 (later)
 - Live smoke run 37678680863 failed after merging main: Modal's single container held 37 in-flight inputs against `max_inputs` 32, so 17 requests got Modal `408 Request Timeout`, forwarded as Fatal, and 7 missed the 10 s first-byte deadline, were retried on kind (circuit open, probe down) and became router `502 upstream_unavailable`. Fixed on PR 37: 408 is Transient (retried only for idempotent or keyed requests), retries return to a healthy tried provider before the panic pool, `hull validate/plan/deploy` warn when fallbacks are below the 1.4 overprovision floor, live Modal `replicas.max` is 2.
