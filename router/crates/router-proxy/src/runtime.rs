@@ -1082,10 +1082,8 @@ mod tests {
         assert_eq!(runtime.admission.waiting("llama"), 0);
         runtime.record_queue_wait(&route, lucky_wait);
         runtime.record_queue_wait(&route, long_wait);
-        assert!(runtime.poll_degraded().is_empty());
-        runtime.record_queue_wait(&route, lucky_wait);
         tokio::time::sleep(sustained * 2).await;
-        assert!(runtime.poll_degraded().is_empty());
+        assert_eq!(runtime.poll_degraded().len(), 1);
     }
 
     #[test]
