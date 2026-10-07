@@ -17,6 +17,7 @@ from multihull import deploy as deploymod
 from multihull import discovery, engine
 from multihull import logs as logsmod
 from multihull import spec as specmod
+from multihull.apikeys import ApiKeyError
 from multihull.controller import (
     DEFAULT_DEGRADED_COOLDOWN,
     DEFAULT_GRPC_LISTEN,
@@ -62,6 +63,14 @@ def load_and_warn(path: Path) -> specmod.ServiceSpec:
     for warning in service.capacity_warnings():
         errors.print(f"[yellow]warning[/yellow] {warning}")
     return service
+
+
+def route_keys_or_exit(service: specmod.ServiceSpec) -> None:
+    try:
+        discovery.auth_block(service)
+    except ApiKeyError as exc:
+        errors.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from None
 
 
 def provider_for(target: specmod.TargetSpec, live: bool = False) -> Provider:
@@ -294,6 +303,7 @@ def deploy(
     image_digest: Annotated[str | None, typer.Option(help="Pin the image to this digest")] = None,
 ) -> None:
     service = load_and_warn(path)
+    route_keys_or_exit(service)
     unknown = unknown_targets(service, target)
     if unknown:
         errors.print(f"[red]unknown targets: {', '.join(unknown)}[/red]")
@@ -355,6 +365,7 @@ def destroy(
     state_path: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
+    route_keys_or_exit(service)
     state = LocalState(state_path)
     records = [r for r in state.list(service.name) if not target or r.provider in target]
     if not records:
@@ -439,6 +450,7 @@ def controller(
         level=log_level.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
     service = load_or_exit(path)
+    route_keys_or_exit(service)
     daemon = Controller(
         service,
         LocalState(state_path),
@@ -460,6 +472,7 @@ def snapshot(
     state_path: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
+    route_keys_or_exit(service)
     state = LocalState(state_path)
     providers = providers_for(service, live=False)
     document = discovery.build_snapshot(service, state, providers)

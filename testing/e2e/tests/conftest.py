@@ -10,6 +10,7 @@ import pytest
 
 from e2e.client import RouterClient
 from e2e.harness import (
+    AUTH_SPEC_NAME,
     SPEC_NAME,
     STICKY_SPEC_NAME,
     Controller,
@@ -89,6 +90,9 @@ def workdir(tmp_path_factory: pytest.TempPathFactory, mock_image: str) -> Path:
     rewrite_spec(SPECS / "three-docker.yaml", directory / SPEC_NAME, mock_image, base_port)
     rewrite_spec(
         SPECS / "three-docker-sticky.yaml", directory / STICKY_SPEC_NAME, mock_image, base_port
+    )
+    rewrite_spec(
+        SPECS / "three-docker-auth.yaml", directory / AUTH_SPEC_NAME, mock_image, base_port
     )
     (directory / ".multihull").mkdir()
     return directory

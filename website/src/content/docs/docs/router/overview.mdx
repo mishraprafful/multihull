@@ -44,7 +44,14 @@ OTel spans `router.request` and `upstream.attempt{provider, endpoint, n, outcome
 
 ## Auth
 
-Keys look like `hull_<key_id>_<secret>`. Only blake3 hashes reach the snapshot; comparison is constant time. Per-key token bucket, concurrency cap, provider and service allowlists.
+Set `route.auth.apiKeys.from` in the spec to `env:NAME` (comma-separated keys) or `file:PATH` (one key per line, a relative path resolves against the working directory of `hull`). Clients send `Authorization: Bearer hull_<id>_<secret>`.
+
+- `<id>` is ASCII letters and digits. `<secret>` is printable ASCII without spaces and may contain underscores. Generate one with `echo "hull_$(openssl rand -hex 4)_$(openssl rand -hex 32)"`.
+- Hashing contract: lowercase hex `blake3("<id>_<secret>")`, the key without its `hull_` prefix. The control plane publishes only these hashes in the snapshot's `auth.api_key_hashes`; the router hashes the presented key the same way and compares it with every hash in constant time. `proto/testdata/api-key-hash.json` is a test vector both sides assert.
+- `hull deploy`, `destroy`, `snapshot` and `controller` reject a malformed key before acting. The error names the source and entry, never the key.
+- A missing, malformed or unknown key gets `401` with error type `unauthorized`.
+- A route without `auth.apiKeys`, or whose source is unset, missing or empty, accepts every request.
+- Per-key rate limits and provider or service allowlists are planned, not enforced yet.
 
 ## Deploying
 

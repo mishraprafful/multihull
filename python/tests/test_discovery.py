@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -8,19 +7,12 @@ import pytest
 
 from multihull import discovery
 from multihull._proto import discovery_pb2 as pb
+from multihull.apikeys import ApiKeyError, hash_api_key
 from multihull.providers import PROVIDERS, create
 from multihull.providers.base import Observed, Ref
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
 from tests.fakes import FakeProvider
-
-
-def test_hash_api_key_never_returns_plaintext() -> None:
-    digest, algorithm = discovery.hash_api_key("hull_test_fixture")
-    assert algorithm in {"blake3", "blake2b"}
-    assert digest != "hull_test_fixture" and len(digest) == 64
-    if algorithm == "blake2b":
-        assert digest == hashlib.blake2b(b"hull_test_fixture", digest_size=32).hexdigest()
 
 
 def test_snapshot_shape(
@@ -49,7 +41,9 @@ def test_snapshot_shape(
         "max_retries": 2,
     }
     assert route["sticky"] is None
-    assert len(route["auth"]["api_key_hashes"]) == 2
+    assert route["auth"]["api_key_hashes"] == sorted(
+        [hash_api_key("hull_fixture_one"), hash_api_key("hull_fixture_two")]
+    )
     assert "hull_fixture_one" not in str(snapshot)
 
     endpoints = route["endpoints"]
@@ -153,7 +147,7 @@ def test_snapshot_skips_unreachable_endpoint(
     providers = {t.provider: create(t.type) for t in llama_spec.targets}
     snapshot = discovery.build_snapshot(llama_spec, state, providers)
     assert snapshot["routes"][0]["endpoints"] == []
-    assert snapshot["routes"][0]["auth"] == {"api_key_hashes": [], "algorithm": "blake3"}
+    assert snapshot["routes"][0]["auth"] == {"api_key_hashes": []}
 
 
 def test_snapshot_docker_endpoints(mock_docker_spec: ServiceSpec, tmp_path: Path) -> None:
@@ -204,10 +198,11 @@ def test_every_provider_type_has_a_distinct_proto_endpoint_type() -> None:
     assert discovery.PROTO_ENDPOINT_TYPE["docker"] == pb.ENDPOINT_TYPE_DOCKER
 
 
-def test_load_api_keys_from_file(tmp_path: Path) -> None:
-    keys = tmp_path / "keys"
-    keys.write_text("hull_a\n\nhull_b\n")
-    assert discovery.load_api_keys(f"file:{keys}") == ["hull_a", "hull_b"]
-    assert discovery.load_api_keys(f"file:{tmp_path / 'missing'}") == []
-    with pytest.raises(ValueError, match="unsupported"):
-        discovery.load_api_keys("vault:x")
+def test_snapshot_refuses_a_malformed_route_key(
+    llama_spec: ServiceSpec, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LLAMA_API_KEYS", "hull_fixture_one,notahullkey")
+    state = LocalState(tmp_path / "state.db")
+    with pytest.raises(ApiKeyError, match="entry 2 of env:LLAMA_API_KEYS") as raised:
+        discovery.build_snapshot(llama_spec, state, {})
+    assert "notahullkey" not in str(raised.value)

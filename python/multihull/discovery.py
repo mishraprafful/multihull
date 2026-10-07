@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +9,7 @@ from typing import Any
 from google.protobuf.timestamp_pb2 import Timestamp
 
 from multihull._proto import discovery_pb2 as pb
+from multihull.apikeys import api_key_hashes
 from multihull.durations import parse_duration
 from multihull.providers.base import Endpoint, Observed, Provider, Ref
 from multihull.spec import ServiceSpec, TargetSpec
@@ -54,37 +53,11 @@ PROTO_STICKY_ON_UNHEALTHY = {
 }
 
 
-def hash_api_key(key: str) -> tuple[str, str]:
-    try:
-        import blake3
-    except ImportError:
-        return hashlib.blake2b(key.encode(), digest_size=32).hexdigest(), "blake2b"
-    return blake3.blake3(key.encode()).hexdigest(), "blake3"
-
-
-def load_api_keys(source: str) -> list[str]:
-    kind, _, location = source.partition(":")
-    if kind == "env":
-        raw = os.environ.get(location, "")
-        return [k.strip() for k in raw.split(",") if k.strip()]
-    if kind == "file":
-        path = Path(location)
-        if not path.exists():
-            return []
-        return [line.strip() for line in path.read_text().splitlines() if line.strip()]
-    raise ValueError(f"unsupported api key source: {source}")
-
-
 def auth_block(spec: ServiceSpec) -> dict[str, Any] | None:
     auth = spec.route.auth
     if auth is None or auth.apiKeys is None:
         return None
-    hashes: list[str] = []
-    algorithm = "blake3"
-    for key in load_api_keys(auth.apiKeys.from_):
-        digest, algorithm = hash_api_key(key)
-        hashes.append(digest)
-    return {"api_key_hashes": sorted(hashes), "algorithm": algorithm}
+    return {"api_key_hashes": api_key_hashes(auth.apiKeys.from_)}
 
 
 def sticky_block(spec: ServiceSpec) -> dict[str, Any] | None:

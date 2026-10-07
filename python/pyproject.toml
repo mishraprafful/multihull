@@ -23,11 +23,11 @@ dependencies = [
   "grpcio>=1.66",
   "protobuf>=5.26",
   "docker>=7.2.0",
+  "blake3>=1.0",
 ]
 
 [project.optional-dependencies]
 modal = ["modal>=1.6"]
-blake3 = ["blake3>=0.4"]
 
 [project.scripts]
 hull = "multihull.cli:app"
