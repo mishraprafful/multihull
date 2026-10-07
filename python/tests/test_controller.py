@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
@@ -80,6 +81,21 @@ class FlakyProvider(FakeProvider):
         super().scale(ref, min, max)
 
 
+class GatedProvider(FakeProvider):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.armed = False
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def scale(self, ref: Ref, min: int, max: int) -> None:
+        if self.armed:
+            self.armed = False
+            self.entered.set()
+            assert self.release.wait(timeout=5)
+        super().scale(ref, min, max)
+
+
 def test_reconcile_tick_updates_state_and_versions(llama_spec: ServiceSpec, tmp_path: Path) -> None:
     providers = {t.provider: FakeProvider(phases=["Pending", "Ready"]) for t in llama_spec.targets}
     controller, state = make_controller(llama_spec, tmp_path, providers)
@@ -135,7 +151,7 @@ def test_scale_back_steps_down_once_per_cooldown_after_degraded_clears(
 ) -> None:
     clock = FakeClock()
     providers = {t.provider: FakeProvider() for t in llama_spec.targets}
-    controller, _ = make_controller(
+    controller, state = make_controller(
         llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=60)
     )
 
@@ -171,9 +187,89 @@ def test_scale_back_steps_down_once_per_cooldown_after_degraded_clears(
         assert {(a.provider, a.new_min) for a in last} == {("modal-main", 1), ("runpod-eu", 1)}
         assert controller.pre_degraded_min == {}
         assert controller.min_replicas == {"gke-prod": 2, "modal-main": 1, "runpod-eu": 1}
+        assert state.list_floors("llama-8b") == []
         clock.advance(600)
         assert await controller.scale_back_once() == []
         assert len(controller.scale_back_actions) == 6
+
+    asyncio.run(scenario())
+
+
+def test_degraded_during_a_blocked_scale_back_step_wins(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    clock = FakeClock()
+    providers = {t.provider: GatedProvider() for t in llama_spec.targets}
+    controller, _ = make_controller(
+        llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=60)
+    )
+    asyncio.run(controller.reconcile_once())
+    asyncio.run(controller.handle_degraded(pb.Degraded(service="llama-8b", provider="gke-prod")))
+    assert controller.min_replicas == {"gke-prod": 2, "modal-main": 2, "runpod-eu": 2}
+
+    clock.advance(60)
+    providers["modal-main"].armed = True
+    scale_back = threading.Thread(target=controller.scale_back_sync)
+    scale_back.start()
+    assert providers["modal-main"].entered.wait(timeout=5)
+    controller.handle_degraded_sync("llama-8b", "gke-prod", "DEGRADED_REASON_QUEUE_DEPTH")
+    providers["modal-main"].release.set()
+    scale_back.join(timeout=5)
+    assert not scale_back.is_alive()
+
+    last_calls = {name: p.scaled[-1][1] for name, p in providers.items() if p.scaled}
+    assert last_calls == {"modal-main": 2, "runpod-eu": 3}
+    assert controller.min_replicas == {"gke-prod": 2, "modal-main": 2, "runpod-eu": 3}
+    assert controller.pre_degraded_min == {"modal-main": 1, "runpod-eu": 1}
+    assert [(a.provider, a.new_min) for a in controller.scale_back_actions] == [("modal-main", 1)]
+    clock.advance(59)
+    assert controller.scale_back_sync() == []
+
+
+def test_raised_floors_survive_a_controller_restart(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    controller, _ = make_controller(llama_spec, tmp_path, providers)
+    signal = pb.Degraded(service="llama-8b", provider="gke-prod")
+    raised = {"gke-prod": 2, "modal-main": 3, "runpod-eu": 3}
+
+    def restart(clock: FakeClock) -> Controller:
+        return Controller(
+            llama_spec,
+            LocalState(tmp_path / "state.db"),
+            providers,
+            snapshot_out=tmp_path / "snapshot.json",
+            degraded_cooldown=timedelta(seconds=60),
+            clock=clock,
+        )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        await controller.handle_degraded(signal)
+        await controller.handle_degraded(signal)
+        assert controller.min_replicas == raised
+
+        clock = FakeClock()
+        quiet = restart(clock)
+        assert quiet.min_replicas == raised
+        assert quiet.pre_degraded_min == {"modal-main": 1, "runpod-eu": 1}
+        clock.advance(59)
+        assert await quiet.scale_back_once() == []
+        clock.advance(1)
+        stepped = await quiet.scale_back_once()
+        assert {(a.provider, a.previous_min, a.new_min) for a in stepped} == {
+            ("modal-main", 3, 2),
+            ("runpod-eu", 3, 2),
+        }
+
+        busy = restart(FakeClock())
+        await busy.reconcile_once()
+        calls = {name: len(p.scaled) for name, p in providers.items()}
+        await busy.handle_degraded(signal)
+        fresh = [call for name, p in providers.items() for call in p.scaled[calls[name] :]]
+        assert fresh == [("modal-main", 3, 8), ("runpod-eu", 3, 8)]
+        assert busy.pre_degraded_min == {"modal-main": 1, "runpod-eu": 1}
 
     asyncio.run(scenario())
 
@@ -189,7 +285,7 @@ def test_scale_back_keeps_the_warm_provider_floor(llama_raw: dict, tmp_path: Pat
         "modal-main": FakeProvider(),
         "runpod-eu": FakeProvider(phases=["Pending"]),
     }
-    controller, _ = make_controller(
+    controller, state = make_controller(
         spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=10)
     )
 
@@ -203,6 +299,10 @@ def test_scale_back_keeps_the_warm_provider_floor(llama_raw: dict, tmp_path: Pat
         assert controller.min_replicas["runpod-eu"] == 1
         assert controller.pre_degraded_min == {}
         assert providers["runpod-eu"].scaled == [("runpod-eu", 1, 2)]
+        floors = [
+            (f.provider, f.min_replicas, f.pre_degraded_min) for f in state.list_floors(spec.name)
+        ]
+        assert floors == [("runpod-eu", 1, None)]
 
     asyncio.run(scenario())
 

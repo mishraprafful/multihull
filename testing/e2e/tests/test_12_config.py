@@ -24,6 +24,7 @@ TUNING = {
     "pressure": {
         "queue_wait_fraction": 0.4,
         "sustained": 1,
+        "resend_every": 4,
         "stale_after": 8,
         "ttft_degrade_factor": 3.0,
         "ttft_window": 20,

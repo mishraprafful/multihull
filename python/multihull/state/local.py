@@ -7,22 +7,36 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from multihull.state.base import StateRecord, utcnow
+from multihull.state.base import Floor, StateRecord, utcnow
 
 DEFAULT_DIR = Path(".multihull")
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS targets (
-    service TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    ref TEXT NOT NULL,
-    image_digest TEXT,
-    spec_hash TEXT NOT NULL DEFAULT '',
-    last_status TEXT NOT NULL DEFAULT 'Unknown',
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (service, provider)
+MIGRATIONS = (
+    """
+    CREATE TABLE IF NOT EXISTS targets (
+        service TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        ref TEXT NOT NULL,
+        image_digest TEXT,
+        spec_hash TEXT NOT NULL DEFAULT '',
+        last_status TEXT NOT NULL DEFAULT 'Unknown',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (service, provider)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS floors (
+        service TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        min_replicas INTEGER NOT NULL,
+        pre_degraded_min INTEGER,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (service, provider)
+    )
+    """,
 )
-"""
+SCHEMA_VERSION = len(MIGRATIONS)
 COLUMNS = "service, provider, ref, image_digest, spec_hash, last_status, updated_at"
+FLOOR_COLUMNS = "service, provider, min_replicas, pre_degraded_min, updated_at"
 
 
 class LocalState:
@@ -31,7 +45,7 @@ class LocalState:
         self.lock_path = self.path.with_suffix(".lock")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
-            conn.execute(SCHEMA)
+            migrate(conn)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, isolation_level=None)
@@ -67,6 +81,9 @@ class LocalState:
             conn.execute(
                 "DELETE FROM targets WHERE service = ? AND provider = ?", (service, provider)
             )
+            conn.execute(
+                "DELETE FROM floors WHERE service = ? AND provider = ?", (service, provider)
+            )
 
     def list(self, service: str | None = None) -> list[StateRecord]:
         with self._connect() as conn:
@@ -80,6 +97,34 @@ class LocalState:
                     (service,),
                 ).fetchall()
         return [row_to_record(row) for row in rows]
+
+    def list_floors(self, service: str) -> list[Floor]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT {FLOOR_COLUMNS} FROM floors WHERE service = ? ORDER BY provider",
+                (service,),
+            ).fetchall()
+        return [row_to_floor(row) for row in rows]
+
+    def put_floor(self, floor: Floor) -> None:
+        floor.updated_at = utcnow()
+        with self._connect() as conn:
+            conn.execute(
+                f"INSERT OR REPLACE INTO floors ({FLOOR_COLUMNS}) VALUES (?, ?, ?, ?, ?)",
+                (
+                    floor.service,
+                    floor.provider,
+                    floor.min_replicas,
+                    floor.pre_degraded_min,
+                    floor.updated_at.isoformat(),
+                ),
+            )
+
+    def delete_floor(self, service: str, provider: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM floors WHERE service = ? AND provider = ?", (service, provider)
+            )
 
     @contextmanager
     def lock(self) -> Iterator[None]:
@@ -102,3 +147,32 @@ def row_to_record(row: tuple) -> StateRecord:
         last_status=last_status,
         updated_at=datetime.fromisoformat(updated_at),
     )
+
+
+def row_to_floor(row: tuple) -> Floor:
+    service, provider, min_replicas, pre_degraded_min, updated_at = row
+    return Floor(
+        service=service,
+        provider=provider,
+        min_replicas=min_replicas,
+        pre_degraded_min=pre_degraded_min,
+        updated_at=datetime.fromisoformat(updated_at),
+    )
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    if schema_version(conn) >= SCHEMA_VERSION:
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for statement in MIGRATIONS[schema_version(conn) :]:
+            conn.execute(statement)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")

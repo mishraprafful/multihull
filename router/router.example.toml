@@ -59,8 +59,11 @@ bound = 1024
 # Queue waits above max_wait * queue_wait_fraction count as pressure. A shorter
 # wait ends the pressure only once no other request is left in the queue.
 queue_wait_fraction = 0.5
-# Pressure sustained for this long sends one Degraded(QueueDepth) to the controller.
+# Pressure sustained for this long sends Degraded(QueueDepth) to the controller.
 sustained = 2
+# While pressure holds and new queue samples confirm it, Degraded is re-sent this
+# often. Keep it well below the controller's --degraded-cooldown.
+resend_every = 30
 # Pressure forgotten after this long without samples.
 stale_after = 10
 # TTFT p95 above baseline * factor over ttft_window samples sends Degraded(TtftP95).

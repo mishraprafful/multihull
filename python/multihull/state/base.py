@@ -22,6 +22,15 @@ class StateRecord:
     updated_at: datetime = field(default_factory=utcnow)
 
 
+@dataclass
+class Floor:
+    service: str
+    provider: str
+    min_replicas: int
+    pre_degraded_min: int | None = None
+    updated_at: datetime = field(default_factory=utcnow)
+
+
 @runtime_checkable
 class StateBackend(Protocol):
     def get(self, service: str, provider: str) -> StateRecord | None: ...
@@ -31,6 +40,12 @@ class StateBackend(Protocol):
     def delete(self, service: str, provider: str) -> None: ...
 
     def list(self, service: str | None = None) -> list[StateRecord]: ...
+
+    def list_floors(self, service: str) -> list[Floor]: ...
+
+    def put_floor(self, floor: Floor) -> None: ...
+
+    def delete_floor(self, service: str, provider: str) -> None: ...
 
     def lock(self) -> AbstractContextManager[None]: ...
 
