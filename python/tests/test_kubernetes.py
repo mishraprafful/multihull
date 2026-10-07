@@ -9,10 +9,12 @@ import pytest
 
 from multihull.providers.base import Ref, Target
 from multihull.providers.kubernetes import (
+    ENDPOINT_ANNOTATION,
     FIELD_MANAGER,
     KubernetesProvider,
     gpu_offers_from_nodes,
     gpu_scheduling,
+    ref_for,
     render_manifests,
 )
 from multihull.spec import GPU, ServiceSpec
@@ -206,3 +208,50 @@ def test_digest_pins_image(llama_spec: ServiceSpec) -> None:
     plain = copy.deepcopy(llama_spec)
     assert Target(plain, plain.target("gke-prod")).image_ref == "ghcr.io/acme/vllm-llama:1.4.0"
     assert Ref.from_json(Ref("p", "kubernetes", "svc", {"a": "b"}).to_json()).ids == {"a": "b"}
+
+
+def kind_target(spec: ServiceSpec) -> Target:
+    return Target(spec, spec.target("kind"))
+
+
+def test_golden_manifests_cpu_nodeport(mock_kind_modal_spec: ServiceSpec) -> None:
+    manifests = render_manifests(kind_target(mock_kind_modal_spec))
+    assert_golden("mock-kind.kubernetes.yaml", manifests)
+    deployment, service = manifests[0], manifests[1]
+    pod = deployment["spec"]["template"]["spec"]
+    assert set(pod) == {"containers"}
+    assert "nvidia.com/gpu" not in pod["containers"][0]["resources"]["limits"]
+    assert service["spec"]["type"] == "NodePort"
+    assert service["spec"]["ports"][0]["nodePort"] == 30080
+    assert service["metadata"]["annotations"] == {ENDPOINT_ANNOTATION: "http://127.0.0.1:30080"}
+
+
+def test_endpoint_override_needs_no_client(mock_kind_modal_spec: ServiceSpec) -> None:
+    ref = ref_for(kind_target(mock_kind_modal_spec))
+    assert ref.ids["endpoint"] == "http://127.0.0.1:30080"
+    assert KubernetesProvider().endpoint(ref).url == "http://127.0.0.1:30080"
+
+
+def test_endpoint_from_annotation_after_rediscover(mock_kind_modal_spec: ServiceSpec) -> None:
+    client = FakeKubeClient()
+    provider = KubernetesProvider(client=client)
+    provider.apply(kind_target(mock_kind_modal_spec), None)
+    found = provider.rediscover("live-mock")
+    assert found is not None and "endpoint" not in found.ids
+    assert provider.endpoint(found).url == "http://127.0.0.1:30080"
+
+
+def test_endpoint_node_port_uses_node_address(mock_kind_modal_spec: ServiceSpec) -> None:
+    raw = mock_kind_modal_spec.model_dump(by_alias=True, exclude_none=True)
+    del raw["targets"][0]["kubernetes"]["endpoint"]
+    spec = ServiceSpec.model_validate(raw)
+    client = FakeKubeClient()
+    client.nodes = [
+        {"status": {"addresses": [{"type": "Hostname", "address": "kind-control-plane"}]}},
+        {"status": {"addresses": [{"type": "InternalIP", "address": "172.18.0.2"}]}},
+    ]
+    provider = KubernetesProvider(client=client)
+    ref = provider.apply(kind_target(spec), None)
+    assert provider.endpoint(ref).url == "http://172.18.0.2:30080"
+    client.nodes = []
+    assert provider.endpoint(ref).url == "http://live-mock.multihull-live.svc.cluster.local:80"

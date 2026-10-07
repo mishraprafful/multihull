@@ -1,0 +1,36 @@
+{
+  "app_name": "multihull-live-mock",
+  "environment": "main",
+  "region": null,
+  "tags": {
+    "multihull.dev/service": "live-mock"
+  },
+  "image": {
+    "ref": "ghcr.io/mishraprafful/multihull-mock-server:main",
+    "secret": {
+      "usernameEnv": "GHCR_USERNAME",
+      "passwordEnv": "GHCR_TOKEN"
+    }
+  },
+  "gpu": null,
+  "memory_mib": 512,
+  "min_containers": 1,
+  "max_containers": 1,
+  "buffer_containers": 0,
+  "scaledown_window": 300,
+  "max_inputs": 32,
+  "web_server": {
+    "port": 8000,
+    "startup_timeout": 60,
+    "label": "multihull-live-mock"
+  },
+  "command": [
+    "/app/.venv/bin/python",
+    "-m",
+    "mock_server"
+  ],
+  "env": {
+    "MOCK_MODEL": "mock-llm"
+  },
+  "secret": null
+}

@@ -38,8 +38,19 @@ def test_target_factory_builds_spec_targets() -> None:
     k8s = target.kubernetes("gke", 1, namespace="inference", context="ctx", replicas=(2, 4))
     assert k8s.type == "kubernetes" and k8s.kubernetes.namespace == "inference"
     assert k8s.kubernetes.context == "ctx" and k8s.replicas.min == 2 and k8s.replicas.max == 4
+    assert k8s.kubernetes.serviceType == "LoadBalancer" and k8s.kubernetes.endpoint is None
+    kind = target.kubernetes(
+        "kind", 2, service_type="NodePort", node_port=30080, endpoint="http://127.0.0.1:30080"
+    )
+    assert kind.kubernetes.nodePort == 30080 and kind.kubernetes.serviceType == "NodePort"
     modal = target.modal("modal-eu", 2, region="eu", weight=3)
     assert modal.modal.region == "eu" and modal.modal.environment == "main" and modal.weight == 3
+    private = target.modal(
+        "modal-ghcr",
+        8,
+        registry_secret={"usernameEnv": "GHCR_USERNAME", "passwordEnv": "GHCR_TOKEN"},
+    )
+    assert private.modal.registrySecret.usernameEnv == "GHCR_USERNAME"
     runpod = target.runpod("runpod-eu", 3, data_centers=["EU-RO-1"], replicas={"min": 0})
     assert runpod.runpod.dataCenters == ["EU-RO-1"] and runpod.replicas.min == 0
     assert target.baseten("bt", 4).type == "baseten"

@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: live-mock
+  namespace: multihull-live
+  labels:
+    multihull.dev/service: live-mock
+    multihull.dev/provider: kind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      multihull.dev/service: live-mock
+  template:
+    metadata:
+      labels:
+        multihull.dev/service: live-mock
+        multihull.dev/provider: kind
+    spec:
+      containers:
+      - name: live-mock
+        image: ghcr.io/mishraprafful/multihull-mock-server:main
+        ports:
+        - name: http
+          containerPort: 8000
+        resources:
+          limits:
+            memory: 512Mi
+          requests:
+            memory: 512Mi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 30
+          failureThreshold: 3
+        command:
+        - /app/.venv/bin/python
+        - -m
+        - mock_server
+        env:
+        - name: MOCK_MODEL
+          value: mock-llm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: live-mock
+  namespace: multihull-live
+  labels:
+    multihull.dev/service: live-mock
+    multihull.dev/provider: kind
+  annotations:
+    multihull.dev/endpoint: http://127.0.0.1:30080
+spec:
+  type: NodePort
+  selector:
+    multihull.dev/service: live-mock
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+    nodePort: 30080
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: live-mock
+  namespace: multihull-live
+  labels:
+    multihull.dev/service: live-mock
+    multihull.dev/provider: kind
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: live-mock
+  minReplicas: 1
+  maxReplicas: 1
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300

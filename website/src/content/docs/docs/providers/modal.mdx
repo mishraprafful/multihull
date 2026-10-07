@@ -3,7 +3,7 @@ title: Modal
 description: Serverless containers via the Modal Python SDK.
 ---
 
-Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a class with `@modal.web_server` that execs the container command, then `app.deploy(name=f"multihull-{svc}")`. Nothing is shelled out.
+Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a serialized class with `@modal.web_server` that execs the container command, then `app.deploy(name=f"multihull-{svc}")`. `destroy` runs `modal app stop`, since the SDK has no stop call. Needs `modal>=1.6`.
 
 ```yaml
 - provider: modal-main
@@ -14,17 +14,35 @@ Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a
 
 Credentials: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or `~/.modal.toml`.
 
+Requirements:
+- `container.command` must be set. Modal does not run the image `CMD`.
+- The server must listen on `0.0.0.0`.
+- The Python running `hull deploy` must match the image's Python minor version, because the server class is serialized with cloudpickle.
+- An empty `resources.gpu` runs the container on CPU.
+
+## Private registries
+
+`registrySecret` names two environment variables. At deploy time their values become a `modal.Secret.from_dict` with `REGISTRY_USERNAME` and `REGISTRY_PASSWORD`, passed to `Image.from_registry`. Only the names reach plan output, state and the snapshot.
+
+```yaml
+modal:
+  environment: main
+  registrySecret: {usernameEnv: GHCR_USERNAME, passwordEnv: GHCR_TOKEN}
+```
+
+Modal pulls the image once, during deploy, and caches it. A short-lived token, such as `GITHUB_TOKEN` with `packages: read`, is enough.
+
 ## Translation
 
 | Spec field | Modal |
 |---|---|
 | `container.image` | `modal.Image.from_registry(ref@digest, secret=)` |
 | `container.command`, `port` | `@modal.web_server(port, startup_timeout)` wrapping `subprocess.Popen(command)` |
-| `resources.gpu` | `gpu="A10G"`, `gpu="L4"`, and so on |
+| `resources.gpu` | `gpu="A10G"`, `gpu="L4"`, and so on; `None` when empty |
 | `scaling.replicas` | `min_containers`, `max_containers`, `buffer_containers` |
 | `scaling.concurrency` | `@modal.concurrent(max_inputs=)` |
-| `container.health` | `startup_timeout`; the router probes `web_url + path` |
+| `container.health` | `startup_timeout` (at least 60 s); the router probes `web_url + path` |
 | `container.secrets` | `modal.Secret.from_dict`, named `multihull-<svc>` |
-| endpoint | `Function.web_url` plus proxy-auth headers injected by the router |
+| endpoint | `get_web_url()` with label `multihull-<svc>`, plus proxy-auth headers injected by the router |
 
 Ref stored in state: app name plus environment.

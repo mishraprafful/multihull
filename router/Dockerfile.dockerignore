@@ -1,0 +1,6 @@
+*
+!proto/discovery.proto
+!router/Cargo.toml
+!router/Cargo.lock
+!router/crates
+router/crates/**/target

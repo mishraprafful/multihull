@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, ClassVar, Protocol
@@ -23,6 +23,9 @@ from multihull.spec import GPU, KubernetesBlock
 FIELD_MANAGER = "multihull"
 NVIDIA_GPU_RESOURCE = "nvidia.com/gpu"
 HTTP_PORT_NAME = "http"
+SERVICE_PORT = 80
+ENDPOINT_ANNOTATION = "multihull.dev/endpoint"
+NODE_ADDRESS_PREFERENCE = ("ExternalIP", "InternalIP")
 SCALEDOWN_STABILIZATION_SECONDS = 300
 CPU_TARGET_UTILIZATION = 80
 
@@ -146,7 +149,7 @@ def gpu_scheduling(gpus: list[GPU]) -> dict[str, Any]:
 def container_spec(desired: Target) -> dict[str, Any]:
     container = desired.service.container
     resources = desired.service.resources
-    limits: dict[str, Any] = {NVIDIA_GPU_RESOURCE: resources.gpuCount}
+    limits: dict[str, Any] = {NVIDIA_GPU_RESOURCE: resources.gpuCount} if desired.gpus else {}
     requests: dict[str, Any] = {}
     if resources.memory:
         limits["memory"] = resources.memory
@@ -184,11 +187,12 @@ def container_spec(desired: Target) -> dict[str, Any]:
 
 def render_deployment(desired: Target) -> dict[str, Any]:
     block = kubernetes_block(desired)
-    pod_spec: dict[str, Any] = {
-        "containers": [container_spec(desired)],
-        "tolerations": [{"key": NVIDIA_GPU_RESOURCE, "operator": "Exists", "effect": "NoSchedule"}],
-        **gpu_scheduling(desired.gpus),
-    }
+    pod_spec: dict[str, Any] = {"containers": [container_spec(desired)]}
+    if desired.gpus:
+        pod_spec["tolerations"] = [
+            {"key": NVIDIA_GPU_RESOURCE, "operator": "Exists", "effect": "NoSchedule"}
+        ]
+        pod_spec.update(gpu_scheduling(desired.gpus))
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -207,25 +211,29 @@ def render_deployment(desired: Target) -> dict[str, Any]:
 
 def render_service(desired: Target) -> dict[str, Any]:
     block = kubernetes_block(desired)
+    port: dict[str, Any] = {
+        "name": HTTP_PORT_NAME,
+        "port": SERVICE_PORT,
+        "targetPort": HTTP_PORT_NAME,
+        "protocol": "TCP",
+    }
+    if block.nodePort is not None:
+        port["nodePort"] = block.nodePort
+    metadata: dict[str, Any] = {
+        "name": desired.name,
+        "namespace": block.namespace,
+        "labels": desired.labels,
+    }
+    if block.endpoint:
+        metadata["annotations"] = {ENDPOINT_ANNOTATION: block.endpoint}
     return {
         "apiVersion": "v1",
         "kind": "Service",
-        "metadata": {
-            "name": desired.name,
-            "namespace": block.namespace,
-            "labels": desired.labels,
-        },
+        "metadata": metadata,
         "spec": {
-            "type": "LoadBalancer",
+            "type": block.serviceType,
             "selector": {SERVICE_LABEL: desired.name},
-            "ports": [
-                {
-                    "name": HTTP_PORT_NAME,
-                    "port": 80,
-                    "targetPort": HTTP_PORT_NAME,
-                    "protocol": "TCP",
-                }
-            ],
+            "ports": [port],
         },
     }
 
@@ -339,7 +347,37 @@ def ref_for(desired: Target) -> Ref:
     ids = {"namespace": block.namespace, "deployment": desired.name, "service": desired.name}
     if block.context:
         ids["context"] = block.context
+    if block.endpoint:
+        ids["endpoint"] = block.endpoint
     return Ref(provider=desired.provider, type="kubernetes", service=desired.name, ids=ids)
+
+
+def node_address(nodes: list[dict[str, Any]]) -> str | None:
+    for kind in NODE_ADDRESS_PREFERENCE:
+        for node in nodes:
+            for address in (node.get("status") or {}).get("addresses") or []:
+                if address.get("type") == kind and address.get("address"):
+                    return str(address["address"])
+    return None
+
+
+def service_url(
+    service: dict[str, Any], cluster_host: str, nodes: Callable[[], list[dict[str, Any]]]
+) -> str:
+    annotations = (service.get("metadata") or {}).get("annotations") or {}
+    if annotations.get(ENDPOINT_ANNOTATION):
+        return str(annotations[ENDPOINT_ANNOTATION])
+    spec = service.get("spec") or {}
+    port = (spec.get("ports") or [{}])[0]
+    ingress = ((service.get("status") or {}).get("loadBalancer") or {}).get("ingress") or []
+    if ingress:
+        host = ingress[0].get("hostname") or ingress[0].get("ip")
+        return f"http://{host}:{port.get('port', SERVICE_PORT)}"
+    if spec.get("type") == "NodePort" and port.get("nodePort"):
+        host = node_address(nodes())
+        if host is not None:
+            return f"http://{host}:{port['nodePort']}"
+    return f"http://{cluster_host}:{port.get('port', SERVICE_PORT)}"
 
 
 def gpu_offers_from_nodes(nodes: list[dict[str, Any]]) -> list[GPUOffer]:
@@ -461,19 +499,17 @@ class KubernetesProvider:
         yield from client.pod_logs(ref.ids["namespace"], selector, int(since.total_seconds()))
 
     def endpoint(self, ref: Ref) -> Endpoint:
+        override = ref.ids.get("endpoint")
+        if override:
+            return Endpoint(url=override.rstrip("/"))
         client = self._require_client()
         service = client.get("v1", "Service", ref.ids["service"], ref.ids["namespace"])
         if service is None:
             raise RuntimeError(f"service {ref.ids['service']} not found")
-        port = (service.get("spec") or {}).get("ports", [{}])[0].get("port", 80)
-        ingress = ((service.get("status") or {}).get("loadBalancer") or {}).get("ingress") or []
-        host = None
-        if ingress:
-            host = ingress[0].get("hostname") or ingress[0].get("ip")
-        if host is None:
-            host = f"{ref.ids['service']}.{ref.ids['namespace']}.svc.cluster.local"
+        cluster_host = f"{ref.ids['service']}.{ref.ids['namespace']}.svc.cluster.local"
+        url = service_url(service, cluster_host, lambda: client.list("v1", "Node", None, ""))
         region = service.get("metadata", {}).get("labels", {}).get("topology.kubernetes.io/region")
-        return Endpoint(url=f"http://{host}:{port}", region=region)
+        return Endpoint(url=url.rstrip("/"), region=region)
 
     def gpu_inventory(self) -> list[GPUOffer]:
         client = self._require_client()

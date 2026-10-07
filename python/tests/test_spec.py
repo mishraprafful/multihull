@@ -90,13 +90,42 @@ def test_block_must_match_type(llama_raw: dict[str, Any]) -> None:
         ServiceSpec.model_validate(raw)
 
 
-def test_empty_gpu_rejected_unless_all_targets_docker(llama_raw: dict[str, Any]) -> None:
+def test_empty_gpu_rejected_for_gpu_only_targets(llama_raw: dict[str, Any]) -> None:
     raw = copy.deepcopy(llama_raw)
     raw["resources"]["gpu"] = []
-    with pytest.raises(ValidationError, match="gke-prod \\(kubernetes\\), modal-main \\(modal\\)"):
+    with pytest.raises(ValidationError, match="need a GPU class: runpod-eu \\(runpod\\);"):
         ServiceSpec.model_validate(raw)
-    raw["targets"].append({"provider": "local", "type": "docker", "priority": 4})
-    with pytest.raises(ValidationError, match="only when every target is of type docker"):
+    raw["targets"] = [t for t in raw["targets"] if t["type"] != "runpod"]
+    spec = ServiceSpec.model_validate(raw)
+    assert [t.type for t in spec.targets] == ["kubernetes", "modal"]
+
+
+def test_kubernetes_service_options(llama_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(llama_raw)
+    block = raw["targets"][0]["kubernetes"]
+    block.update(serviceType="NodePort", nodePort=30080, endpoint="http://127.0.0.1:30080")
+    kubernetes = ServiceSpec.model_validate(raw).target("gke-prod").kubernetes
+    assert kubernetes is not None
+    assert (kubernetes.serviceType, kubernetes.nodePort) == ("NodePort", 30080)
+    block["serviceType"] = "ClusterIP"
+    with pytest.raises(ValidationError, match="nodePort needs serviceType"):
+        ServiceSpec.model_validate(raw)
+    block.update(serviceType="NodePort", endpoint="127.0.0.1:30080")
+    with pytest.raises(ValidationError, match="endpoint"):
+        ServiceSpec.model_validate(raw)
+
+
+def test_modal_registry_secret_takes_env_names_only(llama_raw: dict[str, Any]) -> None:
+    raw = copy.deepcopy(llama_raw)
+    raw["targets"][1]["modal"]["registrySecret"] = {
+        "usernameEnv": "GHCR_USERNAME",
+        "passwordEnv": "GHCR_TOKEN",
+    }
+    modal = ServiceSpec.model_validate(raw).target("modal-main").modal
+    assert modal is not None and modal.registrySecret is not None
+    assert modal.registrySecret.passwordEnv == "GHCR_TOKEN"
+    raw["targets"][1]["modal"]["registrySecret"]["passwordEnv"] = "ghp-not-an-env-name"
+    with pytest.raises(ValidationError, match="passwordEnv"):
         ServiceSpec.model_validate(raw)
 
 

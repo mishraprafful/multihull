@@ -15,8 +15,8 @@ Multihull's promise is that a request keeps succeeding when a provider fails. Un
 | 1. Unit and golden | CI, laptop | nothing | translators render the right native payloads; core policies behave | every PR |
 | 2. Contract | CI, laptop | recorded HTTP cassettes | translators drive provider REST APIs correctly | every PR |
 | 3. Local end to end | CI, laptop | Docker | controller, snapshot, router and failover work together | every PR |
-| 4. Kubernetes end to end | CI nightly, laptop | kind | the Kubernetes translator applies, scales and recovers on a real API server | nightly |
-| 5. Live smoke | manual, weekly | provider credentials, small budget | Modal, RunPod, Baseten, Replicate `apply`, `status`, `destroy` work against the real services on CPU | weekly |
+| 4. Kubernetes end to end | CI, laptop | kind | the Kubernetes translator applies, scales and recovers on a real API server | every PR touching code |
+| 5. Live smoke | manual or PR label | provider credentials, small budget | Modal, RunPod, Baseten, Replicate `apply`, `status`, `destroy` work against the real services on CPU | on demand |
 | 6. Live GPU | manual, monthly | GPU credits | a real model serves through the router across two providers | monthly, before releases |
 | 7. Load | CI nightly | Docker | router overhead stays inside the plan's targets | nightly |
 
@@ -65,11 +65,11 @@ CI runs this on every PR that touches `python/`, `router/` or `testing/`. Target
 
 ## Layer 4: Kubernetes end to end
 
-Two kind clusters in one job act as two providers. The mock server runs on CPU, so the spec sets no GPU. Steps: deploy with both clusters as targets, route through the router from the runner, scale the primary Deployment to zero, assert failover, scale back, assert recovery. Also asserts: labels and `rediscover`, KEDA path when KEDA is installed in one cluster, Helm chart installs the router and controller into the cluster and serves from a file snapshot.
+`kind.yml`, on every PR touching code. One kind cluster is the primary and a `docker` target the secondary (spec `testing/live/specs/kind-docker.yaml`). The mock server runs on CPU, so the spec sets no GPU; the Service is a NodePort mapped to host port 30080 through kind `extraPortMappings`. Steps: `hull doctor`, deploy and wait ready, route through the release router from a file snapshot, scale the primary Deployment to zero under load, assert zero client 5xx and traffic on docker, scale back, assert recovery, `hull logs`, `hull destroy` leaves nothing. The chart is applied with `--dry-run=server` against the same cluster. Not yet covered: `rediscover`, KEDA, and the chart serving traffic in cluster.
 
 ## Layer 5: live smoke
 
-A manually triggered workflow, `e2e-live.yml`, with provider credentials as repository secrets and a hard budget: CPU only, 15-minute timeout, always runs `hull destroy` in an `if: always()` step, and a scheduled sweeper deletes anything tagged `multihull-e2e` older than one hour. Per provider: `doctor`, `deploy --apply`, wait ready, one request through the endpoint, `logs`, `destroy`, then assert nothing is left via `rediscover`. This is the layer that catches SDK drift, such as Modal private log APIs.
+`live-smoke.yml`, triggered by hand or by the `live-smoke` PR label, skipped without Modal secrets, one run at a time, 30-minute budget. Same suite with spec `kind-modal.yaml`: Modal is the secondary, running the private GHCR mock image on CPU with `min_containers: 1`. `hull destroy` and a `modal app stop` backstop run in `if: always()` steps, and a daily job stops `multihull-live-` apps older than two hours. This is the layer that catches SDK drift. RunPod, Baseten and Replicate join once their `apply` exists. Operating notes: `docs/runbooks/live-smoke.md`.
 
 ## Layer 6: live GPU
 
