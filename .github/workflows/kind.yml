@@ -1,0 +1,93 @@
+name: Kind
+
+on:
+  pull_request:
+    paths:
+      - 'python/**'
+      - 'router/**'
+      - 'proto/**'
+      - 'testing/**'
+      - 'charts/**'
+      - '.github/workflows/kind.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'python/**'
+      - 'router/**'
+      - 'proto/**'
+      - 'testing/**'
+      - 'charts/**'
+      - '.github/workflows/kind.yml'
+
+concurrency:
+  group: kind-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  KIND_CLUSTER: multihull-live
+  MOCK_IMAGE: multihull-mock-server:live
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER }}
+          config: testing/live/kind-config.yaml
+      - uses: azure/setup-helm@v4
+      - name: Chart applies against the kind API server
+        run: |
+          helm template multihull charts/multihull --namespace default \
+            | kubectl apply --dry-run=server --namespace default -f -
+          helm template multihull charts/multihull --namespace default \
+            --set controller.enabled=true \
+            --set controller.stateBackend.existingSecret=multihull-state \
+            --set controller.specConfigMap=multihull-spec \
+            | kubectl apply --dry-run=server --namespace default -f -
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build --release -p multihull
+        working-directory: router
+      - run: docker build -t "$MOCK_IMAGE" testing/mock-server
+      - run: kind load docker-image "$MOCK_IMAGE" --name "$KIND_CLUSTER"
+      - run: uv sync --locked --project testing/live
+      - name: Live suite (kind primary, docker secondary)
+        run: >
+          uv run --project testing/live pytest -q -x
+          -c testing/live/pyproject.toml testing/live/tests
+          --junitxml "$RUNNER_TEMP/live/results.xml"
+        env:
+          LIVE_SPEC: kind-docker
+          LIVE_MOCK_IMAGE: ${{ env.MOCK_IMAGE }}
+          LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
+          LIVE_WORKDIR: ${{ runner.temp }}/live
+      - name: Cluster state
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/live/logs"
+          kubectl get all,events --all-namespaces > "$RUNNER_TEMP/live/logs/cluster.txt" 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: kind-logs
+          path: |
+            ${{ runner.temp }}/live/logs
+            ${{ runner.temp }}/live/multihull.yaml
+            ${{ runner.temp }}/live/router.toml
+            ${{ runner.temp }}/live/summary.md
+            ${{ runner.temp }}/live/results.xml
+          if-no-files-found: ignore
