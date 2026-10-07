@@ -5,7 +5,7 @@ use arc_swap::ArcSwap;
 use clap::Parser;
 use config::{Config, LogFormat};
 use router_core::Snapshot;
-use router_cp::SnapshotSource;
+use router_cp::Transport;
 use router_obs::{TracingConfig, TracingFormat};
 use router_proxy::ProxyState;
 use router_tls::TlsReloader;
@@ -52,7 +52,18 @@ async fn main() -> anyhow::Result<()> {
         None => None,
     };
 
-    let source = SnapshotSource::parse(&config.snapshot.source)?;
+    let source = config.snapshot.parsed_source()?;
+    let source_auth = config
+        .snapshot
+        .security()
+        .resolve(&source)
+        .context("loading [snapshot] credentials")?;
+    if source.transport() == Transport::Plaintext {
+        tracing::warn!(
+            source = config.snapshot.source,
+            "snapshot source is plaintext (insecure = true); snapshots can carry provider credentials"
+        );
+    }
     let snapshot = Arc::new(ArcSwap::from_pointee(Snapshot::default()));
     let (snapshot_tx, mut snapshot_rx) = watch::channel(Arc::new(Snapshot::default()));
 
@@ -65,7 +76,11 @@ async fn main() -> anyhow::Result<()> {
     let (degraded_tx, degraded_rx) = tokio::sync::mpsc::channel(64);
     let source_task = {
         let node_id = config.node_id.clone();
-        tokio::spawn(async move { source.run(node_id, snapshot_tx, Some(degraded_rx)).await })
+        tokio::spawn(async move {
+            source
+                .run(node_id, snapshot_tx, Some(degraded_rx), source_auth)
+                .await
+        })
     };
 
     let housekeeping_task = {

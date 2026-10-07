@@ -1,3 +1,4 @@
+use crate::security::SourceAuth;
 use router_core::Snapshot;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,6 +10,8 @@ pub enum SnapshotError {
     InvalidSource(String),
     #[error("http snapshot fetch failed: {0}")]
     Http(String),
+    #[error("snapshot source token: {0}")]
+    Token(String),
     #[error("tls client setup failed: {0}")]
     Tls(#[from] router_tls::TlsError),
     #[error("io error reading {path}: {source}")]
@@ -31,6 +34,13 @@ pub enum SnapshotError {
     Status(#[from] tonic::Status),
     #[error("snapshot receiver dropped")]
     ReceiverDropped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transport {
+    File,
+    Plaintext,
+    Tls,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,18 +82,35 @@ impl SnapshotSource {
         }
     }
 
+    pub fn location(&self) -> String {
+        match self {
+            Self::Grpc(url) | Self::Http(url) => url.clone(),
+            Self::File(path) => path.display().to_string(),
+        }
+    }
+
+    pub fn transport(&self) -> Transport {
+        match self {
+            Self::File(_) => Transport::File,
+            Self::Grpc(url) | Self::Http(url) if url.starts_with("https://") => Transport::Tls,
+            Self::Grpc(_) | Self::Http(_) => Transport::Plaintext,
+        }
+    }
+
     pub async fn run(
         &self,
         node_id: String,
         tx: watch::Sender<Arc<Snapshot>>,
         degraded: Option<crate::grpc::DegradedReceiver>,
+        auth: SourceAuth,
     ) -> Result<(), SnapshotError> {
         match self {
             Self::File(path) => crate::file::watch(path.clone(), tx).await,
-            Self::Grpc(url) => crate::grpc::run(url.clone(), node_id, tx, degraded).await,
+            Self::Grpc(url) => crate::grpc::run(url.clone(), node_id, tx, degraded, auth).await,
             Self::Http(url) => {
-                let client = crate::http::client()?;
-                crate::http::poll(url.clone(), crate::http::DEFAULT_POLL_INTERVAL, client, tx).await
+                let poller = crate::http::Poller::new(url.clone(), crate::http::client(auth.tls))
+                    .with_token(auth.token);
+                crate::http::poll(poller, crate::http::DEFAULT_POLL_INTERVAL, tx).await
             }
         }
     }
@@ -119,6 +146,19 @@ mod tests {
         assert!(SnapshotSource::parse("").is_err());
     }
 
+    #[test]
+    fn transport_follows_the_scheme() {
+        let transport = |spec: &str| SnapshotSource::parse(spec).unwrap().transport();
+        assert_eq!(transport("grpc://controller:7700"), Transport::Plaintext);
+        assert_eq!(transport("grpcs://controller:7700"), Transport::Tls);
+        assert_eq!(
+            transport("http://bucket/snapshot.json"),
+            Transport::Plaintext
+        );
+        assert_eq!(transport("https://bucket/snapshot.json"), Transport::Tls);
+        assert_eq!(transport("./snapshot.json"), Transport::File);
+    }
+
     #[tokio::test]
     async fn http_source_stops_when_the_receiver_is_dropped() {
         let (tx, rx) = watch::channel(Arc::new(Snapshot::default()));
@@ -129,6 +169,7 @@ mod tests {
                 "node".into(),
                 tx,
                 None,
+                SourceAuth::anonymous().unwrap(),
             ),
         )
         .await

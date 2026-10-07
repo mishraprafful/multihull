@@ -32,6 +32,7 @@ pub struct MockUpstreamConfig {
     pub failing_status: StatusCode,
     pub stalling_first: usize,
     pub stall: Duration,
+    pub required_authorization: Option<String>,
 }
 
 impl Default for MockUpstreamConfig {
@@ -52,6 +53,7 @@ impl Default for MockUpstreamConfig {
             failing_status: StatusCode::OK,
             stalling_first: 0,
             stall: Duration::ZERO,
+            required_authorization: None,
         }
     }
 }
@@ -110,6 +112,11 @@ impl MockUpstreamConfig {
     pub fn failing_first(mut self, requests: usize, status: StatusCode) -> Self {
         self.failing_first = requests;
         self.failing_status = status;
+        self
+    }
+
+    pub fn with_required_authorization(mut self, value: impl Into<String>) -> Self {
+        self.required_authorization = Some(value.into());
         self
     }
 
@@ -261,6 +268,23 @@ async fn respond(
     counters: Counters,
 ) -> Result<Response<BoxBody<Bytes, std::io::Error>>, Infallible> {
     counters.requests.fetch_add(1, Ordering::SeqCst);
+    if let Some(required) = &config.required_authorization {
+        let presented = req
+            .headers()
+            .get("authorization")
+            .is_some_and(|value| value.as_bytes() == required.as_bytes());
+        if !presented {
+            let response = Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body(
+                    Full::new(Bytes::new())
+                        .map_err(|never| match never {})
+                        .boxed(),
+                )
+                .expect("valid response");
+            return Ok(response);
+        }
+    }
     let index = counters.since_reconfigure.fetch_add(1, Ordering::SeqCst);
     if index < config.stalling_first {
         tokio::time::sleep(config.stall).await;

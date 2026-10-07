@@ -2,6 +2,7 @@ use crate::proto::discovery_client::DiscoveryClient;
 use crate::proto::{
     control_message, router_message, Ack, ControlMessage, Hello, Nack, RouterMessage,
 };
+use crate::security::{BearerToken, SourceAuth};
 use crate::source::SnapshotError;
 use router_core::snapshot::Degraded;
 use router_core::Snapshot;
@@ -9,20 +10,56 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::Channel;
+use tonic::metadata::{Ascii, MetadataValue};
+use tonic::service::interceptor::InterceptedService;
+use tonic::service::Interceptor;
+use tonic::transport::{Channel, Endpoint};
+use tonic::{Request, Status};
 
 const INITIAL_RECONNECT: Duration = Duration::from_secs(1);
 const MAX_RECONNECT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub type DegradedReceiver = mpsc::Receiver<Degraded>;
+pub type AuthorizedChannel = InterceptedService<Channel, Authorize>;
 
-pub async fn connect(url: String) -> Result<DiscoveryClient<Channel>, SnapshotError> {
-    let channel = Channel::from_shared(url)
+#[derive(Clone, Default)]
+pub struct Authorize(Option<MetadataValue<Ascii>>);
+
+impl Authorize {
+    pub fn new(token: Option<&BearerToken>) -> Result<Self, SnapshotError> {
+        let Some(token) = token else {
+            return Ok(Self(None));
+        };
+        let mut value = MetadataValue::try_from(token.header_value().as_bytes())
+            .map_err(|_| SnapshotError::Token("the token is not valid gRPC metadata".into()))?;
+        value.set_sensitive(true);
+        Ok(Self(Some(value)))
+    }
+}
+
+impl Interceptor for Authorize {
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        if let Some(value) = &self.0 {
+            request
+                .metadata_mut()
+                .insert("authorization", value.clone());
+        }
+        Ok(request)
+    }
+}
+
+pub async fn connect(
+    url: String,
+    auth: &SourceAuth,
+) -> Result<DiscoveryClient<AuthorizedChannel>, SnapshotError> {
+    let authorize = Authorize::new(auth.token.as_ref())?;
+    let channel = Endpoint::from_shared(url)
         .map_err(|e| SnapshotError::InvalidSource(e.to_string()))?
-        .connect_timeout(Duration::from_secs(5))
-        .connect()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .connect_with_connector(router_tls::h2_connector(CONNECT_TIMEOUT, auth.tls.clone()))
         .await?;
-    Ok(DiscoveryClient::new(channel))
+    Ok(DiscoveryClient::with_interceptor(channel, authorize))
 }
 
 pub async fn run(
@@ -30,14 +67,19 @@ pub async fn run(
     node_id: String,
     tx: watch::Sender<Arc<Snapshot>>,
     mut degraded: Option<DegradedReceiver>,
+    auth: SourceAuth,
 ) -> Result<(), SnapshotError> {
     let mut backoff = INITIAL_RECONNECT;
     loop {
-        match stream_once(&url, &node_id, &tx, &mut degraded).await {
+        match stream_once(&url, &node_id, &tx, &mut degraded, &auth).await {
             Ok(()) => backoff = INITIAL_RECONNECT,
             Err(SnapshotError::ReceiverDropped) => return Err(SnapshotError::ReceiverDropped),
             Err(error) => {
-                tracing::warn!(%error, retry_in = ?backoff, "discovery stream failed");
+                tracing::warn!(
+                    error = %error_chain(&error),
+                    retry_in = ?backoff,
+                    "discovery stream failed"
+                );
             }
         }
         tokio::time::sleep(backoff).await;
@@ -45,13 +87,28 @@ pub async fn run(
     }
 }
 
-async fn stream_once(
+pub fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let cause_text = cause.to_string();
+        if !text.ends_with(&cause_text) {
+            text.push_str(": ");
+            text.push_str(&cause_text);
+        }
+        source = cause.source();
+    }
+    text
+}
+
+pub async fn stream_once(
     url: &str,
     node_id: &str,
     tx: &watch::Sender<Arc<Snapshot>>,
     degraded: &mut Option<DegradedReceiver>,
+    auth: &SourceAuth,
 ) -> Result<(), SnapshotError> {
-    let mut client = connect(url.to_string()).await?;
+    let mut client = connect(url.to_string(), auth).await?;
     let (outbound_tx, outbound_rx) = mpsc::channel::<RouterMessage>(16);
     let last_version = tx.borrow().version;
     outbound_tx
@@ -214,6 +271,32 @@ mod tests {
         assert!(next_degraded(&mut some).await.is_some());
         drop(tx);
         assert!(next_degraded(&mut some).await.is_none());
+    }
+
+    #[test]
+    fn authorize_adds_a_sensitive_bearer_header_only_with_a_token() {
+        let token = BearerToken::new("abc").unwrap();
+        let mut with = Authorize::new(Some(&token)).unwrap();
+        let request = with.call(Request::new(())).unwrap();
+        let value = request.metadata().get("authorization").unwrap();
+        assert_eq!(value.to_str().unwrap(), "Bearer abc");
+        assert!(value.is_sensitive());
+        let mut without = Authorize::new(None).unwrap();
+        let request = without.call(Request::new(())).unwrap();
+        assert!(request.metadata().get("authorization").is_none());
+    }
+
+    #[test]
+    fn error_chain_joins_sources_once() {
+        let inner = std::io::Error::other("certificate unknown");
+        let outer = SnapshotError::Io {
+            path: "/ca.pem".into(),
+            source: inner,
+        };
+        assert_eq!(
+            error_chain(&outer),
+            "io error reading /ca.pem: certificate unknown"
+        );
     }
 
     #[test]
