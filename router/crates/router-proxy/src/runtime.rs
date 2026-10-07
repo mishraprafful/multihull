@@ -126,6 +126,15 @@ impl EndpointRuntime {
         lock(&self.circuit).admit(now, rng)
     }
 
+    pub fn try_admit(
+        self: &Arc<Self>,
+        now: Duration,
+        rng: &mut impl Rng,
+    ) -> Option<OutstandingGuard> {
+        let reserved = self.try_reserve()?;
+        self.admit(now, rng).then_some(reserved)
+    }
+
     pub fn record_outcome(&self, outcome: Outcome, now: Duration, rng: &mut impl Rng) {
         lock(&self.circuit).record(outcome, now, rng);
         if outcome == Outcome::Capacity {
@@ -383,6 +392,10 @@ impl Runtime {
     ) {
         let now = self.now();
         self.record_attempt(endpoint, outcome, status, now, rng);
+        self.count_request(route_id, endpoint, label);
+    }
+
+    pub fn count_request(&self, route_id: &str, endpoint: &Endpoint, label: &'static str) {
         metrics::counter!(
             router_obs::metrics::REQUESTS_TOTAL,
             router_obs::metrics::labels::ROUTE => route_id.to_string(),
@@ -836,6 +849,33 @@ mod tests {
         assert!(!rt.has_headroom());
         drop(guards);
         assert!(rt.try_reserve().is_some());
+    }
+
+    #[test]
+    fn a_half_open_trial_is_kept_until_a_slot_is_reserved() {
+        let runtime = Runtime::default();
+        let rt = runtime.endpoint(&endpoint("a"));
+        let mut ramp_says_no = || 0.99;
+        let opened = Duration::from_secs(100);
+        for _ in 0..5 {
+            rt.record_outcome(Outcome::Fatal, opened, &mut ramp_says_no);
+        }
+        let half_open = opened + Duration::from_secs(10);
+        assert_eq!(rt.circuit_state(half_open).label(), "half_open");
+
+        let full: Vec<OutstandingGuard> =
+            (0..rt.limit()).filter_map(|_| rt.try_reserve()).collect();
+        assert!(rt.try_admit(half_open, &mut ramp_says_no).is_none());
+        drop(full);
+
+        let trial = rt.try_admit(half_open, &mut ramp_says_no);
+        assert!(
+            trial.is_some(),
+            "the trial was spent while the limit was full"
+        );
+        assert_eq!(rt.outstanding(), 1);
+        assert!(rt.try_admit(half_open, &mut ramp_says_no).is_none());
+        assert_eq!(rt.outstanding(), 1);
     }
 
     #[test]

@@ -1,14 +1,17 @@
 mod common;
 
 use bytes::Bytes;
-use common::{endpoint, start_proxy};
+use common::{endpoint, single_route, start_proxy, start_proxy_configured};
 use http_body_util::{BodyExt, Empty};
 use hyper::body::Frame;
 use hyper::Request;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
+use router_core::circuit::CircuitConfig;
+use router_core::snapshot::Endpoint;
 use router_obs::prometheus::PrometheusHandle;
 use router_proxy::body::{ERROR_HEADER, ERROR_REASON_HEADER, UPSTREAM_DISCONNECTED};
+use router_proxy::{PhaseTimeouts, ProxyConfig};
 use router_testkit::{MockUpstream, MockUpstreamConfig};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -388,5 +391,128 @@ async fn each_streamed_request_counts_once_with_its_final_outcome() {
             ("success".to_string(), 2),
             (UPSTREAM_DISCONNECTED.to_string(), 1),
         ])
+    );
+}
+
+const TOTAL_TIMEOUT: &str = "total_timeout";
+
+fn capped_by_a_short_total_timeout() -> ProxyConfig {
+    let total = Duration::from_millis(300);
+    ProxyConfig {
+        timeouts: PhaseTimeouts {
+            first_byte: total,
+            total,
+            ..PhaseTimeouts::default()
+        },
+        circuit: CircuitConfig {
+            consecutive_failures: 1,
+            ..CircuitConfig::default()
+        },
+        ..ProxyConfig::default()
+    }
+}
+
+async fn healthy_stream_outliving_the_total_timeout(
+    id: &str,
+    content_type: &str,
+) -> (MockUpstream, Endpoint, common::RunningProxy) {
+    let upstream = MockUpstream::start(MockUpstreamConfig {
+        sse_chunk_interval: Duration::from_millis(20),
+        ..MockUpstreamConfig::default()
+            .with_sse_chunks((1..=500).map(|n| format!("{{\"n\":{n}}}")).collect())
+            .with_stream_content_type(content_type)
+    })
+    .await
+    .unwrap();
+    let target = endpoint(id, "modal", upstream.url(), 1);
+    let proxy = start_proxy_configured(
+        single_route(vec![target.clone()]),
+        capped_by_a_short_total_timeout(),
+    )
+    .await;
+    (upstream, target, proxy)
+}
+
+fn assert_no_failure_recorded(proxy: &common::RunningProxy, target: &Endpoint) {
+    let status = proxy.state.runtime.status(target).unwrap();
+    assert_eq!(status.circuit, "closed");
+    assert!(!status.provider_circuit_open);
+}
+
+#[tokio::test]
+async fn sse_stream_reaching_the_total_timeout_ends_with_a_non_retryable_event() {
+    metrics();
+    let (upstream, target, proxy) =
+        healthy_stream_outliving_the_total_timeout("total-sse", "text/event-stream").await;
+    let text = stream_once(&proxy).await;
+
+    let events: Vec<&str> = text
+        .split("\n\n")
+        .filter(|event| !event.is_empty())
+        .collect();
+    assert!(events.len() > 2, "{text}");
+    assert_eq!(events[0], "data: {\"n\":1}");
+    let terminal = terminal_payload(events[events.len() - 2]);
+    assert_eq!(terminal["error"]["type"], TOTAL_TIMEOUT);
+    assert_eq!(terminal["error"]["retryable"], false);
+    assert_eq!(terminal["error"]["provider"], "modal");
+    assert_eq!(terminal["error"]["reason"], TOTAL_TIMEOUT);
+    assert_eq!(events[events.len() - 1], "data: [DONE]");
+    assert!(!text.contains(UPSTREAM_DISCONNECTED), "{text}");
+    assert_eq!(upstream.request_count(), 1);
+    assert_no_failure_recorded(&proxy, &target);
+    assert_eq!(
+        requests_by_outcome("total-sse"),
+        BTreeMap::from([(TOTAL_TIMEOUT.to_string(), 1)])
+    );
+}
+
+#[tokio::test]
+async fn http2_stream_reaching_the_total_timeout_names_it_in_the_error_trailer() {
+    let (upstream, target, proxy) =
+        healthy_stream_outliving_the_total_timeout("total-h2", "application/octet-stream").await;
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new())
+        .http2_only(true)
+        .build_http();
+    let request = Request::get(proxy.url("/v1/stream"))
+        .header("te", "trailers")
+        .body(Empty::new())
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.version(), http::Version::HTTP_2);
+    assert_eq!(response.status(), 200);
+
+    let (text, trailers) = collect_frames(response.into_body()).await;
+    assert!(text.starts_with("data: {\"n\":1}\n\n"), "{text}");
+    let trailers = trailers.expect("error trailer");
+    assert_eq!(trailers.get(ERROR_HEADER).unwrap(), TOTAL_TIMEOUT);
+    assert_eq!(trailers.get(ERROR_REASON_HEADER).unwrap(), TOTAL_TIMEOUT);
+    assert_eq!(upstream.request_count(), 1);
+    assert_no_failure_recorded(&proxy, &target);
+}
+
+#[tokio::test]
+async fn http1_body_reaching_the_total_timeout_is_cut_without_blaming_the_endpoint() {
+    metrics();
+    let (upstream, target, proxy) =
+        healthy_stream_outliving_the_total_timeout("total-h1", "application/octet-stream").await;
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    let request = Request::get(proxy.url("/v1/stream"))
+        .body(Empty::new())
+        .unwrap();
+    let response = client.request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let collected = tokio::time::timeout(Duration::from_secs(5), response.into_body().collect())
+        .await
+        .unwrap();
+    assert!(
+        collected.is_err(),
+        "a capped plain body must not look complete"
+    );
+    assert_eq!(upstream.request_count(), 1);
+    assert_no_failure_recorded(&proxy, &target);
+    assert_eq!(
+        requests_by_outcome("total-h1"),
+        BTreeMap::from([(TOTAL_TIMEOUT.to_string(), 1)])
     );
 }

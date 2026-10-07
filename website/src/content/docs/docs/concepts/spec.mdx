@@ -26,7 +26,7 @@ Never in the file. Each provider block resolves credentials from its native loca
 
 ## Route API keys
 
-`route.auth.apiKeys.from` names where keys live: `env:NAME` holds a comma-separated list, `file:PATH` one key per line (a relative path resolves against the working directory). Each key is `hull_<id>_<secret>`: the id is ASCII letters and digits, the secret printable ASCII without spaces. `hull` rejects any other shape before it deploys or publishes a snapshot, and only `blake3("<id>_<secret>")` reaches the router. See [Router overview](/docs/router/overview/#auth).
+`route.auth.apiKeys.from` names where keys live: `env:NAME` holds a comma-separated list, `file:PATH` one key per line (`#` starts a comment line; a relative path resolves against the working directory). Each key is `hull_<id>_<secret>`: the id is ASCII letters and digits, the secret printable ASCII without spaces. `hull` rejects any other shape, and a source that yields no keys, before it deploys or publishes a snapshot, and only `blake3("<id>_<secret>")` reaches the router. See [Router overview](/docs/router/overview/#auth).
 
 ## Full example
 

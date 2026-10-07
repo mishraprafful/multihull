@@ -19,6 +19,52 @@ FIXTURES = Path(__file__).parent / "fixtures"
 GOLDEN = Path(__file__).parent / "golden"
 
 
+EMPTY_KEY_SOURCES = (
+    "unset-env",
+    "empty-env",
+    "blank-env",
+    "missing-file",
+    "empty-file",
+    "comments-only-file",
+)
+
+
+@pytest.fixture(autouse=True)
+def llama_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLAMA_API_KEYS", "hull_fixture_one")
+
+
+@pytest.fixture(params=EMPTY_KEY_SOURCES)
+def empty_key_source(
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    keys_file = tmp_path / "route-keys"
+    if request.param == "unset-env":
+        monkeypatch.delenv("ROUTE_KEYS", raising=False)
+        return "env:ROUTE_KEYS"
+    if request.param == "empty-env":
+        monkeypatch.setenv("ROUTE_KEYS", "")
+        return "env:ROUTE_KEYS"
+    if request.param == "blank-env":
+        monkeypatch.setenv("ROUTE_KEYS", " , ,")
+        return "env:ROUTE_KEYS"
+    if request.param == "empty-file":
+        keys_file.write_text("")
+    if request.param == "comments-only-file":
+        keys_file.write_text("# rotated keys go here\n\n  # one per line\n")
+    return f"file:{keys_file}"
+
+
+@pytest.fixture
+def empty_key_raw(llama_raw: dict[str, Any], empty_key_source: str) -> dict[str, Any]:
+    llama_raw["route"]["auth"]["apiKeys"]["from"] = empty_key_source
+    return llama_raw
+
+
+def no_keys_message(source: str) -> str:
+    return f"route `llama-8b` sets auth.apiKeys but {source} resolved to no keys"
+
+
 @pytest.fixture
 def llama_spec() -> ServiceSpec:
     return specmod.load(FIXTURES / "llama-8b.yaml")

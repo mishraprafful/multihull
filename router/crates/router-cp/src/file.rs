@@ -113,6 +113,7 @@ mod tests {
             router_core::snapshot::FailoverPolicy::Priority
         );
         assert!(route.auth.api_key_hashes.is_empty());
+        assert!(!route.auth.required);
         let sticky = route.sticky.as_ref().unwrap();
         assert_eq!(sticky.ttl_seconds, 300);
         assert_eq!(sticky.mode, router_core::snapshot::StickyMode::Endpoint);
@@ -123,6 +124,20 @@ mod tests {
         let secondary = snapshot.find_endpoint("e2e-three/secondary").unwrap();
         assert_eq!(secondary.health, router_core::snapshot::Health::Down);
         assert!(!secondary.accepts_traffic());
+    }
+
+    #[test]
+    fn load_reads_whether_a_route_requires_api_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.json");
+        let document = CONTROL_PLANE_DOCUMENT.replace(
+            r#""auth": {"api_key_hashes": []}"#,
+            r#""auth": {"api_key_hashes": [], "required": true}"#,
+        );
+        std::fs::write(&path, document).unwrap();
+        let snapshot = load(&path).unwrap();
+        assert!(snapshot.routes[0].auth.required);
+        assert!(snapshot.routes[0].auth.api_key_hashes.is_empty());
     }
 
     const CONTROL_PLANE_DOCUMENT: &str = r#"{

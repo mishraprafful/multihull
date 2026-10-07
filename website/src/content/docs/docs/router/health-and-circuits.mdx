@@ -41,6 +41,8 @@ data: [DONE]
 
 and ends the response cleanly, so SDKs never parse truncated JSON and can retry with the same `Idempotency-Key`. A clean upstream end flushes any trailing bytes unchanged. Non-SSE streams never end as if complete: HTTP/2 requests with `te: trailers` or a gRPC content type get an `x-hull-error: upstream_disconnected` trailer, other HTTP/2 streams are reset (`RST_STREAM`) and HTTP/1 connections are closed. Each case counts as `router_requests_total{outcome="upstream_disconnected"}` and feeds the endpoint circuit as `Transient`.
 
+`timeouts.total` (600 s) caps the whole request, so a stream still running when it expires is not an upstream failure. It ends the same way, but the final event reads `"type":"total_timeout","retryable":false` with `"reason":"total_timeout"` and the trailer is `x-hull-error: total_timeout`, since a retry would hit the same cap. It counts as `router_requests_total{outcome="total_timeout"}` and feeds neither the endpoint nor the provider circuit.
+
 A response whose body is still open after its first frame settles its outcome once, when the body ends: `success` on a clean end, `upstream_disconnected` (`Transient`) when the upstream drops. A caller that leaves after bytes reached it also counts as `success`, since the upstream had not failed (OpenAI SDKs close right after `data: [DONE]`); one that leaves before the first byte counts as `client_abort`, which the circuit ignores. Time to first token is still measured at the first byte, and complete responses are recorded as soon as they arrive.
 
 ## Circuit per endpoint

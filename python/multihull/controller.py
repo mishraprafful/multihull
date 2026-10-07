@@ -16,6 +16,7 @@ import grpc
 from multihull import discovery, engine
 from multihull._proto import discovery_pb2 as pb
 from multihull._proto import discovery_pb2_grpc as pb_grpc
+from multihull.apikeys import ApiKeyError
 from multihull.deploy import DEFAULT_SNAPSHOT_PATH
 from multihull.providers.base import Observed, Provider, Ref, ScaleRefused
 from multihull.spec import ServiceSpec, TargetSpec
@@ -425,6 +426,8 @@ class Controller:
         while True:
             try:
                 await self.reconcile_once()
+            except ApiKeyError as exc:
+                log.error("snapshot not published: %s", exc)
             except Exception:
                 log.exception("reconcile failed")
             await asyncio.sleep(self.interval.total_seconds())

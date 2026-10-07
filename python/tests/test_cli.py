@@ -5,15 +5,17 @@ import shutil
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
 from multihull import spec as specmod
 from multihull.cli import app
+from multihull.controller import Controller
 from multihull.providers import docker as dockermod
 from multihull.providers.base import Ref
 from multihull.state import LocalState, StateRecord
-from tests.conftest import FIXTURES
+from tests.conftest import FIXTURES, no_keys_message
 from tests.fake_docker import FakeDockerClient
 from tests.fake_modal import FakeAuthError, FakeModal
 from tests.fakes import FakeProvider
@@ -125,7 +127,6 @@ def test_status_rebuilds_missing_state_via_rediscover(
 
 
 def test_snapshot_command(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.delenv("LLAMA_API_KEYS", raising=False)
     monkeypatch.delenv("MODAL_PROXY_TOKEN_ID", raising=False)
     path = copy_fixture(tmp_path)
     state_path = tmp_path / "state.db"
@@ -161,6 +162,35 @@ def test_snapshot_command_rejects_a_malformed_route_key(tmp_path: Path, monkeypa
     assert result.exit_code == 1, result.output
     assert "entry 2 of env:LLAMA_API_KEYS" in result.output
     assert "leakedsecretvalue" not in result.output
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("command", ["deploy", "destroy", "snapshot", "controller"])
+def test_commands_refuse_a_route_whose_key_source_yields_no_keys(
+    command: str,
+    empty_key_raw: dict,
+    empty_key_source: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def never_serve(self: Controller, listen: str) -> None:
+        return None
+
+    monkeypatch.setattr(Controller, "run", never_serve)
+    path = tmp_path / "multihull.yaml"
+    path.write_text(yaml.safe_dump(empty_key_raw))
+    out = tmp_path / "snapshot.json"
+    args = {
+        "deploy": ["deploy", str(path), "--snapshot-out", str(out)],
+        "destroy": ["destroy", str(path), "--yes", "--snapshot-out", str(out)],
+        "snapshot": ["snapshot", str(path), "--out", str(out)],
+        "controller": ["controller", str(path), "--snapshot-out", str(out)],
+    }[command]
+    result = runner.invoke(
+        app, [*args, "--state", str(tmp_path / "state.db")], env={"COLUMNS": "1000"}
+    )
+    assert result.exit_code == 1, result.output
+    assert no_keys_message(empty_key_source) in result.output
     assert not out.exists()
 
 

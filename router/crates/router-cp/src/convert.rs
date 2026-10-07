@@ -90,6 +90,7 @@ impl From<proto::Auth> for core::Auth {
     fn from(value: proto::Auth) -> Self {
         Self {
             api_key_hashes: value.api_key_hashes,
+            required: value.required,
         }
     }
 }
@@ -98,6 +99,7 @@ impl From<core::Auth> for proto::Auth {
     fn from(value: core::Auth) -> Self {
         Self {
             api_key_hashes: value.api_key_hashes,
+            required: value.required,
         }
     }
 }
@@ -291,6 +293,7 @@ mod tests {
                 },
                 auth: core::Auth {
                     api_key_hashes: vec!["h1".into()],
+                    required: true,
                 },
                 sticky: Some(core::Sticky {
                     key: "header:X-Session-Id".into(),
@@ -329,6 +332,7 @@ mod tests {
             proto.routes[0].endpoints[0].r#type,
             proto::EndpointType::Modal as i32
         );
+        assert!(proto.routes[0].auth.as_ref().unwrap().required);
         let back: core::Snapshot = proto.into();
         assert_eq!(back, original);
     }

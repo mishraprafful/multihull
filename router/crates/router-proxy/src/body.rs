@@ -17,6 +17,7 @@ use crate::state::ProxyState;
 pub type ProxyBody = BoxBody<Bytes, BodyError>;
 
 pub const UPSTREAM_DISCONNECTED: &str = "upstream_disconnected";
+pub const TOTAL_TIMEOUT: &str = "total_timeout";
 pub const ERROR_HEADER: &str = "x-hull-error";
 pub const ERROR_REASON_HEADER: &str = "x-hull-error-reason";
 pub const MAX_HELD_EVENT_BYTES: usize = 1024 * 1024;
@@ -35,9 +36,20 @@ impl BodyError {
     pub fn reason(&self) -> &'static str {
         match self {
             BodyError::IdleTimeout => "idle_timeout",
-            BodyError::TotalTimeout => "total_timeout",
+            BodyError::TotalTimeout => TOTAL_TIMEOUT,
             BodyError::Upstream(_) => "disconnect",
         }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            BodyError::TotalTimeout => TOTAL_TIMEOUT,
+            BodyError::IdleTimeout | BodyError::Upstream(_) => UPSTREAM_DISCONNECTED,
+        }
+    }
+
+    pub fn retryable(&self) -> bool {
+        !matches!(self, BodyError::TotalTimeout)
     }
 }
 
@@ -114,14 +126,31 @@ impl StreamContext {
         );
     }
 
+    fn settle_without_outcome(&mut self, label: &'static str) {
+        if self.deferred_status.take().is_some() {
+            self.state
+                .runtime
+                .count_request(&self.route_id, &self.endpoint, label);
+        }
+    }
+
+    fn settle_failure(&mut self, error: &BodyError) {
+        match error {
+            BodyError::TotalTimeout => self.settle_without_outcome(TOTAL_TIMEOUT),
+            BodyError::IdleTimeout | BodyError::Upstream(_) => {
+                self.settle(Outcome::Transient, UPSTREAM_DISCONNECTED)
+            }
+        }
+    }
+
     fn record_disconnect(&mut self, error: &BodyError) {
-        self.settle(Outcome::Transient, UPSTREAM_DISCONNECTED);
+        self.settle_failure(error);
         tracing::warn!(
             route = %self.route_id,
             endpoint = %self.endpoint.id,
             provider = %self.endpoint.provider,
             reason = error.reason(),
-            "upstream disconnected mid-stream"
+            "stream ended before the upstream finished"
         );
     }
 
@@ -129,15 +158,12 @@ impl StreamContext {
         match self.termination {
             Termination::SseEvent => Some(Frame::data(sse_terminal_event(
                 &self.endpoint.provider,
-                error.reason(),
+                error,
                 at_boundary,
             ))),
             Termination::Http2Trailers => {
                 let mut trailers = HeaderMap::new();
-                trailers.insert(
-                    ERROR_HEADER,
-                    HeaderValue::from_static(UPSTREAM_DISCONNECTED),
-                );
+                trailers.insert(ERROR_HEADER, HeaderValue::from_static(error.kind()));
                 trailers.insert(
                     ERROR_REASON_HEADER,
                     HeaderValue::from_static(error.reason()),
@@ -149,13 +175,13 @@ impl StreamContext {
     }
 }
 
-pub fn sse_terminal_event(provider: &str, reason: &str, at_boundary: bool) -> Bytes {
+pub fn sse_terminal_event(provider: &str, error: &BodyError, at_boundary: bool) -> Bytes {
     let payload = serde_json::json!({
         "error": {
-            "type": UPSTREAM_DISCONNECTED,
-            "retryable": true,
+            "type": error.kind(),
+            "retryable": error.retryable(),
             "provider": provider,
-            "reason": reason,
+            "reason": error.reason(),
         }
     });
     let separator = if at_boundary { "" } else { "\n\n" };
@@ -319,7 +345,7 @@ impl TimedBody {
             return Poll::Ready(Some(Err(error)));
         };
         if !self.committed {
-            context.settle(Outcome::Transient, UPSTREAM_DISCONNECTED);
+            context.settle_failure(&error);
             return Poll::Ready(Some(Err(error)));
         }
         context.record_disconnect(&error);
@@ -488,16 +514,14 @@ mod tests {
 
     #[test]
     fn terminal_event_starts_at_a_boundary_unless_the_client_is_mid_event() {
-        let mid_event = sse_terminal_event("modal", "disconnect", false);
+        let mid_event = sse_terminal_event("modal", &BodyError::IdleTimeout, false);
         assert!(mid_event.starts_with(b"\n\ndata: {"));
-        let at_boundary = sse_terminal_event("modal", "disconnect", true);
+        let at_boundary = sse_terminal_event("modal", &BodyError::IdleTimeout, true);
         assert_eq!(&mid_event[2..], &at_boundary[..]);
     }
 
-    #[test]
-    fn terminal_event_names_the_provider_and_ends_with_done() {
-        let text =
-            String::from_utf8(sse_terminal_event("modal", "disconnect", true).to_vec()).unwrap();
+    fn terminal_error(error: &BodyError) -> serde_json::Value {
+        let text = String::from_utf8(sse_terminal_event("modal", error, true).to_vec()).unwrap();
         assert!(text.starts_with("data: {"));
         assert!(text.ends_with("\n\ndata: [DONE]\n\n"));
         let payload = text
@@ -508,10 +532,25 @@ mod tests {
             .strip_prefix("data: ")
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(payload).unwrap();
-        assert_eq!(parsed["error"]["type"], UPSTREAM_DISCONNECTED);
-        assert_eq!(parsed["error"]["retryable"], true);
-        assert_eq!(parsed["error"]["provider"], "modal");
-        assert_eq!(parsed["error"]["reason"], "disconnect");
+        parsed["error"].clone()
+    }
+
+    #[test]
+    fn terminal_event_names_the_provider_and_ends_with_done() {
+        let error = terminal_error(&BodyError::IdleTimeout);
+        assert_eq!(error["type"], UPSTREAM_DISCONNECTED);
+        assert_eq!(error["retryable"], true);
+        assert_eq!(error["provider"], "modal");
+        assert_eq!(error["reason"], "idle_timeout");
+    }
+
+    #[test]
+    fn total_timeout_is_its_own_non_retryable_error() {
+        let error = terminal_error(&BodyError::TotalTimeout);
+        assert_eq!(error["type"], TOTAL_TIMEOUT);
+        assert_eq!(error["retryable"], false);
+        assert_eq!(error["provider"], "modal");
+        assert_eq!(error["reason"], TOTAL_TIMEOUT);
     }
 
     fn push_all(framer: &mut EventFramer, chunks: &[&'static str]) -> Vec<Bytes> {
