@@ -161,6 +161,7 @@ pub struct Circuit {
     state: State,
     consecutive_failures: u32,
     buckets: VecDeque<Bucket>,
+    ejected_by_probe: bool,
 }
 
 impl Default for Circuit {
@@ -176,6 +177,7 @@ impl Circuit {
             state: State::Closed,
             consecutive_failures: 0,
             buckets: VecDeque::new(),
+            ejected_by_probe: false,
         }
     }
 
@@ -242,6 +244,7 @@ impl Circuit {
 
     pub fn eject(&mut self, now: Duration, rng: &mut impl Rng) -> bool {
         self.advance(now);
+        self.ejected_by_probe = true;
         match self.state {
             State::Closed => {
                 self.open(now, 0, rng);
@@ -267,11 +270,23 @@ impl Circuit {
         }
     }
 
-    pub fn restore(&mut self) -> bool {
-        if self.state.is_closed() {
+    pub fn ejected_by_probe(&self) -> bool {
+        self.ejected_by_probe
+    }
+
+    pub fn release(&mut self, now: Duration) -> bool {
+        if !std::mem::take(&mut self.ejected_by_probe) {
             return false;
         }
-        self.close();
+        let State::Open { backoff_n, .. } = self.state else {
+            return false;
+        };
+        self.state = State::HalfOpen {
+            admitted: 0,
+            started: now,
+            probe_successes: 0,
+            backoff_n,
+        };
         true
     }
 
@@ -792,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn eject_opens_from_closed_and_half_open_and_restore_closes() {
+    fn eject_opens_from_closed_and_half_open_and_release_half_opens() {
         let mut circuit = Circuit::default();
         let mut rng = ZeroRng;
         assert!(circuit.eject(secs(1), &mut rng));
@@ -814,9 +829,31 @@ mod tests {
                 wait: secs(10)
             }
         );
-        assert!(circuit.restore());
-        assert!(circuit.state().is_closed());
-        assert!(!circuit.restore());
+        assert!(circuit.ejected_by_probe());
+        assert!(circuit.release(secs(8)));
+        assert_eq!(
+            circuit.state(),
+            State::HalfOpen {
+                admitted: 0,
+                started: secs(8),
+                probe_successes: 0,
+                backoff_n: 1
+            }
+        );
+        assert!(!circuit.ejected_by_probe());
+        assert!(!circuit.release(secs(9)));
+    }
+
+    #[test]
+    fn release_leaves_a_circuit_opened_by_traffic_alone() {
+        let mut circuit = Circuit::default();
+        let mut rng = ZeroRng;
+        for i in 0..5 {
+            circuit.record(Outcome::Transient, millis(i), &mut rng);
+        }
+        assert!(!circuit.release(secs(1)));
+        assert!(circuit.state().is_open());
+        assert!(!circuit.release(secs(1)));
     }
 
     #[test]

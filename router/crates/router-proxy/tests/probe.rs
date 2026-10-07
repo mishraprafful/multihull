@@ -1,6 +1,6 @@
 mod common;
 
-use common::{endpoint, start_proxy};
+use common::{endpoint, get, start_proxy};
 use http::StatusCode;
 use router_core::probe::ProbeOutcome;
 use router_core::snapshot::EndpointType;
@@ -53,7 +53,7 @@ async fn probe_classifies_status_connect_failure_and_runpod_warming() {
 }
 
 #[tokio::test]
-async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_close_it() {
+async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_allow_a_half_open_trial() {
     let upstream = MockUpstream::start(
         MockUpstreamConfig::default().with_status(StatusCode::SERVICE_UNAVAILABLE),
     )
@@ -88,10 +88,18 @@ async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_close_it() {
     }
     probe_all(&proxy.state).await;
     let status = proxy.state.runtime.status(&target).unwrap();
-    assert_eq!(status.circuit, "closed");
+    assert_eq!(status.circuit, "half_open");
     assert_eq!(status.probe.probes, 6);
     assert!(proxy
         .state
         .runtime
         .endpoint_healthy(&target, proxy.state.runtime.now()));
+
+    for _ in 0..3 {
+        assert_eq!(get(&proxy, "/v1/x", &[]).await.status, 200);
+    }
+    assert_eq!(
+        proxy.state.runtime.status(&target).unwrap().circuit,
+        "closed"
+    );
 }
