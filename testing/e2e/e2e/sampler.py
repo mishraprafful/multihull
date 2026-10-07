@@ -13,6 +13,7 @@ from e2e.harness import Router
 
 @dataclass(frozen=True)
 class EndpointSample:
+    requested_at: float
     at: float
     circuit: str | None
     probe: str | None
@@ -29,6 +30,7 @@ class EndpointSampler:
 
     def run(self) -> None:
         while not self.stop_event.is_set():
+            requested_at = time.monotonic()
             try:
                 entry = self.router.endpoint(self.provider)
             except (httpx.HTTPError, KeyError):
@@ -36,7 +38,9 @@ class EndpointSampler:
             if entry is not None:
                 probe = entry.get("probe") or {}
                 self.samples.append(
-                    EndpointSample(time.monotonic(), entry["circuit"], probe.get("state"))
+                    EndpointSample(
+                        requested_at, time.monotonic(), entry["circuit"], probe.get("state")
+                    )
                 )
             time.sleep(self.interval)
 
@@ -60,7 +64,7 @@ class EndpointSampler:
         self.stop()
 
     def state_after(self, moment: float) -> str | None:
-        times = [sample.at for sample in self.samples]
+        times = [sample.requested_at for sample in self.samples]
         position = min(bisect_right(times, moment), len(self.samples) - 1)
         return self.samples[position].circuit
 

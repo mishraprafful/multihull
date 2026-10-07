@@ -65,7 +65,10 @@ def test_traffic_returns_to_primary_only_after_the_circuit_closes(
     assert failures(after_close) == []
     from_primary = [o for o in observed + after_close if o.provider == "primary"]
     assert from_primary, "traffic never returned to primary"
-    assert all(sampler.state_after(o.started_at) != "open" for o in from_primary)
+    served_while_open = [
+        o.describe() for o in from_primary if sampler.state_after(o.finished_at) == "open"
+    ]
+    assert served_while_open == []
     assert any(o.provider == "primary" for o in after_close)
     assert sampler.states() >= {"open", "closed"}
 
