@@ -258,30 +258,3 @@ def modal_app_states(app_name: str, environment: str, log: Path) -> list[str]:
     return [
         str(app["state"]) for app in json.loads(result.stdout) if app["description"] == app_name
     ]
-
-
-class Report:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.rows: list[tuple[str, str]] = []
-
-    def add(self, key: str, value: object) -> None:
-        self.rows.append((key, str(value)))
-
-    def markdown(self) -> str:
-        lines = [
-            f"### Live suite: {self.settings.spec} ({self.settings.service})",
-            "",
-            "| check | result |",
-            "|---|---|",
-        ]
-        lines.extend(f"| {key} | {value} |" for key, value in self.rows)
-        return "\n".join(lines) + "\n"
-
-    def write(self, workdir: Path) -> None:
-        text = self.markdown()
-        (workdir / "summary.md").write_text(text)
-        summary = os.environ.get("GITHUB_STEP_SUMMARY")
-        if summary:
-            with open(summary, "a") as handle:
-                handle.write(text)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -9,17 +10,30 @@ import docker
 import pytest
 
 from e2e.client import RouterClient
+from live.capture import (
+    AFTER_DEPLOY,
+    AFTER_DESTROY,
+    BEFORE_DESTROY,
+    Recorder,
+    ScenarioProbe,
+)
 from live.harness import (
     LOG_DIR,
     REPO_ROOT,
     Kind,
     LiveDeployment,
     LiveRouter,
-    Report,
     Settings,
     render_spec,
 )
+from live.summary import RunSummary, apply_report
 from multihull.providers.base import SERVICE_LABEL
+
+RECORDER_KEY = pytest.StashKey[Recorder]()
+
+
+def scenario_name(item: pytest.Item) -> str:
+    return item.name.removeprefix("test_").replace("_", " ")
 
 
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -27,6 +41,19 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     outcome = yield
     report = outcome.get_result()
     setattr(item, f"report_{report.when}", report)
+    recorder = item.config.stash.get(RECORDER_KEY, None)
+    if recorder is not None and "scenario" in getattr(item, "fixturenames", ()):
+        apply_report(recorder.summary.scenario(item.nodeid, scenario_name(item)), report)
+        recorder.save()
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    recorder = session.config.stash.get(RECORDER_KEY, None)
+    if recorder is None:
+        return
+    recorder.summary.finished_at = time.time()
+    recorder.summary.exit_status = int(exitstatus)
+    recorder.save()
 
 
 @pytest.fixture(autouse=True)
@@ -52,18 +79,29 @@ def workdir(settings: Settings, tmp_path_factory: pytest.TempPathFactory) -> Pat
     return settings.workdir or tmp_path_factory.mktemp("multihull-live")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def recorder(request: pytest.FixtureRequest, settings: Settings, workdir: Path) -> Recorder:
+    created = Recorder(RunSummary(spec=settings.spec, service=settings.service), workdir)
+    request.config.stash[RECORDER_KEY] = created
+    created.save()
+    return created
+
+
+@pytest.fixture
+def scenario(request: pytest.FixtureRequest, recorder: Recorder) -> Iterator[ScenarioProbe]:
+    probe = ScenarioProbe(
+        recorder.summary.scenario(request.node.nodeid, scenario_name(request.node))
+    )
+    try:
+        yield probe
+    finally:
+        probe.finish()
+        recorder.save()
+
+
 @pytest.fixture(scope="session")
 def document(settings: Settings, workdir: Path) -> dict[str, Any]:
     return render_spec(settings, workdir)
-
-
-@pytest.fixture(scope="session")
-def report(settings: Settings, workdir: Path) -> Iterator[Report]:
-    collected = Report(settings)
-    try:
-        yield collected
-    finally:
-        collected.write(workdir)
 
 
 @pytest.fixture(scope="session")
@@ -121,15 +159,26 @@ def live(
     return LiveDeployment(settings, workdir, document)
 
 
+def destroy_outcome(deployment: LiveDeployment, result: subprocess.CompletedProcess[str]) -> str:
+    left = sorted(deployment.records())
+    return f"hull destroy exit {result.returncode}, state records left: {left or 'none'}"
+
+
 @pytest.fixture(scope="session")
-def deployment(live: LiveDeployment, kind: Kind) -> Iterator[LiveDeployment]:
+def deployment(live: LiveDeployment, kind: Kind, recorder: Recorder) -> Iterator[LiveDeployment]:
     if live.secondary_type == "docker":
         sweep_docker(live.service)
     try:
         live.deploy()
+        recorder.capture(AFTER_DEPLOY, kind, live)
         yield live
     finally:
-        live.destroy()
+        if not recorder.summary.has_kube(BEFORE_DESTROY):
+            recorder.capture(BEFORE_DESTROY, kind, live)
+        result = live.destroy()
+        if not recorder.summary.destroy:
+            recorder.summary.destroy = destroy_outcome(live, result)
+        recorder.capture(AFTER_DESTROY, kind, live, kube=False)
         kind.sweep(live.service)
         if live.secondary_type == "docker":
             sweep_docker(live.service)
@@ -137,7 +186,7 @@ def deployment(live: LiveDeployment, kind: Kind) -> Iterator[LiveDeployment]:
 
 @pytest.fixture(scope="session")
 def router(
-    request: pytest.FixtureRequest, router_binary: Path, deployment: LiveDeployment
+    router_binary: Path, deployment: LiveDeployment, kind: Kind, recorder: Recorder
 ) -> Iterator[LiveRouter]:
     process = LiveRouter(router_binary, deployment.workdir, deployment.snapshot_path, expected=2)
     process.start()
@@ -145,6 +194,8 @@ def router(
         process.wait_ready(timeout=120)
         yield process
     finally:
+        if recorder.summary.router is None:
+            recorder.capture(BEFORE_DESTROY, kind, deployment, router=process)
         process.stop()
 
 

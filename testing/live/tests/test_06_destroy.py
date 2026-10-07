@@ -3,24 +3,34 @@ from __future__ import annotations
 import docker
 
 from e2e.waiting import wait_until
+from live.capture import AFTER_DESTROY, BEFORE_DESTROY, Recorder, ScenarioProbe
 from live.harness import (
     LOG_DIR,
     MODAL_STOPPED_STATES,
     Kind,
     LiveDeployment,
-    Report,
+    LiveRouter,
     modal_app_states,
 )
 from multihull.providers.base import SERVICE_LABEL
 
 
 def test_destroy_leaves_nothing_behind(
-    deployment: LiveDeployment, kind: Kind, report: Report
+    deployment: LiveDeployment,
+    kind: Kind,
+    router: LiveRouter,
+    scenario: ScenarioProbe,
+    recorder: Recorder,
 ) -> None:
     refs = deployment.refs()
+    recorder.capture(BEFORE_DESTROY, kind, deployment, router=router)
     result = deployment.destroy()
+    left = sorted(deployment.records())
+    recorder.summary.destroy = (
+        f"hull destroy exit {result.returncode}, state records left: {left or 'none'}"
+    )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert deployment.records() == {}
+    assert left == []
 
     wait_until(lambda: not kind.labelled(deployment.service), 120, 2.0, "kind namespace empty")
     if deployment.secondary_type == "docker":
@@ -40,4 +50,5 @@ def test_destroy_leaves_nothing_behind(
             5.0,
             "modal app stopped",
         )
-    report.add("destroy", "nothing left in the kind namespace or on the secondary")
+        recorder.capture(AFTER_DESTROY, kind, deployment, kube=False)
+    scenario.note(f"nothing left in namespace {kind.namespace} or on {deployment.secondary}")
