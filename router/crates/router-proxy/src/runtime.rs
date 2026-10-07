@@ -381,6 +381,10 @@ impl Runtime {
     ) {
         let now = self.now();
         self.record_attempt(endpoint, outcome, status, now, rng);
+        self.count_request(route_id, endpoint, label);
+    }
+
+    pub fn count_request(&self, route_id: &str, endpoint: &Endpoint, label: &'static str) {
         metrics::counter!(
             router_obs::metrics::REQUESTS_TOTAL,
             router_obs::metrics::labels::ROUTE => route_id.to_string(),
