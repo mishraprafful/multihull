@@ -166,6 +166,7 @@ h1[data-page-title],
 
 .sl-markdown-content :is(h1, h2, h3, h4) code {
   background: transparent;
+  border: 0;
   padding: 0;
   margin: 0;
   font-size: 0.92em;
@@ -173,31 +174,41 @@ h1[data-page-title],
 }
 
 :root[data-has-hero] {
-  --sl-content-width: 62rem;
+  --sl-content-width: 60rem;
 }
 
 .hero {
-  padding-block: clamp(2.5rem, 7vmin, 5rem) 0.5rem;
+  padding-block: clamp(2.5rem, 8vmin, 5.5rem) 0.5rem;
+}
+
+.hero .stack {
+  text-align: start;
+}
+
+.hero .copy {
+  align-items: flex-start;
+  gap: 1.25rem;
 }
 
 .hero h1 {
-  font-size: clamp(2.25rem, 1.25rem + 3.5vw, 3.5rem);
-  font-weight: 600;
+  font-size: clamp(2.75rem, 1.5rem + 5vw, 4.5rem);
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.05em;
   text-wrap: balance;
 }
 
 .hero .tagline {
-  max-width: 34ch;
-  font-size: clamp(1.0625rem, 0.9rem + 0.6vw, 1.25rem);
-  line-height: 1.5;
-  color: var(--sl-color-gray-2);
+  max-width: 40ch;
+  font-size: clamp(1rem, 0.9rem + 0.4vw, 1.125rem);
+  line-height: 1.6;
+  color: var(--mh-body);
   text-wrap: pretty;
 }
 
 .hero .actions {
-  gap: 1rem 1.5rem;
+  justify-content: flex-start;
+  gap: 1rem;
 }
 
 .sl-markdown-content .mh-section + .mh-section,
@@ -207,20 +218,24 @@ h1[data-page-title],
 }
 
 [data-has-hero] .sl-markdown-content h2 {
-  font-size: var(--sl-text-2xl);
+  font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2rem);
   font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.25;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
 }
 
 .sl-markdown-content .mh-lead {
   margin-top: 0.5rem;
-  max-width: 56ch;
-  color: var(--sl-color-gray-2);
+  max-width: 60ch;
+  color: var(--mh-body);
 }
 
 .sl-markdown-content .mh-lead + * {
   margin-top: 1.75rem;
+}
+
+[data-has-hero] .sl-markdown-content td {
+  white-space: nowrap;
 }
 
 .mh-value-props {
@@ -231,33 +246,36 @@ h1[data-page-title],
 
 .mh-value-props > div {
   margin: 0;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--sl-color-hairline);
+  padding-top: 1rem;
+  border-top: var(--mh-border-strong) solid var(--mh-strong);
 }
 
 .mh-value-props h3 {
   margin: 0 0 0.5rem;
   font-size: var(--sl-text-base);
-  font-weight: 600;
-  color: var(--sl-color-white);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--mh-ink);
 }
 
 .mh-value-props p {
   margin: 0;
   font-size: var(--sl-text-sm);
-  line-height: 1.6;
-  color: var(--sl-color-gray-2);
+  line-height: 1.65;
+  color: var(--mh-body);
 }
 
 .mh-value-props code {
   font-size: 0.9em;
+  color: var(--mh-ink);
   background: var(--sl-color-bg-inline-code);
-  padding: 0.1em 0.35em;
+  border: 1px solid var(--mh-rule);
+  padding: 0.1em 0.3em;
   border-radius: 0.25rem;
 }
 
 .mh-closing {
-  color: var(--sl-color-gray-2);
+  color: var(--mh-body);
 }
 
 header.header {
@@ -371,22 +389,22 @@ site-search button[data-open-modal]:hover {
 }
 
 .sl-link-button {
+  border: var(--mh-border-strong) solid var(--mh-strong);
   border-radius: var(--mh-radius);
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: var(--mh-offset) var(--mh-offset) 0 var(--mh-shadow);
+  transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
 .sl-link-button.primary {
-  color: var(--mh-navy);
+  border-color: var(--mh-strong);
+  background: var(--sl-color-accent);
+  color: var(--mh-on-accent);
 }
 
-.sl-link-button.minimal {
-  color: var(--sl-color-gray-1);
-  text-underline-offset: 0.25em;
-}
-
-.sl-link-button.minimal:hover {
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+.sl-link-button.secondary {
+  background: var(--mh-paper);
+  color: var(--mh-ink);
 }
 
 .expressive-code {
@@ -502,14 +520,16 @@ site-search button[data-open-modal]:hover {
 }
 
 @media (hover: hover) {
-  .pagination-links a:hover {
+  .pagination-links a:hover,
+  .sl-link-button:hover {
     transform: translate(2px, 2px);
     box-shadow: 1px 1px 0 var(--mh-shadow);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pagination-links a {
+  .pagination-links a,
+  .sl-link-button {
     transition: none;
   }
 }

@@ -27,8 +27,10 @@
       </g>
     </defs>
 
+    <rect class="hf-bar" x="0" y="0" width="960" height="38" />
     <rect class="hf-water" x="0" y="38" width="960" height="382" />
     <line class="hf-horizon" x1="0" y1="38" x2="960" y2="38" />
+    <text class="t2 bar-title" x="40" y="21">llama-8b</text>
 
     <g class="hf-legend t2">
       <circle class="c-ok" cx="708" cy="21" r="4" />
@@ -159,8 +161,19 @@
 
 <style>
   .hf {
-    margin: 2rem 0 1rem;
+    margin: 2.5rem 0 1rem;
+    overflow: hidden;
     color: var(--sl-color-text);
+    background: var(--mh-paper);
+    border: var(--mh-border-strong) solid var(--mh-strong);
+    border-radius: var(--mh-frame-radius);
+    box-shadow: 6px 6px 0 var(--mh-shadow);
+  }
+
+  @media (max-width: 50rem) {
+    .hf {
+      box-shadow: var(--mh-offset) var(--mh-offset) 0 var(--mh-shadow);
+    }
   }
 
   .hf svg {
@@ -210,20 +223,30 @@
     fill: var(--sl-color-gray-2);
   }
 
-  .hf-legend text {
+  .hf-legend text,
+  .bar-title {
     text-anchor: start;
+  }
+
+  .bar-title {
+    fill: var(--mh-ink);
+    font-weight: 600;
   }
 
   .c-ok { fill: var(--mh-ok); }
   .c-down { fill: var(--mh-down); }
   .c-warn { fill: var(--mh-warn); }
 
+  .hf-bar {
+    fill: var(--mh-panel);
+  }
+
   .hf-water {
     fill: color-mix(in srgb, var(--mh-teal) 7%, transparent);
   }
 
   .hf-horizon {
-    stroke: var(--sl-color-hairline);
+    stroke: var(--mh-rule);
     stroke-width: 1.5;
   }
 
@@ -308,13 +331,13 @@
 
   .hf-pkt {
     fill: var(--mh-ok);
-    stroke: var(--sl-color-bg);
+    stroke: var(--mh-paper);
     stroke-width: 1.5;
   }
 
   .hf-probe {
     fill: var(--mh-warn);
-    stroke: var(--sl-color-bg);
+    stroke: var(--mh-paper);
     stroke-width: 1.5;
     opacity: 0;
   }
