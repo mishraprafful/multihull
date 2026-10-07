@@ -157,7 +157,7 @@ async fn proxy(
                         attempts,
                         deadline,
                     };
-                    Ok(forward(response, &plan, &endpoint, guard, extra))
+                    Ok(forward(response, &plan, &endpoint, guard, extra, false))
                 }
                 None => {
                     finish_session(&state, &route, session.take(), None);
@@ -183,20 +183,24 @@ async fn proxy(
             Some(router_core::outcome::AttemptError::FirstByteTimeout)
         );
         let outcome = classify(attempt.status(), attempt.error.as_ref(), ttft_timed_out);
-        let now = state.runtime.now();
         if attempt.response.is_some() {
             state.runtime.record_ttft(&route, &endpoint, attempt.ttft);
         }
-        state
-            .runtime
-            .record_attempt(&endpoint, outcome, attempt.status(), now, &mut rng);
-        metrics::counter!(
-            router_obs::metrics::REQUESTS_TOTAL,
-            router_obs::metrics::labels::ROUTE => route.id.clone(),
-            router_obs::metrics::labels::ENDPOINT => endpoint.id.clone(),
-            router_obs::metrics::labels::OUTCOME => outcome.label()
-        )
-        .increment(1);
+        let settles_at_body_end = outcome == Outcome::Success
+            && attempt
+                .response
+                .as_ref()
+                .is_some_and(UpstreamResponse::body_pending);
+        if !settles_at_body_end {
+            state.runtime.finish_attempt(
+                &route.id,
+                &endpoint,
+                outcome,
+                outcome.label(),
+                attempt.status(),
+                &mut rng,
+            );
+        }
 
         let server_error = matches!(attempt.status(), Some(500..=599));
         if outcome == Outcome::Success || (outcome == Outcome::Fatal && !server_error) {
@@ -211,7 +215,14 @@ async fn proxy(
                 attempts,
                 deadline,
             };
-            return Ok(forward(response, &plan, &endpoint, guard, extra));
+            return Ok(forward(
+                response,
+                &plan,
+                &endpoint,
+                guard,
+                extra,
+                settles_at_body_end,
+            ));
         }
 
         let retry_ctx = RetryContext {
@@ -261,7 +272,7 @@ async fn proxy(
                             attempts,
                             deadline,
                         };
-                        Ok(forward(response, &plan, &endpoint, guard, extra))
+                        Ok(forward(response, &plan, &endpoint, guard, extra, false))
                     }
                     None => {
                         finish_session(&state, &route, session.take(), None);
@@ -612,6 +623,7 @@ fn forward(
     endpoint: &Endpoint,
     guard: OutstandingGuard,
     extra: Vec<(HeaderName, HeaderValue)>,
+    settles_at_body_end: bool,
 ) -> Response<ProxyBody> {
     let UpstreamResponse {
         response,
@@ -637,6 +649,7 @@ fn forward(
         route_id: forward.route.id.clone(),
         endpoint: endpoint.clone(),
         termination,
+        deferred_status: settles_at_body_end.then_some(parts.status.as_u16()),
     });
     let mut builder = Response::builder()
         .status(parts.status)

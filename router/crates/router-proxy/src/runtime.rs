@@ -363,6 +363,26 @@ impl Runtime {
         self.publish_circuit_gauges(endpoint, now);
     }
 
+    pub fn finish_attempt(
+        &self,
+        route_id: &str,
+        endpoint: &Endpoint,
+        outcome: Outcome,
+        label: &'static str,
+        status: Option<u16>,
+        rng: &mut impl Rng,
+    ) {
+        let now = self.now();
+        self.record_attempt(endpoint, outcome, status, now, rng);
+        metrics::counter!(
+            router_obs::metrics::REQUESTS_TOTAL,
+            router_obs::metrics::labels::ROUTE => route_id.to_string(),
+            router_obs::metrics::labels::ENDPOINT => endpoint.id.clone(),
+            router_obs::metrics::labels::OUTCOME => label
+        )
+        .increment(1);
+    }
+
     pub fn record_probe(&self, endpoint: &Endpoint, outcome: ProbeOutcome, status: Option<u16>) {
         let runtime = self.endpoint(endpoint);
         let now = self.now();

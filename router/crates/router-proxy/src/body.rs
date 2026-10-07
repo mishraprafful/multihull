@@ -95,25 +95,27 @@ pub struct StreamContext {
     pub route_id: String,
     pub endpoint: Endpoint,
     pub termination: Termination,
+    pub deferred_status: Option<u16>,
 }
 
 impl StreamContext {
-    fn record_disconnect(&self, error: &BodyError) {
-        metrics::counter!(
-            router_obs::metrics::REQUESTS_TOTAL,
-            router_obs::metrics::labels::ROUTE => self.route_id.clone(),
-            router_obs::metrics::labels::ENDPOINT => self.endpoint.id.clone(),
-            router_obs::metrics::labels::OUTCOME => UPSTREAM_DISCONNECTED
-        )
-        .increment(1);
-        let now = self.state.runtime.now();
-        self.state.runtime.record_attempt(
+    fn settle(&mut self, outcome: Outcome, label: &'static str) {
+        let Some(status) = self.deferred_status.take() else {
+            return;
+        };
+        let status = (outcome == Outcome::Success).then_some(status);
+        self.state.runtime.finish_attempt(
+            &self.route_id,
             &self.endpoint,
-            Outcome::Transient,
-            None,
-            now,
+            outcome,
+            label,
+            status,
             &mut ThreadRng,
         );
+    }
+
+    fn record_disconnect(&mut self, error: &BodyError) {
+        self.settle(Outcome::Transient, UPSTREAM_DISCONNECTED);
         tracing::warn!(
             route = %self.route_id,
             endpoint = %self.endpoint.id,
@@ -304,16 +306,20 @@ impl TimedBody {
 
     fn end(&mut self) -> Poll<Option<Result<Frame<Bytes>, BodyError>>> {
         self.finished = true;
+        if let Some(context) = self.context.as_mut() {
+            context.settle(Outcome::Success, Outcome::Success.label());
+        }
         let held = self.events.as_mut().and_then(EventFramer::flush);
         Poll::Ready(held.map(|data| Ok(Frame::data(data))))
     }
 
     fn fail(&mut self, error: BodyError) -> Poll<Option<Result<Frame<Bytes>, BodyError>>> {
         self.finished = true;
-        let Some(context) = self.context.as_ref() else {
+        let Some(context) = self.context.as_mut() else {
             return Poll::Ready(Some(Err(error)));
         };
         if !self.committed {
+            context.settle(Outcome::Transient, UPSTREAM_DISCONNECTED);
             return Poll::Ready(Some(Err(error)));
         }
         context.record_disconnect(&error);
@@ -392,6 +398,19 @@ impl Body for TimedBody {
             }
         }
         hint
+    }
+}
+
+impl Drop for TimedBody {
+    fn drop(&mut self) {
+        let outcome = if self.is_end_stream() {
+            Outcome::Success
+        } else {
+            Outcome::ClientAbort
+        };
+        if let Some(context) = self.context.as_mut() {
+            context.settle(outcome, outcome.label());
+        }
     }
 }
 

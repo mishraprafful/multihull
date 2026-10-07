@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, Uri};
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Frame, Incoming};
+use hyper::body::{Body, Frame, Incoming};
 use router_core::outcome::AttemptError;
 use router_core::snapshot::Endpoint;
 use router_tls::TlsError;
@@ -25,6 +25,10 @@ pub struct UpstreamResponse {
 impl UpstreamResponse {
     pub fn status(&self) -> u16 {
         self.response.status().as_u16()
+    }
+
+    pub fn body_pending(&self) -> bool {
+        self.first_frame.is_some() && !self.response.body().is_end_stream()
     }
 }
 
