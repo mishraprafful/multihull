@@ -80,6 +80,14 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/live/logs"
           kubectl get all,events --all-namespaces > "$RUNNER_TEMP/live/logs/cluster.txt" 2>&1 || true
+      - name: Job summary
+        if: always()
+        working-directory: testing/live
+        run: >
+          uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
+          --job-status "$JOB_STATUS" --artifact kind-logs --spec kind-docker
+        env:
+          JOB_STATUS: ${{ job.status }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -89,5 +97,6 @@ jobs:
             ${{ runner.temp }}/live/multihull.yaml
             ${{ runner.temp }}/live/router.toml
             ${{ runner.temp }}/live/summary.md
+            ${{ runner.temp }}/live/summary.json
             ${{ runner.temp }}/live/results.xml
           if-no-files-found: ignore
