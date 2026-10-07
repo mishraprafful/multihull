@@ -12,6 +12,8 @@ router:
     value: /var/lib/multihull/snapshot.json
   tls:
     secretName: ""
+  # router.toml tuning tables, see router/router.example.toml. Durations are
+  # seconds as numbers (1.5, not "1.5s"). Set to null to use the router defaults.
   tuning:
     timeouts:
       connect: 2

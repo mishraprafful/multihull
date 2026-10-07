@@ -66,9 +66,11 @@ npm run build
 ```sh
 helm lint charts/multihull
 helm template multihull charts/multihull > /dev/null
+(cd router && cargo build --release -p multihull)
+charts/multihull/tests/render.sh
 ```
 
-Helm may be absent locally; CI installs it and runs these for you.
+`render.sh` renders `router.toml` with the value files in `charts/multihull/tests/values/` and loads each with `multihull --check-config`. Helm may be absent locally; CI installs it and runs these for you.
 
 ## Running tests
 

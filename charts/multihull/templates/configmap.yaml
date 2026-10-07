@@ -32,12 +32,13 @@ data:
     cert = "/etc/multihull/tls/tls.crt"
     key = "/etc/multihull/tls/tls.key"
     {{- end }}
+    {{- $tuning := .Values.router.tuning | default dict }}
     {{- range $table := list "timeouts" "circuit" "admission" "pressure" "probe" "retry" }}
-    {{- with index $.Values.router.tuning $table }}
+    {{- with index $tuning $table }}
 
     [{{ $table }}]
     {{- range $key, $value := . }}
-    {{ $key }} = {{ $value }}
+    {{ $key }} = {{ include "multihull.tomlValue" $value }}
     {{- end }}
     {{- end }}
     {{- end }}

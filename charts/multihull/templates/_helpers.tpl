@@ -48,3 +48,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "multihull.controllerImage" -}}
 {{- printf "%s:%s" .Values.controller.image.repository (default .Chart.AppVersion .Values.controller.image.tag) }}
 {{- end }}
+
+{{- define "multihull.tomlValue" -}}
+{{- $value := . -}}
+{{- if and (kindIs "string" $value) (regexMatch "^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?$" $value) -}}
+{{- $value = float64 $value -}}
+{{- end -}}
+{{- if kindIs "string" $value -}}
+{{- toJson $value -}}
+{{- else if and (kindIs "float64" $value) (eq $value (floor $value)) (lt $value 9007199254740992.0) (gt $value -9007199254740992.0) -}}
+{{- int64 $value -}}
+{{- else -}}
+{{- $value -}}
+{{- end -}}
+{{- end }}

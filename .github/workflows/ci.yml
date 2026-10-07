@@ -46,6 +46,7 @@ jobs:
               - '.github/workflows/ci.yml'
             chart:
               - 'charts/**'
+              - 'router/**'
               - '.github/workflows/ci.yml'
             mock_server:
               - 'testing/mock-server/**'
@@ -130,6 +131,15 @@ jobs:
           --set controller.stateBackend.existingSecret=multihull-state
           --set controller.specConfigMap=multihull-spec
           > /dev/null
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build -p multihull
+        working-directory: router
+      - run: charts/multihull/tests/render.sh
+        env:
+          MULTIHULL_BIN: ${{ github.workspace }}/router/target/debug/multihull
 
   mock-server:
     needs: changes
