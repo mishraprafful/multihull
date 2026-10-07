@@ -48,6 +48,7 @@ jobs:
               - 'charts/**'
               - 'router/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
             mock_server:
               - 'testing/mock-server/**'
               - '.github/workflows/ci.yml'
@@ -133,6 +134,13 @@ jobs:
           --set controller.stateBackend.existingSecret=multihull-state
           --set controller.specConfigMap=multihull-spec
           > /dev/null
+      - name: Package the chart as a release would, without pushing
+        run: charts/package.sh "v0.0.0-ci.$GITHUB_RUN_NUMBER" "$RUNNER_TEMP/chart"
+      - name: Reject release tags that are not semver
+        run: |
+          for tag in v1.2 1.2.3 v1.2.3+build.1; do
+            if charts/package.sh "$tag" "$RUNNER_TEMP/rejected"; then exit 1; fi
+          done
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
