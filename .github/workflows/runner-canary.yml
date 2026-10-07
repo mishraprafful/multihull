@@ -1,0 +1,64 @@
+name: Runner canary
+
+on:
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-canary
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+      - run: uv sync --locked
+      - run: uv run pytest
+
+  router:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: router
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+          key: ubuntu-26.04
+      - run: cargo test --workspace
+
+  website:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm run build
