@@ -39,6 +39,7 @@ async fn provider_circuit_opens_after_endpoint_failures_and_recovers() {
         fast_circuits(),
     )
     .await;
+    proxy.state.runtime.endpoint(&b);
 
     for _ in 0..40 {
         let reply = get(&proxy, "/v1/x", &[]).await;
