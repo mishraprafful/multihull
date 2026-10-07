@@ -20,6 +20,7 @@ from multihull.deploy import DEFAULT_SNAPSHOT_PATH
 from multihull.providers.base import Observed, Provider, Ref, ScaleRefused
 from multihull.spec import ServiceSpec, TargetSpec
 from multihull.state.base import Floor, StateBackend, StateRecord, records_by_provider
+from multihull.stream_security import StreamSecurity
 
 log = logging.getLogger("multihull.controller")
 
@@ -448,16 +449,29 @@ class Controller:
             except Exception:
                 log.exception("scale back failed")
 
-    async def serve(self, listen: str) -> tuple[grpc.aio.Server, int]:
+    async def serve(self, listen: str, security: StreamSecurity) -> tuple[grpc.aio.Server, int]:
+        security.validate()
         server = grpc.aio.server()
-        pb_grpc.add_DiscoveryServicer_to_server(DiscoveryServicer(self), server)
-        port = server.add_insecure_port(listen)
+        pb_grpc.add_DiscoveryServicer_to_server(DiscoveryServicer(self, security), server)
+        if security.insecure:
+            port = server.add_insecure_port(listen)
+            log.warning(
+                "discovery stream is plaintext%s (--insecure); snapshots can carry provider "
+                "credentials, so use --tls-cert and --tls-key outside local development",
+                "" if security.token else " and unauthenticated",
+            )
+        else:
+            port = server.add_secure_port(listen, security.server_credentials())
         await server.start()
-        log.info("discovery stream listening on %s", listen if port == 0 else f"port {port}")
+        log.info(
+            "discovery stream listening on %s (%s)",
+            listen if port == 0 else f"port {port}",
+            security.describe(),
+        )
         return server, port
 
-    async def run(self, listen: str = DEFAULT_GRPC_LISTEN) -> None:
-        server, _ = await self.serve(listen)
+    async def run(self, security: StreamSecurity, listen: str = DEFAULT_GRPC_LISTEN) -> None:
+        server, _ = await self.serve(listen, security)
         loops = [
             asyncio.create_task(self.reconcile_loop()),
             asyncio.create_task(self.health_loop()),
@@ -472,12 +486,17 @@ class Controller:
 
 
 class DiscoveryServicer(pb_grpc.DiscoveryServicer):
-    def __init__(self, controller: Controller) -> None:
+    def __init__(self, controller: Controller, security: StreamSecurity) -> None:
         self.controller = controller
+        self.security = security
 
     async def Stream(
         self, request_iterator: AsyncIterator[pb.RouterMessage], context: grpc.aio.ServicerContext
     ) -> AsyncIterator[pb.ControlMessage]:
+        problem = self.security.authorization_problem(context.invocation_metadata())
+        if problem is not None:
+            log.warning("rejected discovery stream from %s: %s", context.peer(), problem)
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, problem)
         queue = self.controller.subscribe()
         node = {"id": context.peer()}
 
