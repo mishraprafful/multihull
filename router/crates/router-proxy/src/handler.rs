@@ -87,8 +87,7 @@ async fn proxy(
         .map_err(|error| (error, 0))?;
     let mut preferred = session.as_ref().and_then(|s| s.owner.clone());
 
-    let mut excluded: HashSet<EndpointId> = HashSet::new();
-    let mut excluded_providers: HashSet<String> = HashSet::new();
+    let mut tried = Tried::default();
     let mut attempts: u32 = 0;
     let mut last_error = ProxyError::NoHealthyUpstream;
     let mut fallback: Option<(UpstreamResponse, Endpoint, OutstandingGuard)> = None;
@@ -109,16 +108,7 @@ async fn proxy(
         let picked = preferred
             .take()
             .and_then(|id| take_preferred(&state, &route, &id, &mut rng))
-            .or_else(|| {
-                pick_endpoint(
-                    &state,
-                    &route,
-                    &excluded,
-                    &excluded_providers,
-                    preset,
-                    &mut rng,
-                )
-            });
+            .or_else(|| pick_endpoint(&state, &route, &tried, preset, &mut rng));
         if picked.is_some() || !state.runtime.route_has_routable(&route) {
             break picked;
         }
@@ -136,16 +126,9 @@ async fn proxy(
     }
 
     loop {
-        let picked = reserved.take().or_else(|| {
-            pick_endpoint(
-                &state,
-                &route,
-                &excluded,
-                &excluded_providers,
-                preset,
-                &mut rng,
-            )
-        });
+        let picked = reserved
+            .take()
+            .or_else(|| pick_endpoint(&state, &route, &tried, preset, &mut rng));
         let Some((endpoint, guard)) = picked else {
             return match fallback.take() {
                 Some((response, endpoint, guard)) => {
@@ -242,10 +225,11 @@ async fn proxy(
         };
         match decision {
             RetryDecision::Retry { exclude_provider } => {
-                excluded.insert(endpoint.id.clone());
-                if exclude_provider && !endpoint.provider.is_empty() {
-                    excluded_providers.insert(endpoint.provider.clone());
-                }
+                let reachable = !matches!(
+                    attempt.error,
+                    Some(router_core::outcome::AttemptError::Connect)
+                );
+                tried.record(&endpoint, exclude_provider, reachable);
                 metrics::counter!(
                     router_obs::metrics::FAILOVERS_TOTAL,
                     router_obs::metrics::labels::FROM => endpoint.provider.clone(),
@@ -522,21 +506,79 @@ fn preset_for(route: &Route) -> Preset {
     }
 }
 
+#[derive(Default)]
+struct Tried {
+    endpoints: HashSet<EndpointId>,
+    providers: HashSet<String>,
+    reachable: HashSet<EndpointId>,
+}
+
+impl Tried {
+    fn record(&mut self, endpoint: &Endpoint, exclude_provider: bool, reachable: bool) {
+        self.endpoints.insert(endpoint.id.clone());
+        if exclude_provider && !endpoint.provider.is_empty() {
+            self.providers.insert(endpoint.provider.clone());
+        }
+        if reachable {
+            self.reachable.insert(endpoint.id.clone());
+        } else {
+            self.reachable.remove(&endpoint.id);
+        }
+    }
+
+    fn untried(&self, endpoint: &Endpoint) -> bool {
+        !self.endpoints.contains(&endpoint.id) && !self.providers.contains(&endpoint.provider)
+    }
+}
+
 fn pick_endpoint(
     state: &ProxyState,
     route: &Route,
-    excluded: &HashSet<EndpointId>,
-    excluded_providers: &HashSet<String>,
+    tried: &Tried,
     preset: Preset,
     rng: &mut ThreadRng,
 ) -> Option<Reservation> {
-    let eligible: Vec<&Endpoint> = route
+    let now = state.runtime.now();
+    let untried: Vec<&Endpoint> = route
         .endpoints
         .iter()
         .filter(|e| e.accepts_traffic())
-        .filter(|e| !excluded.contains(&e.id))
-        .filter(|e| !excluded_providers.contains(&e.provider))
+        .filter(|e| tried.untried(e))
         .collect();
+    let untried_all_open = untried.iter().all(|e| state.runtime.endpoint_open(e, now));
+    if untried_all_open {
+        if let Some(reservation) = pick_tried_again(state, route, tried, preset, rng) {
+            return Some(reservation);
+        }
+    }
+    pick_untried(state, untried, &tried.endpoints, preset, rng)
+}
+
+fn pick_tried_again(
+    state: &ProxyState,
+    route: &Route,
+    tried: &Tried,
+    preset: Preset,
+    rng: &mut ThreadRng,
+) -> Option<Reservation> {
+    let now = state.runtime.now();
+    let healthy: Vec<&Endpoint> = route
+        .endpoints
+        .iter()
+        .filter(|e| e.accepts_traffic())
+        .filter(|e| tried.reachable.contains(&e.id))
+        .filter(|e| !state.runtime.endpoint_open(e, now))
+        .collect();
+    reserve_one(state, &healthy, &HashSet::new(), false, preset, rng)
+}
+
+fn pick_untried(
+    state: &ProxyState,
+    eligible: Vec<&Endpoint>,
+    excluded: &HashSet<EndpointId>,
+    preset: Preset,
+    rng: &mut ThreadRng,
+) -> Option<Reservation> {
     if eligible.is_empty() {
         return None;
     }
@@ -561,6 +603,21 @@ fn pick_endpoint(
     } else {
         provider_closed
     };
+    reserve_one(state, &routable, excluded, panic_mode, preset, rng)
+}
+
+fn reserve_one(
+    state: &ProxyState,
+    routable: &[&Endpoint],
+    excluded: &HashSet<EndpointId>,
+    panic_mode: bool,
+    preset: Preset,
+    rng: &mut ThreadRng,
+) -> Option<Reservation> {
+    if routable.is_empty() {
+        return None;
+    }
+    let now = state.runtime.now();
     let candidates: Vec<Candidate> = routable
         .iter()
         .map(|e| {

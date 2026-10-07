@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import yaml
 
 from e2e.harness import READY_HEALTH, Router
 from multihull.providers.base import SERVICE_LABEL, Ref
+from multihull.providers.modal import redact
 from multihull.state import LocalState
 
 LIVE_ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +32,7 @@ DEFAULT_CLUSTER = "multihull-live"
 ROUTER_TUNING: dict[str, dict[str, bool | int | float | str]] = {"timeouts": {"first_byte": 10}}
 KUBE_KINDS = "deployments,services,horizontalpodautoscalers,secrets,pods"
 MODAL_STOPPED_STATES = frozenset({"stopped", "stopping..."})
+IMAGE_ID = re.compile(r"\bim-[A-Za-z0-9]{10,}\b")
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,15 @@ def render_spec(settings: Settings, workdir: Path) -> dict[str, Any]:
     (workdir / LOG_DIR).mkdir(exist_ok=True)
     (workdir / SPEC_NAME).write_text(yaml.safe_dump(document, sort_keys=False))
     return document
+
+
+def image_ids(text: str) -> list[str]:
+    return list(dict.fromkeys(IMAGE_ID.findall(text)))
+
+
+def registry_password_envs(document: dict[str, Any]) -> list[str]:
+    secrets = [(t.get("modal") or {}).get("registrySecret") for t in document["targets"]]
+    return [secret["passwordEnv"] for secret in secrets if secret]
 
 
 def run_logged(
@@ -165,6 +177,7 @@ class LiveDeployment:
         self.workdir = workdir
         self.document = document
         self.deploy_seconds = 0.0
+        self.image_builds: dict[str, Path] = {}
         secondary = [t for t in document["targets"] if t["provider"] != PRIMARY]
         self.secondary = str(secondary[0]["provider"])
         self.secondary_type = str(secondary[0]["type"])
@@ -205,8 +218,24 @@ class LiveDeployment:
         )
         self.deploy_seconds = time.monotonic() - started
         if result.returncode != 0:
+            self.fetch_image_logs(result.stdout + result.stderr)
             raise RuntimeError(f"hull deploy failed:\n{result.stdout}\n{result.stderr}")
         return result
+
+    def fetch_image_logs(self, output: str) -> None:
+        for image_id in image_ids(output):
+            command = [sys.executable, "-m", "modal", "image", "logs", image_id, "--all"]
+            try:
+                result = subprocess.run(
+                    command, capture_output=True, text=True, timeout=180, check=False
+                )
+                text = result.stdout + result.stderr or f"exit {result.returncode}, no output"
+            except subprocess.TimeoutExpired:
+                text = "modal image logs timed out after 180 s"
+            path = self.workdir / LOG_DIR / f"modal-image-{image_id}.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(redact(text, registry_password_envs(self.document)))
+            self.image_builds[image_id] = path
 
     def destroy(self) -> subprocess.CompletedProcess[str]:
         return self.hull(

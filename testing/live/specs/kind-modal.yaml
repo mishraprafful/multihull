@@ -29,6 +29,7 @@ targets:
   - provider: modal
     type: modal
     priority: 2
+    replicas: {max: 2}
     modal:
       environment: main
       registrySecret: {usernameEnv: GHCR_USERNAME, passwordEnv: GHCR_TOKEN}

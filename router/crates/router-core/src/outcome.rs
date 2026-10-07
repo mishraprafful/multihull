@@ -54,7 +54,7 @@ pub fn classify(
     match status {
         None => Outcome::ClientAbort,
         Some(429) => Outcome::Capacity,
-        Some(502..=504) => Outcome::Transient,
+        Some(408) | Some(502..=504) => Outcome::Transient,
         Some(400..=499) => Outcome::Fatal,
         Some(500..=599) => Outcome::Fatal,
         Some(_) => Outcome::Success,
@@ -85,6 +85,12 @@ mod tests {
         assert_eq!(classify(Some(500), None, false), Outcome::Fatal);
         assert_eq!(classify(Some(404), None, false), Outcome::Fatal);
         assert_eq!(classify(Some(401), None, false), Outcome::Fatal);
+    }
+
+    #[test]
+    fn request_timeout_is_transient_not_fatal() {
+        assert_eq!(classify(Some(408), None, false), Outcome::Transient);
+        assert!(Outcome::Transient.is_retryable_before_first_byte());
     }
 
     #[test]

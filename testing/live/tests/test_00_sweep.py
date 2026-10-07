@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from live import sweep
 from live.sweep import main, stale_apps
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
@@ -30,3 +31,14 @@ def test_sweeper_picks_only_old_running_live_apps() -> None:
 def test_sweeper_refuses_prefixes_outside_live_runs() -> None:
     with pytest.raises(SystemExit):
         main(["--prefix", "multihull-"])
+
+
+def test_sweeper_reports_a_failed_listing_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def rejected(environment: str) -> list[dict[str, str]]:
+        raise RuntimeError("modal app list failed: Token validation failed")
+
+    monkeypatch.setattr(sweep, "list_apps", rejected)
+    assert main(["--prefix", "multihull-live-1"]) == 1
+    assert capsys.readouterr().out == "skipped, modal app list failed: Token validation failed\n"

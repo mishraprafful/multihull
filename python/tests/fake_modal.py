@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,21 +30,51 @@ class FakeLogEntry:
     context_ids: list[str]
 
 
+class FakeAuthError(Exception):
+    pass
+
+
+class FakeInvalidError(Exception):
+    pass
+
+
+class FakeModalClient:
+    def __init__(self) -> None:
+        self.error: BaseException | None = None
+        self.delay = 0.0
+        self.hellos = 0
+        self.hello = SimpleNamespace(aio=self._hello)
+
+    async def _hello(self) -> None:
+        self.hellos += 1
+        await asyncio.sleep(self.delay)
+        if self.error is not None:
+            raise self.error
+
+
 class FakeModal:
     def __init__(self) -> None:
         self.images: list[FakeImage] = []
         self.cls_kwargs: dict[str, Any] = {}
         self.web_server_kwargs: dict[str, Any] = {}
         self.deployed: list[tuple[str, str]] = []
+        self.builder_versions: list[str | None] = []
         self.autoscaler: dict[str, int] = {}
         self.runners = 1
         self.log_entries: list[FakeLogEntry] = []
         self.log_since: datetime | None = None
         self.lookups: list[tuple[str, str | None]] = []
+        self.deploy_error: BaseException | None = None
         self.App = self._app_type()
         self.Image = SimpleNamespace(from_registry=self._from_registry)
         self.Secret = SimpleNamespace(from_dict=FakeSecret)
         self.Cls = SimpleNamespace(from_name=self._cls_from_name)
+        self.client = FakeModalClient()
+        self.Client = SimpleNamespace(from_env=SimpleNamespace(aio=self._client_from_env))
+        self.exception = SimpleNamespace(AuthError=FakeAuthError, InvalidError=FakeInvalidError)
+
+    async def _client_from_env(self) -> FakeModalClient:
+        return self.client
 
     def _from_registry(self, ref: str, secret: FakeSecret | None = None) -> FakeImage:
         image = FakeImage(ref, secret)
@@ -62,7 +94,10 @@ class FakeModal:
                 return lambda cls: cls
 
             def deploy(self, name: str, environment_name: str) -> None:
+                if fake.deploy_error is not None:
+                    raise fake.deploy_error
                 fake.deployed.append((name, environment_name))
+                fake.builder_versions.append(os.environ.get("MODAL_IMAGE_BUILDER_VERSION"))
 
             @staticmethod
             def lookup(name: str, environment_name: str | None = None) -> Any:

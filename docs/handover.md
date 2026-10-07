@@ -10,15 +10,16 @@ Rules for entries
 
 ## Current state
 
-- Merged to `main`: architecture plan (PR 1), name placeholders (PR 2), v0.1 scaffold (PR 3), CI and generated reference docs (PR 5), Python deploy, destroy, logs, controller and SDK (PR 6), router sticky routing, provider circuits, adaptive concurrency, TLS and HTTP snapshot source (PR 7), handover (PR 8), Cloudflare Pages docs deploy (PR 16), contributing guide (PR 21), animated failover hero and spec fan-out illustrations (PR 22), mock model server (PR 23), docker provider (PR 24), local end-to-end harness with the failover fixes it found (PR 25), minimal docs refresh (PR 26), retry budget and disconnect docs aligned with the code (PR 27).
-- PR 29 merged: active health prober, `upstream_disconnected` terminal SSE event and HTTP/2 error trailer, `[circuit]`, `[admission]`, `[pressure]`, `[probe]` and `[retry]` tuning tables in `router.toml` and under `router.tuning` in the chart, controller scale-back after `Degraded` clears.
-- Branch `fix/live-run-blockers` (local, not pushed) fixes the four blockers the PR 29 review found: a config panic on huge durations plus a one-day backoff cap, the controller recording failed scale calls as successes, a truncated SSE event dispatched before the terminal event, and HTTP/2 truncation reported as a clean end. The other findings are under "TODO from the PR 29 review".
-- Docs live at https://multihull.pages.dev, deployed by `.github/workflows/docs.yml` on pushes to `main`. PRs touching `website/`, `docs/`, `python/` or the workflow get a preview deployment and one sticky comment; `docs-preview-sweep.yml` deletes previews older than 24 hours. Cloudflare secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are repository secrets.
-- CI runs path-filtered jobs for python, router, website, chart, mock-server and e2e. The e2e harness (`testing/e2e`, `make e2e`) runs on every PR touching `python/`, `router/`, `proto/` or `testing/`. Release workflow gated by the `release` environment and `PUBLISH_ENABLED`. GitHub-hosted runners are pinned to `ubuntu-24.04`; `runner-canary.yml` runs the Python tests, Rust tests and docs build weekly on `ubuntu-26.04` (see `docs/runbooks/ci.md`).
-- Test counts on `fix/live-run-blockers`: Python 126 passed, 1 skipped; Rust 206; e2e 25 rows, 23 passed, recovery row xfailed non-streaming and xpassed streaming, 2 m 50 s. Mock server 40 (not rerun).
-- Logo explorations in progress on branch `design/logo-explorations`.
-- Not yet exercised against any real provider; only `docker` targets have run end to end. Modal log access uses private SDK internals.
-- Name placeholders `multihull` 0.0.1 not yet published to PyPI or crates.io; needs the owner's tokens.
+- Merged to `main`: plan, scaffold, CI, controller, SDK and router core (PRs 1 to 8); docs site, contributing guide and docs refresh (16, 21, 26, 27); mock server, docker provider and local e2e harness (23 to 25); router gaps and live-run blocker fixes (29, 30); kind in CI, GHCR images and the live smoke workflow (31); pages.dev homepages (32); probe masking fixes (33); Node 24 actions (34); queue pressure fix and stable e2e waits (35); runner pin (36); Modal credential checks and pinned image builder (37).
+- First live run passed: live smoke run 37671938141 on PR 37, kind as primary and Modal as secondary running the mock server on CPU. During kind scale-to-zero: 1,345 requests, 0 client errors, 9 failovers, Modal served 872. Recovery returned traffic to kind; destroy left nothing.
+- `live-smoke.yml` runs on manual dispatch or a PR labelled `live-smoke`, starts with a credential preflight, pins Modal image builder `2025.06`, always destroys and stops leftover `multihull-live-` apps, and uploads logs on every run. A daily sweeper stops apps older than two hours. Runbook: `docs/runbooks/live-smoke.md`.
+- `images.yml` publishes `ghcr.io/mishraprafful/multihull-mock-server` and `multihull-router` (private packages) tagged `main` and `sha-<short>` on pushes to `main`. Modal pulls them with a registry secret built from `GHCR_USERNAME` and `GHCR_TOKEN` env names.
+- Modal secrets `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` are repository secrets, regenerated 2026-10-07. `hull doctor` verifies them with an authenticated call. The workspace default image builder is the legacy 2023.12 version.
+- Docs live at https://multihull.pages.dev, deployed by `.github/workflows/docs.yml` on pushes to `main`. PRs touching `website/`, `docs/`, `python/` or the workflow get a preview and one sticky comment; `docs-preview-sweep.yml` deletes previews older than 24 hours. Cloudflare secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are repository secrets.
+- CI runs path-filtered jobs for python, router, website, chart, mock-server and e2e (whole suite, no `-x`, no retries), plus `kind.yml` (kind primary, docker secondary, chart dry run) on every PR touching `python/`, `router/`, `proto/`, `testing/` or `charts/`. Release workflow gated by the `release` environment and `PUBLISH_ENABLED`. GitHub-hosted runners are pinned to `ubuntu-24.04`; `runner-canary.yml` runs the Python tests, Rust tests and docs build weekly on `ubuntu-26.04` (see `docs/runbooks/ci.md`).
+- Test counts: Python 150 passed, 1 skipped; Rust 215; e2e 27 rows; kind suite 16; mock server 40.
+- Package names claimed: `multihull` 0.0.1 placeholders on PyPI (pages.dev links) and crates.io (GitHub homepage until the next version), uploaded from commit `fbdf211` so no private source was published. The owner reports trusted publishers configured for `release.yml` with environment `release`; this cannot be checked through the public APIs.
+- Logo explorations (PR 28) closed unmerged; the original three-hull mark stays.
 - GitHub repo `mishraprafful/multihull` is private. `multihull.dev` is not owned; all URLs use `multihull.pages.dev`.
 
 ## Decisions log
@@ -41,19 +42,27 @@ Rules for entries
 | 2026-10-07 | Only `ScaleRefused` (a `ValueError` subclass the docker provider raises) and `NotImplementedError` count as permanent scale refusals | A bare `ValueError` also covers transient errors such as `JSONDecodeError` from provider APIs, which must be retried, not recorded as intent |
 | 2026-10-07 | SSE hold-back falls back to passthrough when an incomplete event exceeds 1 MiB | Bounds router memory when an upstream labels a non-SSE body as an event stream |
 | 2026-10-07 | Pin runners to `ubuntu-24.04` and canary `ubuntu-26.04` weekly | `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19 (actions/runner-images#14748) with Python 3.14, Node 24, Docker 29 and Helm 4; pinning moves us on our schedule, the canary shows breakage first |
+| 2026-10-07 | Probes only take an endpoint out; only real request successes close a circuit (PR 33) | A passing `/health` must never restore traffic to a model whose requests fail |
+| 2026-10-07 | e2e runs the whole suite without `-x` and with no retries (PR 35) | `-x` hid a second flake behind the first; flakes are fixed, not masked |
+| 2026-10-07 | A kind cluster inside GitHub Actions is the Kubernetes provider for CI and the live smoke | Owner's call; free, reproducible, no external cluster credentials |
+| 2026-10-07 | Pulling one digest-pinned registry image is the only image path; no Modal-side builds | Owner's call after weighing `Image.from_dockerfile`: failover must land on byte-identical containers |
+| 2026-10-07 | Modal deploys pin image builder `2025.06`; `MODAL_IMAGE_BUILDER_VERSION` overrides | The workspace default 2023.12 builder runs pip inside the image, and uv-based images have no pip |
+| 2026-10-07 | Placeholders published by hand from `fbdf211`; real releases go through trusted publishing | Publishing `main` would expose private source, and the crate depends on internal crates that cannot be published |
+| 2026-10-07 | An upstream 408 is Transient, retried only for idempotent or keyed requests; when every untried provider is open, a retry returns to a tried provider that answered and is still closed, before the panic pool | Live run 37678680863: Modal's 408s were forwarded as Fatal, yet Modal logged about 5 s of execution for them, so a keyless POST may already have reached the model; retries spent on kind (circuit open, probe down) turned recoverable Modal timeouts into 502s |
 
 ## Open questions
 
 - Public or private repo at launch. Currently private.
-- Domain for docs. `multihull.dev` and `.io` not checked.
-- Whether `router/` becomes a Cargo workspace with `multihull` as the binary crate, or stays a single package. Plan assumes a workspace.
+- Domain for docs. `multihull.dev` is not owned; the site uses `multihull.pages.dev`.
+- How to publish the router crate: release the internal crates under `multihull-` names (`router-core` is taken on crates.io), or fold them into the single `multihull` crate.
 
 ## Next steps
 
-1. First live run on Kubernetes and Modal: the mock server on CPU first, then the llama-8b example on a GPU, with the router in front. The owner runs the apply. Record findings here. Unblocked once `fix/live-run-blockers` merges.
+1. GPU live run: the llama-8b example on a Modal GPU behind the router, triggered by the owner. kind has no GPUs, so a Kubernetes GPU run needs a real cluster.
 2. RunPod, Baseten and Replicate `apply` implementations (currently render-only) with the translator conformance suite from the plan.
-3. Owner publishes the 0.0.1 placeholders.
-4. Work through the TODO list below; the probe items go together.
+3. Release 0.1.0 preparation: bump versions past 0.0.1, rework the `release.yml` crates job (see open question) onto trusted publishing, and push the Helm chart to `oci://ghcr.io/mishraprafful/charts`, with an Artifact Hub listing once the repo is public.
+4. Work through the TODO list below.
+5. Owner, optional: `modal workspace settings set image-builder-version 2025.06` so other Modal projects in the workspace get the new builder.
 
 ## TODO from the PR 29 review
 
@@ -83,12 +92,22 @@ Rules for entries
 
 **Harness and docs:**
 - [x] `testing/e2e/tests/test_03_health_503.py:53`: the 20 percent leak allowance is timing dependent. Sample the circuit during load and assert it is never closed while probes report down.
-- [ ] `testing/e2e/tests/test_10_degraded.py:64`: `scale_before` counts all scale lines but slices only scale-back lines. Count scale-back lines separately.
-- [ ] Docs still say the `upstream_disconnected` event is planned and the retry budget is not configurable (`website/src/content/docs/docs/concepts/targets-and-failover.mdx` lines 47 and 53, `docs/design/architecture-plan.md:236`, `docs/design/testing-strategy.md:56`); PR 29 made both exist. `testing/e2e/README.md` still calls the recovery row xfail although it passes under the prober.
+- [x] `testing/e2e/tests/test_10_degraded.py:64`: `scale_before` counts all scale lines but slices only scale-back lines. Count scale-back lines separately. Done in PR 35.
+- [ ] Docs still say the `upstream_disconnected` event is planned and the retry budget is not configurable (`website/src/content/docs/docs/concepts/targets-and-failover.mdx` lines 47 and 53, `docs/design/architecture-plan.md:236`, `docs/design/testing-strategy.md:56`); PR 29 made both exist. (The e2e README part is done.)
 
 Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some of them in `body.rs`, `handler.rs` and `controller.py`.
 
 ## Session log
+
+### 2026-10-07 (later)
+- Live smoke run 37678680863 failed after merging main: Modal's single container held 37 in-flight inputs against `max_inputs` 32, so 17 requests got Modal `408 Request Timeout`, forwarded as Fatal, and 7 missed the 10 s first-byte deadline, were retried on kind (circuit open, probe down) and became router `502 upstream_unavailable`. Fixed on PR 37: 408 is Transient (retried only for idempotent or keyed requests), retries return to a healthy tried provider before the panic pool, `hull validate/plan/deploy` warn when fallbacks are below the 1.4 overprovision floor, live Modal `replicas.max` is 2.
+- Merged PRs 30 to 37. Hunk review of PR 29 led to the blocker fixes (30) and probe masking fixes (33).
+- CI on `main` went red after PR 33 from two timing flakes. One was a real router bug: any short queue wait cleared queue pressure while others still waited, so `Degraded` could go unsent under saturation. Fixed in PR 35 with a test that fails on the old code.
+- First live smoke attempts: Modal rejected the old token (run 37666477209); after regenerating it, Modal's legacy image builder failed with `No module named pip` (run 37667963715). PR 37 added credential checks, build-log capture and the pinned builder; run 37671938141 passed.
+- Claimed the `multihull` names on PyPI and crates.io.
+- Lesson: GitHub packages inherit repository access permissions but not visibility; a public repo does not make its images public.
+- Lesson: `hull doctor` must make an authenticated call; checking that env vars are set let a rejected token reach deploy.
+- Lesson: `pytest -x` in CI hides later failures behind the first one.
 
 ### 2026-10-07
 - Branch `fix/probe-masking` (local) fixes the four probe-masking items, one `fix(router)` commit each with tests that failed first, plus a follow-up counting a stream the client leaves after data as success: probe recovery releases into half-open, only admitted-request successes close half-open, a probe ejection holds the circuit open until the probe is up, streamed outcomes settle once at body end; new e2e row test_13 (health 200, inference 500), test_03 asserts zero leakage, test_08 xfail removed; e2e 3 runs of 27 rows all green, about 3 m 50 s each.

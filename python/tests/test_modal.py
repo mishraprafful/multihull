@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import timedelta
@@ -10,8 +11,12 @@ import pytest
 from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref, Target
 from multihull.providers.modal import (
+    IMAGE_BUILDER_VERSION,
+    IMAGE_BUILDER_VERSION_ENV,
     MISSING_COMMAND_NOTE,
+    CredentialStatus,
     ModalProvider,
+    check_credentials,
     deploy_with_sdk,
     derive_web_url,
     modal_gpu,
@@ -21,9 +26,16 @@ from multihull.providers.modal import (
 )
 from multihull.spec import GPU, ServiceSpec
 from tests.conftest import assert_golden
-from tests.fake_modal import FakeLogEntry, FakeModal
+from tests.fake_modal import FakeAuthError, FakeLogEntry, FakeModal
 
 REGISTRY_ENV = {"GHCR_USERNAME": "fixture-user", "GHCR_TOKEN": "fixture-registry-value"}
+FAKE_TOKEN_ID = "ak-fixture-token-id"
+FAKE_TOKEN_SECRET = "as-fixture-token-secret"
+
+
+@pytest.fixture(autouse=True)
+def default_image_builder_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(IMAGE_BUILDER_VERSION_ENV, raising=False)
 
 
 def test_golden_app_spec(target_for) -> None:
@@ -79,17 +91,81 @@ def test_endpoint_derives_web_url(monkeypatch: pytest.MonkeyPatch) -> None:
     assert provider.endpoint(ref).url == "https://custom.modal.run"
 
 
-def test_credentials_health_reports_presence_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    monkeypatch.setenv("MODAL_TOKEN_ID", "fixture")
-    monkeypatch.setenv("MODAL_TOKEN_SECRET", "fixture")
-    health = ModalProvider().credentials_health()
-    assert health.ok and "fixture" not in health.message
-    monkeypatch.delenv("MODAL_TOKEN_ID")
-    monkeypatch.delenv("MODAL_TOKEN_SECRET")
+@pytest.fixture
+def modal_tokens(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MODAL_TOKEN_ID", FAKE_TOKEN_ID)
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", FAKE_TOKEN_SECRET)
+
+
+def assert_no_token_values(message: str) -> None:
+    assert FAKE_TOKEN_ID not in message and FAKE_TOKEN_SECRET not in message
+
+
+def test_credentials_accepted_after_authenticated_call(modal_tokens, fake_modal) -> None:
+    health = ModalProvider().credentials_health()
+    assert health.ok
+    assert health.message == "Modal accepted MODAL_TOKEN_ID/MODAL_TOKEN_SECRET"
+    assert fake_modal.client.hellos == 1
+
+
+def test_credentials_rejected_reports_modal_error(modal_tokens, fake_modal) -> None:
+    fake_modal.client.error = FakeAuthError("Token validation failed")
+    check = check_credentials()
+    assert check.status is CredentialStatus.REJECTED and not check.ok
+    assert check.message == (
+        "Modal rejected MODAL_TOKEN_ID/MODAL_TOKEN_SECRET: Token validation failed"
+    )
     assert not ModalProvider().credentials_health().ok
+
+
+def test_credentials_error_never_echoes_token_values(
+    modal_tokens, fake_modal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret_with_newline = FAKE_TOKEN_SECRET + "\n"
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", secret_with_newline)
+    fake_modal.client.error = ValueError(f"Invalid metadata value: {secret_with_newline!r}")
+    check = check_credentials()
+    assert check.status is CredentialStatus.INVALID
+    assert "Invalid metadata value" in check.message and "<redacted>" in check.message
+    assert_no_token_values(check.message)
+
+
+def test_credentials_network_error_is_not_ok(modal_tokens, fake_modal) -> None:
+    fake_modal.client.error = OSError("connection refused")
+    check = check_credentials()
+    assert check.status is CredentialStatus.UNREACHABLE
+    assert check.message == (
+        "could not verify MODAL_TOKEN_ID/MODAL_TOKEN_SECRET: OSError: connection refused"
+    )
+
+
+def test_credentials_check_times_out(modal_tokens, fake_modal) -> None:
+    fake_modal.client.delay = 5
+    check = check_credentials(timeout=0.05)
+    assert check.status is CredentialStatus.UNREACHABLE
+    assert check.message == "no answer from Modal within 0.05 s"
+
+
+def test_credentials_without_sdk_say_so(modal_tokens, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "modal", None)
+    check = check_credentials()
+    assert check.status is CredentialStatus.SDK_MISSING
+    assert "modal SDK is not installed" in check.message
+    assert not ModalProvider().credentials_health().ok
+
+
+def test_credentials_missing_skips_the_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, fake_modal
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+    check = check_credentials()
+    assert check.status is CredentialStatus.MISSING
+    assert fake_modal.client.hellos == 0
+    (tmp_path / ".modal.toml").write_text("[default]\n")
+    assert check_credentials().message == "Modal accepted ~/.modal.toml"
 
 
 @pytest.fixture
@@ -164,6 +240,37 @@ def test_deploy_pulls_private_image_with_serialized_server(
     }
     assert fake_modal.deployed == [("multihull-live-mock", "main")]
     assert url == "https://ws--multihull-live-mock.modal.run"
+
+
+def test_deploy_pins_image_builder_version_only_while_deploying(
+    mock_kind_modal_spec: ServiceSpec,
+    fake_modal: FakeModal,
+    registry_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = mock_modal_target(mock_kind_modal_spec)
+    deploy_with_sdk(render_app_spec(target))
+    assert fake_modal.builder_versions == [IMAGE_BUILDER_VERSION]
+    assert IMAGE_BUILDER_VERSION_ENV not in os.environ
+    monkeypatch.setenv(IMAGE_BUILDER_VERSION_ENV, "PREVIEW")
+    deploy_with_sdk(render_app_spec(target))
+    assert fake_modal.builder_versions[-1] == "PREVIEW"
+    assert os.environ[IMAGE_BUILDER_VERSION_ENV] == "PREVIEW"
+
+
+def test_apply_error_keeps_image_build_hint_and_hides_secrets(
+    mock_kind_modal_spec: ServiceSpec, fake_modal: FakeModal, registry_env: dict[str, str]
+) -> None:
+    fake_modal.deploy_error = RuntimeError(
+        "Image build for im-AbC123 failed.\nView the build logs:\n  modal image logs im-AbC123"
+        f"\npull with {registry_env['GHCR_TOKEN']}"
+    )
+    with pytest.raises(RuntimeError) as raised:
+        ModalProvider(dry_run=False).apply(mock_modal_target(mock_kind_modal_spec), None)
+    message = str(raised.value)
+    assert "Image build for im-AbC123 failed." in message
+    assert "modal image logs im-AbC123" in message
+    assert registry_env["GHCR_TOKEN"] not in message and "<redacted>" in message
 
 
 def test_status_scale_and_logs_use_the_server_class(fake_modal: FakeModal) -> None:

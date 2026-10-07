@@ -19,6 +19,7 @@ Requirements:
 - The server must listen on `0.0.0.0`.
 - The Python running `hull deploy` must match the image's Python minor version, because the server class is serialized with cloudpickle.
 - An empty `resources.gpu` runs the container on CPU.
+- Deploys pin Modal's image builder to `2025.06`, whatever the workspace default. Modal then mounts its client at runtime instead of running `pip install` in the image, so images without `pip` (a uv venv first on `PATH`, for example) work. `MODAL_IMAGE_BUILDER_VERSION` overrides it.
 
 ## Private registries
 
@@ -36,7 +37,7 @@ Modal pulls the image once, during deploy, and caches it. A short-lived token, s
 
 | Spec field | Modal |
 |---|---|
-| `container.image` | `modal.Image.from_registry(ref@digest, secret=)` |
+| `container.image` | `modal.Image.from_registry(ref@digest, secret=)`, image builder `2025.06` |
 | `container.command`, `port` | `@modal.web_server(port, startup_timeout)` wrapping `subprocess.Popen(command)` |
 | `resources.gpu` | `gpu="A10G"`, `gpu="L4"`, and so on; `None` when empty |
 | `scaling.replicas` | `min_containers`, `max_containers`, `buffer_containers` |

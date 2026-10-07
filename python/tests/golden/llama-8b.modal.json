@@ -7,7 +7,8 @@
   },
   "image": {
     "ref": "ghcr.io/acme/vllm-llama:1.4.0",
-    "secret": null
+    "secret": null,
+    "builder_version": "2025.06"
   },
   "gpu": "L4",
   "memory_mib": 32768,

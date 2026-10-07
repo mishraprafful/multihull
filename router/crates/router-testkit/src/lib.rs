@@ -28,6 +28,10 @@ pub struct MockUpstreamConfig {
     pub stream_content_type: String,
     pub drop_connection: bool,
     pub etag: Option<String>,
+    pub failing_first: usize,
+    pub failing_status: StatusCode,
+    pub stalling_first: usize,
+    pub stall: Duration,
 }
 
 impl Default for MockUpstreamConfig {
@@ -44,6 +48,10 @@ impl Default for MockUpstreamConfig {
             stream_content_type: "text/event-stream".to_string(),
             drop_connection: false,
             etag: None,
+            failing_first: 0,
+            failing_status: StatusCode::OK,
+            stalling_first: 0,
+            stall: Duration::ZERO,
         }
     }
 }
@@ -98,6 +106,18 @@ impl MockUpstreamConfig {
         self.etag = Some(etag.into());
         self
     }
+
+    pub fn failing_first(mut self, requests: usize, status: StatusCode) -> Self {
+        self.failing_first = requests;
+        self.failing_status = status;
+        self
+    }
+
+    pub fn stalling_first(mut self, requests: usize, stall: Duration) -> Self {
+        self.stalling_first = requests;
+        self.stall = stall;
+        self
+    }
 }
 
 pub struct MockUpstream {
@@ -105,6 +125,7 @@ pub struct MockUpstream {
     tls: bool,
     requests: Arc<AtomicUsize>,
     not_modified: Arc<AtomicUsize>,
+    since_reconfigure: Arc<AtomicUsize>,
     config_tx: watch::Sender<MockUpstreamConfig>,
     shutdown_tx: Option<watch::Sender<bool>>,
 }
@@ -132,10 +153,12 @@ impl MockUpstream {
         let addr = listener.local_addr()?;
         let requests = Arc::new(AtomicUsize::new(0));
         let not_modified = Arc::new(AtomicUsize::new(0));
+        let since_reconfigure = Arc::new(AtomicUsize::new(0));
         let (config_tx, config_rx) = watch::channel(config);
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
         let counter = requests.clone();
         let not_modified_counter = not_modified.clone();
+        let since_counter = since_reconfigure.clone();
         let tls = acceptor.is_some();
         tokio::spawn(async move {
             loop {
@@ -150,11 +173,16 @@ impl MockUpstream {
                         let config_rx = config_rx.clone();
                         let counter = counter.clone();
                         let not_modified_counter = not_modified_counter.clone();
+                        let since_counter = since_counter.clone();
                         let acceptor = acceptor.clone();
                         tokio::spawn(async move {
                             let service = service_fn(move |req| {
                                 let config = config_rx.borrow().clone();
-                                let counters = (counter.clone(), not_modified_counter.clone());
+                                let counters = Counters {
+                                    requests: counter.clone(),
+                                    not_modified: not_modified_counter.clone(),
+                                    since_reconfigure: since_counter.clone(),
+                                };
                                 async move { respond(req, config, counters).await }
                             });
                             match acceptor {
@@ -181,6 +209,7 @@ impl MockUpstream {
             tls,
             requests,
             not_modified,
+            since_reconfigure,
             config_tx,
             shutdown_tx: Some(shutdown_tx),
         })
@@ -204,7 +233,10 @@ impl MockUpstream {
     }
 
     pub fn reconfigure(&self, config: MockUpstreamConfig) {
-        let _ = self.config_tx.send(config);
+        self.config_tx.send_modify(|current| {
+            self.since_reconfigure.store(0, Ordering::SeqCst);
+            *current = config;
+        });
     }
 }
 
@@ -216,14 +248,37 @@ impl Drop for MockUpstream {
     }
 }
 
+#[derive(Clone)]
+struct Counters {
+    requests: Arc<AtomicUsize>,
+    not_modified: Arc<AtomicUsize>,
+    since_reconfigure: Arc<AtomicUsize>,
+}
+
 async fn respond(
     req: Request<Incoming>,
     config: MockUpstreamConfig,
-    (counter, not_modified): (Arc<AtomicUsize>, Arc<AtomicUsize>),
+    counters: Counters,
 ) -> Result<Response<BoxBody<Bytes, std::io::Error>>, Infallible> {
-    counter.fetch_add(1, Ordering::SeqCst);
+    counters.requests.fetch_add(1, Ordering::SeqCst);
+    let index = counters.since_reconfigure.fetch_add(1, Ordering::SeqCst);
+    if index < config.stalling_first {
+        tokio::time::sleep(config.stall).await;
+    }
     if config.ttft_delay > Duration::ZERO {
         tokio::time::sleep(config.ttft_delay).await;
+    }
+    if index < config.failing_first {
+        let response = Response::builder()
+            .status(config.failing_status)
+            .header("content-type", "application/json")
+            .body(
+                Full::new(Bytes::from_static(b"{\"error\":\"mock failure\"}"))
+                    .map_err(|never| match never {})
+                    .boxed(),
+            )
+            .expect("valid response");
+        return Ok(response);
     }
     if let Some(etag) = &config.etag {
         let matches = req
@@ -232,7 +287,7 @@ async fn respond(
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value == etag);
         if matches {
-            not_modified.fetch_add(1, Ordering::SeqCst);
+            counters.not_modified.fetch_add(1, Ordering::SeqCst);
             let response = Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
                 .header("etag", etag)

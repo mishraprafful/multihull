@@ -50,9 +50,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.prefix.startswith("multihull-live-"):
         parser.error("--prefix must start with multihull-live-")
-    targets = stale_apps(
-        list_apps(args.env), args.prefix, timedelta(seconds=args.older_than), datetime.now(UTC)
-    )
+    try:
+        apps = list_apps(args.env)
+    except RuntimeError as exc:
+        print(f"skipped, {exc}")
+        return 1
+    targets = stale_apps(apps, args.prefix, timedelta(seconds=args.older_than), datetime.now(UTC))
     failed = 0
     for app in targets:
         result = modal("app", "stop", str(app["app_id"]), "--env", args.env, "--yes")
