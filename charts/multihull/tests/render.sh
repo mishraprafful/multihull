@@ -57,6 +57,27 @@ has_line() {
   grep -qxF "$line" "$work/$name.toml" || fail "$name" "missing line '$line'"
 }
 
+before() {
+  local name=$1 first=$2 second=$3 a b
+  a=$(grep -nxF "$first" "$work/$name.toml" | head -1 | cut -d: -f1)
+  b=$(grep -nxF "$second" "$work/$name.toml" | head -1 | cut -d: -f1)
+  if [ -z "$a" ] || [ -z "$b" ] || [ "$a" -ge "$b" ]; then
+    fail "$name" "expected '$first' before '$second'"
+  fi
+}
+
+template_fails() {
+  local name=$1 reason=$2
+  shift 2
+  if "$helm" template multihull "$chart" "$@" >/dev/null 2>"$work/$name.err"; then
+    fail "$name" "helm template succeeded but should fail"
+  elif ! grep -qF "$reason" "$work/$name.err"; then
+    fail "$name" "expected '$reason' in: $(cat "$work/$name.err")"
+  else
+    echo "ok   $name (template failed: $reason)"
+  fi
+}
+
 lacks() {
   local name=$1 text=$2
   if grep -qF "$text" "$work/$name.toml"; then
@@ -104,6 +125,17 @@ lacks null-tuning "[timeouts]"
 
 rejected string-duration 'invalid type: string "2s"' --set router.tuning.timeouts.connect=2s
 has_line string-duration 'connect = "2s"'
+
+accepted extra-config -f "$values/extra-config.yaml"
+before extra-config 'upstream_ca = "/etc/multihull/upstream-ca.pem"' "[snapshot]"
+before extra-config "max_buffered_body_bytes = 4194304" "[snapshot]"
+before extra-config "[retry]" "[log]"
+
+accepted extra-config-tables-only -f "$values/extra-config-tables-only.yaml"
+before extra-config-tables-only "[retry]" "[log]"
+
+template_fails extra-config-map "router.extraConfig must be a string of TOML" \
+  --set router.extraConfig.node_id=router-eu
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures chart render check(s) failed"

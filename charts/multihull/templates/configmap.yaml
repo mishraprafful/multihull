@@ -1,3 +1,9 @@
+{{- $extraConfig := .Values.router.extraConfig | default "" }}
+{{- if not (kindIs "string" $extraConfig) }}
+{{- fail "router.extraConfig must be a string of TOML" }}
+{{- end }}
+{{- $extraTables := regexFind "(?m)^[ \\t]*\\[(?s:.*)" $extraConfig }}
+{{- $extraTopLevel := trimSuffix $extraTables $extraConfig | trim -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,6 +16,9 @@ data:
     admin_listen = "0.0.0.0:{{ .Values.router.admin }}"
     {{- with .Values.router.region }}
     region = {{ . | quote }}
+    {{- end }}
+    {{- with $extraTopLevel }}
+    {{ . | indent 4 | trim }}
     {{- end }}
 
     [snapshot]
@@ -42,7 +51,7 @@ data:
     {{- end }}
     {{- end }}
     {{- end }}
-    {{- with .Values.router.extraConfig }}
+    {{- with $extraTables }}
 
     {{ . | indent 4 | trim }}
     {{- end }}
