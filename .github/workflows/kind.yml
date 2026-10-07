@@ -35,12 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: helm/kind-action@v1
+      - uses: actions/checkout@v7
+      - uses: helm/kind-action@v1.15.1
         with:
           cluster_name: ${{ env.KIND_CLUSTER }}
           config: testing/live/kind-config.yaml
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: Chart applies against the kind API server
         run: |
           helm template multihull charts/multihull --namespace default \
@@ -50,7 +50,7 @@ jobs:
             --set controller.stateBackend.existingSecret=multihull-state \
             --set controller.specConfigMap=multihull-spec \
             | kubectl apply --dry-run=server --namespace default -f -
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -88,7 +88,7 @@ jobs:
           --job-status "$JOB_STATUS" --artifact kind-logs --spec kind-docker
         env:
           JOB_STATUS: ${{ job.status }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: kind-logs
