@@ -3,6 +3,7 @@ name: Images
 on:
   push:
     branches: [main]
+    tags: ['v*']
     paths:
       - 'router/**'
       - 'proto/**'
@@ -41,7 +42,7 @@ jobs:
             context: .
             file: router/Dockerfile
     env:
-      PUSH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -55,9 +56,11 @@ jobs:
         id: meta
         with:
           images: ghcr.io/mishraprafful/multihull-${{ matrix.name }}
+          flavor: latest=false
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=main,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
