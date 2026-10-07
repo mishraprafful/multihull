@@ -68,6 +68,7 @@ export default defineConfig({
           items: [
             { label: 'CLI', slug: 'docs/reference/cli' },
             { label: 'Spec schema', slug: 'docs/reference/spec-schema' },
+            { label: 'Security', slug: 'docs/reference/security' },
           ],
         },
         {

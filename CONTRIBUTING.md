@@ -9,6 +9,7 @@ Coding agents: read [AGENTS.md](AGENTS.md) instead; it covers the same rules in 
 ## Ways to contribute
 
 - Bug reports: open a GitHub issue with the spec, the command, the output and the provider involved. Strip credentials first.
+- Security vulnerabilities: never in a public issue. Report them privately as described in [SECURITY.md](SECURITY.md).
 - Provider translators: one translator per provider, written against that provider's native SDK or API. No CRDs, no operators, no shim processes.
 - Router policies: scoring, circuits, retry budgets, sticky routing. Keep `router-core` free of IO.
 - Docs: the Astro Starlight site under `website/` and the design docs under `docs/design/`.
