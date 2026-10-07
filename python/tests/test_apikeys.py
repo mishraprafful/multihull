@@ -75,6 +75,6 @@ def test_missing_sources_yield_no_keys(tmp_path: Path, monkeypatch: pytest.Monke
 
 def test_api_key_hashes_are_sorted_and_deduplicated(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ROUTE_KEYS", "hull_b2_two,hull_a1_one,hull_b2_two")
-    hashes = apikeys.api_key_hashes("env:ROUTE_KEYS")
+    hashes = apikeys.api_key_hashes("llama-8b", "env:ROUTE_KEYS")
     expected = sorted({apikeys.hash_api_key("hull_a1_one"), apikeys.hash_api_key("hull_b2_two")})
     assert hashes == expected

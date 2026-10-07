@@ -19,6 +19,7 @@ uv tool install multihull
 hull init                       # detects Dockerfile, vLLM or TGI; writes multihull.yaml
 hull doctor                     # checks credentials and GPU availability per target
 hull plan                       # renders native payloads to .multihull/plan/, shows diff
+export LLAMA_8B_API_KEYS=...    # route keys hull_<id>_<secret>; deploy refuses a route with none
 hull deploy                     # applies all targets concurrently, waits for ready
 hull status
   gke-prod    Ready  2/2  L4    https://gke.int/llama

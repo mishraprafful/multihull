@@ -77,8 +77,8 @@ Rules for entries
 - [ ] `router/crates/router-core/src/circuit.rs:77`: `panic_threshold` accepts 0.0 and rejects 1.0. Use (0, 1] and revisit the test that rejects 1.0.
 - [ ] `router/crates/router-core/src/pressure.rs:30`: NaN or infinity pass `ttft_degrade_factor` validation. Require finite and greater than 1.
 - [ ] `router/crates/router-core/src/retry.rs:30` and circuit.rs ratio window: fractional windows are truncated to whole seconds by `as_secs()`. Reject non-integer windows or bucket on milliseconds.
-- [ ] `router/crates/router-proxy/src/body.rs:203`: hitting `timeouts.total` is reported as a retryable upstream disconnect and counted against the endpoint. Skip the circuit record and emit a distinct non-retryable error type.
-- [ ] `router/crates/router-proxy/src/handler.rs:587` (predates PR 29): `admit()` spends the half-open trial before `try_reserve` checks headroom. Reserve first, then admit.
+- [x] `router/crates/router-proxy/src/body.rs:203`: hitting `timeouts.total` is reported as a retryable upstream disconnect and counted against the endpoint. Skip the circuit record and emit a distinct non-retryable error type. Done in PR 86.
+- [x] `router/crates/router-proxy/src/handler.rs:587` (predates PR 29): `admit()` spends the half-open trial before `try_reserve` checks headroom. Reserve first, then admit. Done in PR 86.
 - [ ] RunPod and Baseten translators inject no provider auth and Baseten's base URL ends in `/production/predict`, so their probes and traffic will fail once implemented; fix with their `apply` work.
 
 **Controller:**
@@ -100,7 +100,8 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some 
 ## Session log
 
 ### 2026-10-08
-- Issue 48 on branch `ci/publish-helm-chart`: release tags push the chart to `oci://ghcr.io/mishraprafful/charts/multihull`, `images.yml` tags images with the release version (no `latest`), docs gained "Install from OCI" in the router overview.
+- PR 86 (issues 53, 54): a stream reaching `timeouts.total` feeds no circuit and ends with a non-retryable `total_timeout` event or trailer; selection reserves headroom before taking the half-open trial. Each fix has a test that failed first.
+- PR 90 (issue 48): release tags push the chart to `oci://ghcr.io/mishraprafful/charts/multihull`, `images.yml` tags images with the release version (no `latest`), docs gained "Install from OCI" in the router overview.
 - Decision: one script, `charts/package.sh`, packages for both CI and release, so the PR dry run exercises the release path. It rejects tags that are not `v<semver>`, and build metadata, because `+` is not valid in an image tag.
 - Decision: the chart job waits up to 30 minutes for `multihull-router:<version>` before pushing, so a published chart never defaults to a missing image.
 - Lesson: `helm package --version v1.2` succeeds; Helm's own semver parsing is loose.

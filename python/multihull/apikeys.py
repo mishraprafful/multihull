@@ -39,7 +39,11 @@ def read_entries(source: str) -> list[tuple[str, str]]:
         if not path.exists():
             return []
         lines = [line.strip() for line in path.read_text().splitlines()]
-        return [(f"line {n}", line) for n, line in enumerate(lines, start=1) if line]
+        return [
+            (f"line {n}", line)
+            for n, line in enumerate(lines, start=1)
+            if line and not line.startswith("#")
+        ]
     raise ApiKeyError(f"unsupported api key source: {source}")
 
 
@@ -54,5 +58,8 @@ def load_api_keys(source: str) -> list[str]:
     return keys
 
 
-def api_key_hashes(source: str) -> list[str]:
-    return sorted({hash_api_key(key) for key in load_api_keys(source)})
+def api_key_hashes(route: str, source: str) -> list[str]:
+    hashes = sorted({hash_api_key(key) for key in load_api_keys(source)})
+    if not hashes:
+        raise ApiKeyError(f"route `{route}` sets auth.apiKeys but {source} resolved to no keys")
+    return hashes

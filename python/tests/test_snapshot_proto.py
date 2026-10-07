@@ -67,6 +67,7 @@ def test_dict_and_proto_snapshot_share_fields(
     assert list(proto_route.failover.retry_on) == route["failover"]["retry_on"]
     assert proto_route.failover.max_retries == 2
     assert list(proto_route.auth.api_key_hashes) == route["auth"]["api_key_hashes"]
+    assert proto_route.auth.required is True
     assert proto_route.sticky.key == "header:X-Session-Id"
     assert proto_route.sticky.ttl_seconds == 900
     assert proto_route.sticky.mode == pb.STICKY_MODE_ENDPOINT
@@ -99,7 +100,6 @@ def test_dict_and_proto_snapshot_share_fields(
 def test_snapshot_without_auth_or_sticky(
     llama_spec: ServiceSpec, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("LLAMA_API_KEYS", raising=False)
     snapshot = seeded_snapshot(llama_spec, tmp_path)
     snapshot["routes"][0]["auth"] = None
     message = discovery.snapshot_to_proto(snapshot)
