@@ -103,6 +103,16 @@ controller_accepted() {
   fi
 }
 
+manifest_has() {
+  local name=$1 template=$2 text=$3
+  shift 3
+  if ! "$helm" template multihull "$chart" --show-only "templates/$template" "$@" >"$work/$name-manifest.yaml"; then
+    fail "$name" "helm template failed for $template"
+  elif ! grep -qF -- "$text" "$work/$name-manifest.yaml"; then
+    fail "$name" "missing '$text' in $template"
+  fi
+}
+
 lacks() {
   local name=$1 text=$2
   if grep -qF "$text" "$work/$name.toml"; then
@@ -114,9 +124,21 @@ accepted defaults
 has_line defaults "bound = 1024"
 has_line defaults "ttft_degrade_factor = 2"
 
-accepted grpc-tls-region \
-  --set controller.enabled=true --set controller.stateBackend.existingSecret=state \
-  --set controller.specConfigMap=spec --set router.snapshot.type=grpc \
+controller=(
+  --set controller.enabled=true --set controller.stateBackend.existingSecret=state
+  --set controller.specConfigMap=spec
+)
+controller_tls=(
+  "${controller[@]}" --set controller.tls.secretName=controller-tls
+  --set controller.tls.clientCaSecret=discovery-ca
+  --set controller.token.existingSecret=discovery-token
+)
+router_tls=(
+  --set router.snapshot.type=grpc --set router.snapshot.tls.secretName=router-discovery
+  --set router.snapshot.token.existingSecret=discovery-token
+)
+
+accepted grpc-tls-region "${controller_tls[@]}" "${router_tls[@]}" \
   --set router.tls.secretName=router-tls --set router.region=eu
 has_line grpc-tls-region 'region = "eu"'
 has_line grpc-tls-region "[tls]"
@@ -162,9 +184,81 @@ before extra-config-tables-only "[retry]" "[log]"
 template_fails extra-config-map "router.extraConfig must be a string of TOML" \
   --set router.extraConfig.node_id=router-eu
 
-controller_accepted controller-args \
-  --set controller.enabled=true --set controller.stateBackend.existingSecret=state \
-  --set controller.specConfigMap=spec
+controller_accepted controller-args "${controller_tls[@]}"
+
+accepted grpc-mtls-token "${controller_tls[@]}" "${router_tls[@]}"
+has_line grpc-mtls-token 'source = "grpcs://multihull-controller:9443"'
+has_line grpc-mtls-token 'ca = "/etc/multihull/discovery/ca.crt"'
+has_line grpc-mtls-token 'client_cert = "/etc/multihull/discovery/tls.crt"'
+has_line grpc-mtls-token 'client_key = "/etc/multihull/discovery/tls.key"'
+has_line grpc-mtls-token 'token_env = "MULTIHULL_DISCOVERY_TOKEN"'
+lacks grpc-mtls-token "insecure"
+manifest_has grpc-mtls-token router-deployment.yaml "secretName: router-discovery" \
+  "${controller_tls[@]}" "${router_tls[@]}"
+manifest_has grpc-mtls-token router-deployment.yaml "name: MULTIHULL_DISCOVERY_TOKEN" \
+  "${controller_tls[@]}" "${router_tls[@]}"
+manifest_has grpc-mtls-token controller-deployment.yaml "secretName: discovery-ca" \
+  "${controller_tls[@]}"
+manifest_has grpc-mtls-token controller-deployment.yaml "name: discovery-token" \
+  "${controller_tls[@]}"
+controller_accepted grpc-mtls-token-controller "${controller_tls[@]}"
+
+accepted grpc-tls-token-only "${controller[@]}" \
+  --set controller.tls.secretName=controller-tls \
+  --set controller.token.existingSecret=discovery-token \
+  --set router.snapshot.type=grpc --set router.snapshot.tls.secretName=router-discovery \
+  --set router.snapshot.tls.clientCertificate=false \
+  --set router.snapshot.token.existingSecret=discovery-token
+has_line grpc-tls-token-only 'ca = "/etc/multihull/discovery/ca.crt"'
+lacks grpc-tls-token-only "client_cert"
+controller_accepted grpc-tls-token-only-controller "${controller[@]}" \
+  --set controller.tls.secretName=controller-tls \
+  --set controller.token.existingSecret=discovery-token
+
+accepted grpc-external-mtls --set router.snapshot.type=grpc \
+  --set router.snapshot.value=controller.example.com:7700 \
+  --set router.snapshot.tls.secretName=router-discovery
+has_line grpc-external-mtls 'source = "grpcs://controller.example.com:7700"'
+lacks grpc-external-mtls "token_env"
+
+accepted grpc-plaintext-opt-in "${controller[@]}" --set controller.insecure=true \
+  --set router.snapshot.type=grpc --set router.snapshot.insecure=true
+has_line grpc-plaintext-opt-in 'source = "grpc://multihull-controller:9443"'
+has_line grpc-plaintext-opt-in "insecure = true"
+manifest_has grpc-plaintext-opt-in controller-deployment.yaml '- "--insecure"' \
+  "${controller[@]}" --set controller.insecure=true
+controller_accepted grpc-plaintext-opt-in-controller "${controller[@]}" \
+  --set controller.insecure=true
+
+accepted https-token --set router.snapshot.type=http \
+  --set router.snapshot.value=https://snapshots.example.com/llama.json \
+  --set router.snapshot.token.existingSecret=snapshot-token
+has_line https-token 'source = "https://snapshots.example.com/llama.json"'
+has_line https-token 'token_env = "MULTIHULL_DISCOVERY_TOKEN"'
+lacks https-token "ca = "
+
+accepted http-plaintext-opt-in --set router.snapshot.type=http \
+  --set router.snapshot.value=http://snapshots.local/llama.json --set router.snapshot.insecure=true
+has_line http-plaintext-opt-in "insecure = true"
+
+template_fails grpc-without-tls "router.snapshot.tls.secretName" \
+  "${controller_tls[@]}" --set router.snapshot.type=grpc
+template_fails http-plaintext-without-opt-in "is plaintext" \
+  --set router.snapshot.type=http --set router.snapshot.value=http://snapshots.local/llama.json
+template_fails grpc-insecure-with-tls "cannot be combined" \
+  "${controller_tls[@]}" "${router_tls[@]}" --set router.snapshot.insecure=true
+template_fails https-insecure "only permits plaintext" --set router.snapshot.type=http \
+  --set router.snapshot.value=https://snapshots.example.com/llama.json \
+  --set router.snapshot.insecure=true
+template_fails file-with-token "not to a snapshot file" \
+  --set router.snapshot.token.existingSecret=discovery-token
+template_fails grpc-without-address "host:port" --set router.snapshot.type=grpc \
+  --set router.snapshot.tls.secretName=router-discovery
+template_fails controller-without-tls "controller.tls.secretName is required" "${controller[@]}"
+template_fails controller-tls-without-client-auth "controller.tls.clientCaSecret" \
+  "${controller[@]}" --set controller.tls.secretName=controller-tls
+template_fails controller-insecure-with-tls "controller.insecure cannot be combined" \
+  "${controller_tls[@]}" --set controller.insecure=true
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures chart render check(s) failed"

@@ -1,4 +1,15 @@
 {{- if .Values.controller.enabled }}
+{{- $tls := .Values.controller.tls | default dict }}
+{{- $token := .Values.controller.token | default dict }}
+{{- if and .Values.controller.insecure (or $tls.secretName $tls.clientCaSecret) }}
+{{- fail "controller.insecure cannot be combined with controller.tls" }}
+{{- end }}
+{{- if and (not .Values.controller.insecure) (not $tls.secretName) }}
+{{- fail "controller.tls.secretName is required: the discovery stream carries provider credentials. Point it at a Secret with tls.crt and tls.key, or set controller.insecure=true for local development only" }}
+{{- end }}
+{{- if and $tls.secretName (not $tls.clientCaSecret) (not $token.existingSecret) }}
+{{- fail "controller.tls needs controller.tls.clientCaSecret (mTLS), controller.token.existingSecret or both to authenticate routers" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,6 +46,21 @@ spec:
             - "/etc/multihull/multihull.yaml"
             - "--grpc-listen"
             - "0.0.0.0:{{ .Values.controller.grpcPort }}"
+            {{- if .Values.controller.insecure }}
+            - "--insecure"
+            {{- end }}
+            {{- if $tls.secretName }}
+            - "--tls-cert"
+            - "/etc/multihull/discovery/tls/tls.crt"
+            - "--tls-key"
+            - "/etc/multihull/discovery/tls/tls.key"
+            {{- end }}
+            {{- if $tls.clientCaSecret }}
+            - "--client-ca"
+            - "/etc/multihull/discovery/client-ca/ca.crt"
+            {{- end }}
+            - "--token-env"
+            - {{ include "multihull.tokenEnv" . | quote }}
           ports:
             - name: grpc
               containerPort: {{ .Values.controller.grpcPort }}
@@ -45,20 +71,51 @@ spec:
                 secretKeyRef:
                   name: {{ required "controller.stateBackend.existingSecret is required when controller.enabled" .Values.controller.stateBackend.existingSecret }}
                   key: {{ .Values.controller.stateBackend.key }}
+            {{- with $token.existingSecret }}
+            - name: {{ include "multihull.tokenEnv" $ }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $token.key | default "token" }}
+            {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
-          {{- if .Values.controller.specConfigMap }}
+          {{- if or .Values.controller.specConfigMap $tls.secretName $tls.clientCaSecret }}
           volumeMounts:
+            {{- if .Values.controller.specConfigMap }}
             - name: spec
               mountPath: /etc/multihull/multihull.yaml
               subPath: multihull.yaml
               readOnly: true
+            {{- end }}
+            {{- if $tls.secretName }}
+            - name: discovery-tls
+              mountPath: /etc/multihull/discovery/tls
+              readOnly: true
+            {{- end }}
+            {{- if $tls.clientCaSecret }}
+            - name: discovery-client-ca
+              mountPath: /etc/multihull/discovery/client-ca
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if .Values.controller.specConfigMap }}
+      {{- if or .Values.controller.specConfigMap $tls.secretName $tls.clientCaSecret }}
       volumes:
+        {{- with .Values.controller.specConfigMap }}
         - name: spec
           configMap:
-            name: {{ .Values.controller.specConfigMap }}
+            name: {{ . }}
+        {{- end }}
+        {{- with $tls.secretName }}
+        - name: discovery-tls
+          secret:
+            secretName: {{ . }}
+        {{- end }}
+        {{- with $tls.clientCaSecret }}
+        - name: discovery-client-ca
+          secret:
+            secretName: {{ . }}
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1
