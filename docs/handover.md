@@ -48,7 +48,7 @@ Rules for entries
 | 2026-10-07 | Pulling one digest-pinned registry image is the only image path; no Modal-side builds | Owner's call after weighing `Image.from_dockerfile`: failover must land on byte-identical containers |
 | 2026-10-07 | Modal deploys pin image builder `2025.06`; `MODAL_IMAGE_BUILDER_VERSION` overrides | The workspace default 2023.12 builder runs pip inside the image, and uv-based images have no pip |
 | 2026-10-07 | Placeholders published by hand from `fbdf211`; real releases go through trusted publishing | Publishing `main` would expose private source, and the crate depends on internal crates that cannot be published |
-| 2026-10-07 | An upstream 408 is Transient and retried without idempotency; when every untried provider is open, a retry returns to a tried provider that answered and is still closed, before the panic pool | Live run 37678680863: 408 means the upstream never received the request, and retries spent on kind (circuit open, probe down) turned recoverable Modal timeouts into 502s |
+| 2026-10-07 | An upstream 408 is Transient, retried only for idempotent or keyed requests; when every untried provider is open, a retry returns to a tried provider that answered and is still closed, before the panic pool | Live run 37678680863: Modal's 408s were forwarded as Fatal, yet Modal logged about 5 s of execution for them, so a keyless POST may already have reached the model; retries spent on kind (circuit open, probe down) turned recoverable Modal timeouts into 502s |
 
 ## Open questions
 
@@ -100,7 +100,7 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some 
 ## Session log
 
 ### 2026-10-07 (later)
-- Live smoke run 37678680863 failed after merging main: Modal's single container held 37 in-flight inputs against `max_inputs` 32, so 17 requests got Modal `408 Request Timeout`, forwarded as Fatal, and 7 missed the 10 s first-byte deadline, were retried on kind (circuit open, probe down) and became router `502 upstream_unavailable`. Fixed on PR 37: 408 is Transient and retryable, retries return to a healthy tried provider before the panic pool, `hull validate/plan/deploy` warn when fallbacks are below the 1.4 overprovision floor, live Modal `replicas.max` is 2.
+- Live smoke run 37678680863 failed after merging main: Modal's single container held 37 in-flight inputs against `max_inputs` 32, so 17 requests got Modal `408 Request Timeout`, forwarded as Fatal, and 7 missed the 10 s first-byte deadline, were retried on kind (circuit open, probe down) and became router `502 upstream_unavailable`. Fixed on PR 37: 408 is Transient (retried only for idempotent or keyed requests), retries return to a healthy tried provider before the panic pool, `hull validate/plan/deploy` warn when fallbacks are below the 1.4 overprovision floor, live Modal `replicas.max` is 2.
 - Merged PRs 30 to 37. Hunk review of PR 29 led to the blocker fixes (30) and probe masking fixes (33).
 - CI on `main` went red after PR 33 from two timing flakes. One was a real router bug: any short queue wait cleared queue pressure while others still waited, so `Degraded` could go unsent under saturation. Fixed in PR 35 with a test that fails on the old code.
 - First live smoke attempts: Modal rejected the old token (run 37666477209); after regenerating it, Modal's legacy image builder failed with `No module named pip` (run 37667963715). PR 37 added credential checks, build-log capture and the pinned builder; run 37671938141 passed.
