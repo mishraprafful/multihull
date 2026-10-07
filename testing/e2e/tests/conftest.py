@@ -11,11 +11,14 @@ import pytest
 from e2e.client import RouterClient
 from e2e.harness import (
     AUTH_SPEC_NAME,
+    RUN_ID,
+    SERVICE,
     SPEC_NAME,
     STICKY_SPEC_NAME,
     Controller,
     Deployment,
     Router,
+    host_ports,
     rewrite_spec,
     sweep_containers,
 )
@@ -24,7 +27,11 @@ E2E_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = E2E_ROOT.parents[1]
 SPECS = E2E_ROOT / "specs"
 DEFAULT_IMAGE = "multihull-mock-server:e2e"
-DEFAULT_BASE_PORT = 18100
+SPEC_SOURCES = {
+    SPEC_NAME: "three-docker.yaml",
+    STICKY_SPEC_NAME: "three-docker-sticky.yaml",
+    AUTH_SPEC_NAME: "three-docker-auth.yaml",
+}
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -85,15 +92,11 @@ def sweeper(docker_client: docker.DockerClient) -> list[str]:
 
 @pytest.fixture(scope="session")
 def workdir(tmp_path_factory: pytest.TempPathFactory, mock_image: str) -> Path:
-    directory = tmp_path_factory.mktemp("multihull-e2e")
-    base_port = int(os.environ.get("E2E_BASE_PORT", DEFAULT_BASE_PORT))
-    rewrite_spec(SPECS / "three-docker.yaml", directory / SPEC_NAME, mock_image, base_port)
-    rewrite_spec(
-        SPECS / "three-docker-sticky.yaml", directory / STICKY_SPEC_NAME, mock_image, base_port
-    )
-    rewrite_spec(
-        SPECS / "three-docker-auth.yaml", directory / AUTH_SPEC_NAME, mock_image, base_port
-    )
+    directory = tmp_path_factory.mktemp(f"multihull-e2e-{RUN_ID}")
+    configured = os.environ.get("E2E_BASE_PORT")
+    ports = host_ports(RUN_ID, int(configured) if configured else None)
+    for name, source in SPEC_SOURCES.items():
+        rewrite_spec(SPECS / source, directory / name, mock_image, SERVICE, ports)
     (directory / ".multihull").mkdir()
     return directory
 

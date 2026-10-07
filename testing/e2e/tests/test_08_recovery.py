@@ -4,7 +4,7 @@ import threading
 import time
 
 from e2e.client import Outcome, RouterClient, failures, fresh_keys, load
-from e2e.harness import Deployment, Router, probe_ejection_budget
+from e2e.harness import Deployment, Router, endpoint_id, probe_ejection_budget
 from e2e.sampler import EndpointSampler
 from e2e.waiting import wait_until
 
@@ -73,5 +73,5 @@ def test_traffic_returns_to_primary_only_after_the_circuit_closes(
     assert sampler.states() >= {"open", "closed"}
 
     metrics = router.metrics()
-    assert metrics.circuit_state("e2e-three/primary") == 0
-    assert metrics.requests(endpoint="e2e-three/primary", outcome="success") >= len(from_primary)
+    assert metrics.circuit_state(endpoint_id("primary")) == 0
+    assert metrics.requests(endpoint=endpoint_id("primary"), outcome="success") >= len(from_primary)

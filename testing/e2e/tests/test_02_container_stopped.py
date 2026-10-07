@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 
 from e2e.client import Outcome, RouterClient, fresh_keys, load, server_errors
-from e2e.harness import Deployment, Router, probe_ejection_budget
+from e2e.harness import Deployment, Router, endpoint_id, probe_ejection_budget
 from e2e.waiting import wait_until
 
 STOP_AFTER = 10
@@ -45,8 +45,8 @@ def test_stopped_primary_fails_over_without_client_errors(
 
     metrics = router.metrics()
     assert metrics.failovers(**{"from": "primary", "reason": "transient"}) >= 1
-    assert metrics.requests(endpoint="e2e-three/secondary", outcome="success") >= 1
-    assert metrics.circuit_state("e2e-three/primary") == 2
+    assert metrics.requests(endpoint=endpoint_id("secondary"), outcome="success") >= 1
+    assert metrics.circuit_state(endpoint_id("primary")) == 2
 
     wait_until(
         lambda: router.endpoint("primary")["health"] == "down",

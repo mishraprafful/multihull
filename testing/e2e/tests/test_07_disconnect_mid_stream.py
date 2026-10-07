@@ -3,10 +3,10 @@ from __future__ import annotations
 import uuid
 
 from e2e.client import RouterClient, stream_raw
-from e2e.harness import Deployment, Router
+from e2e.harness import Deployment, Router, endpoint_id
 
 DISCONNECT_AFTER = 3
-PRIMARY = "e2e-three/primary"
+PRIMARY = endpoint_id("primary")
 
 
 def test_mid_stream_disconnect_ends_with_a_terminal_event_and_no_splice(

@@ -10,26 +10,37 @@ E2E_ROUTER_BIN=$PWD/router/target/release/multihull make e2e-quick
 cd testing/e2e && uv run pytest -q tests/test_04_capacity_429.py
 ```
 
-Env: `E2E_ROUTER_BIN` (skip the cargo build), `E2E_MOCK_IMAGE` (skip the docker build), `E2E_BASE_PORT` (host ports, default 18101 to 18103). Docker must be running. Each test has a 600 s timeout; the suite takes about four minutes.
+Env: `E2E_ROUTER_BIN` (skip the cargo build), `E2E_MOCK_IMAGE` (skip the docker build), `E2E_RUN_ID`, `E2E_BASE_PORT` (fixed host ports base+1 to base+3). Docker must be running. Each test has a 600 s timeout; the suite takes about four minutes.
+
+## Concurrent runs
+
+Each run has an id: `E2E_RUN_ID` (lowercase letters, digits and inner dashes, at most 30 characters) or a random six-character hex id. It names the service `e2e-three-<id>`, so containers are `multihull-e2e-three-<id>-<target>`, labelled `multihull.dev/service=e2e-three-<id>`; it also names the temp dir and the router node id. Host ports come from the first free block in 20001 to 29993 (three ports per block), starting at a block derived from the id, unless `E2E_BASE_PORT` is set. Teardown and the sweeper remove only that run's containers.
+
+```sh
+E2E_RUN_ID=wt-a make e2e &
+E2E_RUN_ID=wt-b make e2e
+```
+
+To clean up after a crashed run, rerun with the same `E2E_RUN_ID` (the sweeper removes its containers first) or `docker rm -f $(docker ps -aq --filter label=multihull.dev/service=e2e-three-<id>)`.
 
 ## Fixtures (`tests/conftest.py`)
 
 | Fixture | Scope | What it does |
 |---|---|---|
 | `mock_image`, `router_binary` | session | build once or read from env |
-| `sweeper` | session | removes containers labelled `multihull.dev/service=e2e-three` left by a crashed run |
-| `workdir` | session | temp dir with `multihull.yaml`, `multihull-sticky.yaml`, `multihull-auth.yaml` (route keys from `file:route-api-keys`, written by `test_14` with fake keys), `.multihull/` |
+| `sweeper` | session | removes this run's containers (`multihull.dev/service=e2e-three-<id>`) left by a crashed run with the same id |
+| `workdir` | session | temp dir `multihull-e2e-<id>` with `multihull.yaml`, `multihull-sticky.yaml`, `multihull-auth.yaml` (route keys from `file:route-api-keys`, written by `test_14` with fake keys), `.multihull/` |
 | `deployment` | session | `hull deploy --apply --wait`, yields targets and mock handles, `hull destroy --yes` at teardown |
 | `controller` | session | `hull controller --interval 2s --degraded-cooldown 5s`, restartable with another spec |
 | `reset_faults` | function, autouse | restarts stopped containers, resets every knob, waits for docker health before and after each test |
 | `router` | function | fresh router per test, `grpc` source by default, `file` via the `router_source` indirect param, extra `router.toml` tables via `@pytest.mark.router_tuning(probe={...})`; attaches router and controller logs on failure |
 | `client`, `stream` | function | `RouterClient` for the router and the streaming parametrization |
 
-Helpers: `deployment.mock(name).control(**knobs)` and `.stats()`, `deployment.stop_container(name)` and `start_container(name)`, `router.endpoints()`, `router.metrics()` (parsed Prometheus text), `load(client, n, stream, concurrency, idempotency_key)` returning per-request `Outcome`s, `stream_raw(base_url, ...)` returning the raw SSE `data:` frames, `wait_until(pred, timeout)`, `EndpointSampler(router, provider)` (context manager) recording `/debug/endpoints` circuit and probe state in the background, with the times each poll was sent and answered.
+Helpers: `endpoint_id(provider)` (router endpoint id `e2e-three-<id>/<provider>`, for metrics labels and debug output), `deployment.mock(name).control(**knobs)` and `.stats()`, `deployment.stop_container(name)` and `start_container(name)`, `router.endpoints()`, `router.metrics()` (parsed Prometheus text), `load(client, n, stream, concurrency, idempotency_key)` returning per-request `Outcome`s, `stream_raw(base_url, ...)` returning the raw SSE `data:` frames, `wait_until(pred, timeout)`, `EndpointSampler(router, provider)` (context manager) recording `/debug/endpoints` circuit and probe state in the background, with the times each poll was sent and answered.
 
 ## Adding a scenario
 
-Create `tests/test_NN_name.py` (modules run in numeric order), request `deployment`, `router`, `client` and `stream`, inject a fault through the mock knobs or the docker SDK, then assert on `Outcome`s and on `router.metrics()`. Mark rows that cannot pass yet with `pytest.mark.xfail(strict=False, reason=...)` rather than deleting them.
+Create `tests/test_NN_name.py` (modules run in numeric order), request `deployment`, `router`, `client` and `stream`, inject a fault through the mock knobs or the docker SDK, then assert on `Outcome`s and on `router.metrics()`, naming endpoints with `endpoint_id(provider)` rather than a literal service name. Mark rows that cannot pass yet with `pytest.mark.xfail(strict=False, reason=...)` rather than deleting them.
 
 ## Known limitations
 

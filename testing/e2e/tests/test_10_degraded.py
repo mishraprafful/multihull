@@ -8,7 +8,14 @@ from typing import Any
 import pytest
 
 from e2e.client import RouterClient, load_for
-from e2e.harness import DEGRADED_COOLDOWN_SECONDS, TARGETS, Controller, Deployment, Router
+from e2e.harness import (
+    DEGRADED_COOLDOWN_SECONDS,
+    SERVICE,
+    TARGETS,
+    Controller,
+    Deployment,
+    Router,
+)
 from e2e.waiting import wait_until
 
 SCALE_UP = re.compile(r"scale (\w+) to min=(\d+) failed")
@@ -17,6 +24,7 @@ TIMESTAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})")
 HOUSEKEEPING_SECONDS = 0.5
 RESEND_SECONDS = 1
 CLIENTS = 12
+DEGRADED_LINE = f"degraded {SERVICE}/"
 
 
 def logged_at(line: str) -> datetime:
@@ -48,7 +56,7 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded_and_scales_
     budget = queue_pressure_budget(config)
     for name in TARGETS:
         deployment.mock(name).control(max_inflight=1, ttft_ms=1500)
-    degraded_before = len(controller.log_lines("degraded e2e-three/"))
+    degraded_before = len(controller.log_lines(DEGRADED_LINE))
     scale_before = len(controller.log_lines("scale "))
     scale_back_before = len(controller.log_lines("scale back "))
 
@@ -69,7 +77,7 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded_and_scales_
     assert any(outcome.status == 200 for outcome in outcomes)
 
     degraded = wait_until(
-        lambda: controller.log_lines("degraded e2e-three/")[degraded_before:],
+        lambda: controller.log_lines(DEGRADED_LINE)[degraded_before:],
         budget,
         message="controller logs a Degraded signal",
     )
@@ -111,7 +119,7 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded_and_scales_
     assert all("exactly one container" in line for line in attempts)
 
     first_scale_back = min(logged_at(line) for line in attempts)
-    episode = controller.log_lines("degraded e2e-three/")[degraded_before:]
+    episode = controller.log_lines(DEGRADED_LINE)[degraded_before:]
     assert len(episode) >= 2, episode
     last_degraded = max(logged_at(line) for line in episode)
     assert last_degraded < first_scale_back, "scaled back while Degraded was still arriving"
