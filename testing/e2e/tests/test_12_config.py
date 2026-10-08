@@ -29,6 +29,7 @@ TUNING = {
         "ttft_degrade_factor": 3.0,
         "ttft_window": 20,
         "ttft_baseline_smoothing": 0.3,
+        "ttft_rebaseline_after": 900,
     },
     "probe": {
         "enabled": True,
