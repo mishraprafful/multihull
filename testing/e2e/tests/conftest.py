@@ -117,7 +117,7 @@ def deployment(
 
 @pytest.fixture(scope="session")
 def stream_credentials(tmp_path_factory: pytest.TempPathFactory) -> StreamCredentials:
-    return generate_credentials(tmp_path_factory.mktemp("stream-tls"))
+    return generate_credentials(tmp_path_factory.mktemp(f"stream-tls-{RUN_ID}"))
 
 
 @pytest.fixture(scope="session")

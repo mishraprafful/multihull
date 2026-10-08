@@ -31,7 +31,7 @@ To clean up after a crashed run, rerun with the same `E2E_RUN_ID` (the sweeper r
 | `sweeper` | session | removes this run's containers (`multihull.dev/service=e2e-three-<id>`) left by a crashed run with the same id |
 | `workdir` | session | temp dir `multihull-e2e-<id>` with `multihull.yaml`, `multihull-sticky.yaml`, `multihull-auth.yaml` (route keys from `file:route-api-keys`, written by `test_14` with fake keys), `.multihull/` |
 | `deployment` | session | `hull deploy --apply --wait`, yields targets and mock handles, `hull destroy --yes` at teardown |
-| `stream_credentials` | session | CA, controller and router certificates and a bootstrap token generated per run (`e2e/stream.py`); keys never leave the temp dir |
+| `stream_credentials` | session | CA, controller and router certificates and a bootstrap token generated per run (`e2e/stream.py`); keys never leave the temp dir `stream-tls-<id>` |
 | `controller` | session | `hull controller --interval 2s --degraded-cooldown 5s` with `--tls-cert`, `--tls-key`, `--client-ca` and the token in `MULTIHULL_DISCOVERY_TOKEN`, restartable with another spec |
 | `reset_faults` | function, autouse | restarts stopped containers, resets every knob, waits for docker health before and after each test |
 | `router` | function | fresh router per test, `grpcs` source with `ca`, `client_cert`, `client_key` and `token_env` by default, `file` via the `router_source` indirect param, extra `router.toml` tables via `@pytest.mark.router_tuning(probe={...})`; attaches router and controller logs on failure |
