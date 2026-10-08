@@ -7,10 +7,12 @@ from typing import Any
 
 import pytest
 
+from multihull.providers import kubernetes as kubernetes_provider
 from multihull.providers.base import Ref, Target
 from multihull.providers.kubernetes import (
     ENDPOINT_ANNOTATION,
     FIELD_MANAGER,
+    DynamicKubeClient,
     KubernetesProvider,
     gpu_offers_from_nodes,
     gpu_scheduling,
@@ -200,6 +202,67 @@ def test_credentials_health_missing_context(tmp_path, monkeypatch: pytest.Monkey
     health = KubernetesProvider(context="gke_acme_europe-west4_prod").credentials_health()
     assert not health.ok and "not found" in health.message
     assert KubernetesProvider(context="other").credentials_health().ok
+
+
+@pytest.fixture
+def in_pod(tmp_path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    from kubernetes import config, dynamic
+
+    calls: dict[str, Any] = {}
+
+    def load_incluster_config(client_configuration: Any) -> None:
+        client_configuration.host = "https://10.96.0.1:443"
+        calls["incluster"] = client_configuration
+
+    def new_client_from_config(context: str | None = None) -> Any:
+        from kubernetes import client
+
+        calls["kubeconfig_context"] = context
+        return client.ApiClient()
+
+    token = tmp_path / "serviceaccount" / "token"
+    token.parent.mkdir()
+    token.write_text("fixture")
+    monkeypatch.setattr(config, "load_incluster_config", load_incluster_config)
+    monkeypatch.setattr(config, "new_client_from_config", new_client_from_config)
+    monkeypatch.setattr(dynamic, "DynamicClient", lambda api_client: api_client)
+    monkeypatch.setattr(kubernetes_provider, "SERVICE_ACCOUNT_TOKEN", token)
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.96.0.1")
+    monkeypatch.setenv("KUBECONFIG", str(tmp_path / "no-kubeconfig"))
+    calls["token"] = token
+    return calls
+
+
+def test_pod_without_kubeconfig_uses_its_service_account(in_pod: dict[str, Any]) -> None:
+    provider = KubernetesProvider.connect(None)
+    client = provider.client
+    assert isinstance(client, DynamicKubeClient)
+    assert client.api_client.configuration.host == "https://10.96.0.1:443"
+    assert "incluster" in in_pod and "kubeconfig_context" not in in_pod
+    health = provider.credentials_health()
+    assert health.ok and health.message == "in-cluster service account"
+
+
+def test_pod_without_service_account_token_fails_credentials(in_pod: dict[str, Any]) -> None:
+    in_pod["token"].unlink()
+    health = KubernetesProvider(context=None).credentials_health()
+    assert not health.ok and "token missing" in health.message
+
+
+def test_kubeconfig_or_context_wins_over_the_service_account(
+    in_pod: dict[str, Any], tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    KubernetesProvider.connect("kind-multihull-live")
+    assert in_pod.pop("kubeconfig_context") == "kind-multihull-live"
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\nkind: Config\n")
+    monkeypatch.setenv("KUBECONFIG", f"{tmp_path / 'missing'}:{kubeconfig}")
+    KubernetesProvider.connect(None)
+    assert in_pod.pop("kubeconfig_context") is None
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST")
+    monkeypatch.setenv("KUBECONFIG", str(tmp_path / "missing"))
+    KubernetesProvider.connect(None)
+    assert in_pod["kubeconfig_context"] is None and "incluster" not in in_pod
 
 
 def test_digest_pins_image(llama_spec: ServiceSpec) -> None:

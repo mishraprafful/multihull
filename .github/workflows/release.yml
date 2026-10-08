@@ -120,7 +120,7 @@ jobs:
       contents: read
       packages: write
     env:
-      ROUTER_IMAGE: ghcr.io/mishraprafful/multihull-router
+      IMAGES: ghcr.io/mishraprafful/multihull-router ghcr.io/mishraprafful/multihull-controller
       CHART_REGISTRY: oci://ghcr.io/mishraprafful/charts
     steps:
       - uses: actions/checkout@v7
@@ -133,14 +133,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Wait for the router image this chart defaults to
+      - name: Wait for the router and controller images this chart defaults to
         run: |
-          image="$ROUTER_IMAGE:${GITHUB_REF_NAME#v}"
           for _ in $(seq 60); do
-            if docker buildx imagetools inspect "$image" > /dev/null 2>&1; then exit 0; fi
+            missing=""
+            for repository in $IMAGES; do
+              image="$repository:${GITHUB_REF_NAME#v}"
+              docker buildx imagetools inspect "$image" > /dev/null 2>&1 || missing="$missing $image"
+            done
+            if [ -z "$missing" ]; then exit 0; fi
             sleep 30
           done
-          echo "$image was not published within 30 minutes" >&2
+          echo "not published within 30 minutes:$missing" >&2
           exit 1
       - run: printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
         env:

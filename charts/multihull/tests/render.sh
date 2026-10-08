@@ -113,6 +113,16 @@ manifest_has() {
   fi
 }
 
+manifest_lacks() {
+  local name=$1 template=$2 text=$3
+  shift 3
+  if ! "$helm" template multihull "$chart" --show-only "templates/$template" "$@" >"$work/$name-manifest.yaml"; then
+    fail "$name" "helm template failed for $template"
+  elif grep -qF -- "$text" "$work/$name-manifest.yaml"; then
+    fail "$name" "unexpected '$text' in $template"
+  fi
+}
+
 lacks() {
   local name=$1 text=$2
   if grep -qF "$text" "$work/$name.toml"; then
@@ -185,6 +195,20 @@ template_fails extra-config-map "router.extraConfig must be a string of TOML" \
   --set router.extraConfig.node_id=router-eu
 
 controller_accepted controller-args "${controller_tls[@]}"
+
+state_volume=(--set controller.stateBackend.volume.persistentVolumeClaim.claimName=multihull-state)
+manifest_has controller-state-volume controller-deployment.yaml "mountPath: /var/lib/multihull/state" \
+  "${controller_tls[@]}" "${state_volume[@]}"
+manifest_has controller-state-volume controller-deployment.yaml "claimName: multihull-state" \
+  "${controller_tls[@]}" "${state_volume[@]}"
+manifest_has controller-state-volume controller-deployment.yaml "fsGroup: 10001" \
+  "${controller_tls[@]}" "${state_volume[@]}"
+manifest_lacks controller-no-state-volume controller-deployment.yaml "/var/lib/multihull/state" \
+  "${controller_tls[@]}"
+controller_accepted controller-state-volume-args "${controller_tls[@]}" "${state_volume[@]}"
+manifest_has controller-env-from controller-deployment.yaml "name: modal-credentials" \
+  "${controller_tls[@]}" --set 'controller.envFrom[0].secretRef.name=modal-credentials'
+manifest_lacks controller-no-env-from controller-deployment.yaml "envFrom" "${controller_tls[@]}"
 
 accepted grpc-mtls-token "${controller_tls[@]}" "${router_tls[@]}"
 has_line grpc-mtls-token 'source = "grpcs://multihull-controller:9443"'

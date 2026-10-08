@@ -32,6 +32,15 @@ uv run ruff format --check .
 uv run pytest
 ```
 
+### Control-plane image (`python/Dockerfile`)
+
+```sh
+docker build -t multihull-controller:dev python
+docker run --rm multihull-controller:dev --help
+```
+
+`images.yml` publishes it as `ghcr.io/mishraprafful/multihull-controller`; the chart's controller runs it.
+
 ### Rust (`router/`)
 
 Requires rustup stable with `rustfmt` and `clippy`. If `cargo` is not on `PATH`:
@@ -71,7 +80,15 @@ helm template multihull charts/multihull > /dev/null
 HULL="uv run --project $PWD/python hull" charts/multihull/tests/render.sh
 ```
 
-`render.sh` renders `router.toml` with the value files in `charts/multihull/tests/values/` and the TLS, token and plaintext opt-in cases, and loads each with `multihull --check-config`. It also checks the controller Deployment's command against `hull controller --help`, and that refused values fail the render. Helm may be absent locally; CI installs it and runs these for you.
+`render.sh` renders `router.toml` with the value files in `charts/multihull/tests/values/` and the TLS, token and plaintext opt-in cases, and loads each with `multihull --check-config`. It also checks the controller Deployment's command against `hull controller --help`, its state volume and `envFrom`, and that refused values fail the render. Helm may be absent locally; CI installs it and runs these for you.
+
+To run the chart's controller and router in kind with images built from your tree (needs `helm` on `PATH` or in `HELM`):
+
+```sh
+kind create cluster --name multihull-in-cluster
+make kind-in-cluster
+kind delete cluster --name multihull-in-cluster
+```
 
 ## Running tests
 

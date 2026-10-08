@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import socket
 import threading
+import time
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
@@ -523,6 +526,41 @@ def test_grpc_stream_hello_snapshot_and_degraded(llama_spec: ServiceSpec, tmp_pa
             assert await asyncio.wait_for(call.read(), timeout=5) is grpc.aio.EOF
         assert controller.subscribers == set()
         await server.stop(None)
+
+    asyncio.run(scenario())
+
+
+def test_stopping_the_controller_ends_open_streams_without_waiting_for_grace(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    controller, _ = make_controller(llama_spec, tmp_path, providers)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    async def scenario() -> None:
+        running = asyncio.create_task(
+            controller.run(StreamSecurity(insecure=True), f"127.0.0.1:{port}")
+        )
+        hello = pb.RouterMessage(hello=pb.Hello(node_id="router-1"))
+
+        async def requests() -> AsyncIterator[pb.RouterMessage]:
+            yield hello
+            await asyncio.Event().wait()
+
+        async with grpc.aio.insecure_channel(f"127.0.0.1:{port}") as channel:
+            await asyncio.wait_for(channel.channel_ready(), timeout=5)
+            call = pb_grpc.DiscoveryStub(channel).Stream(requests())
+            first = await asyncio.wait_for(call.read(), timeout=5)
+            assert first.snapshot.version == 1
+            started = time.monotonic()
+            running.cancel()
+            assert await asyncio.wait_for(call.read(), timeout=5) is grpc.aio.EOF
+            assert await call.code() == grpc.StatusCode.OK
+            assert time.monotonic() - started < 2
+        with contextlib.suppress(asyncio.CancelledError):
+            await running
 
     asyncio.run(scenario())
 

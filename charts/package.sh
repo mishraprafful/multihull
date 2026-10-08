@@ -20,13 +20,21 @@ version=${tag#v}
 chart="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/multihull"
 helm="${HELM:-helm}"
 package="$destination/multihull-$version.tgz"
-expected_image="ghcr.io/mishraprafful/multihull-router:$version"
+
+check_image() {
+  local component=$1 expected=$2 image
+  shift 2
+  image="$("$helm" template multihull "$package" --show-only "templates/$component-deployment.yaml" "$@" | sed -n 's/^ *image: "\(.*\)"$/\1/p')"
+  if [[ $image != "$expected" ]]; then
+    echo "$component image is '$image', expected '$expected'" >&2
+    exit 1
+  fi
+}
 
 "$helm" package "$chart" --version "$version" --app-version "$version" --destination "$destination"
 "$helm" lint "$package"
 
-image="$("$helm" template multihull "$package" --show-only templates/router-deployment.yaml | sed -n 's/^ *image: "\(.*\)"$/\1/p')"
-if [[ $image != "$expected_image" ]]; then
-  echo "router image is '$image', expected '$expected_image'" >&2
-  exit 1
-fi
+check_image router "ghcr.io/mishraprafful/multihull-router:$version"
+check_image controller "ghcr.io/mishraprafful/multihull-controller:$version" \
+  --set controller.enabled=true --set controller.stateBackend.existingSecret=state \
+  --set controller.insecure=true

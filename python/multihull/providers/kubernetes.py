@@ -28,6 +28,23 @@ ENDPOINT_ANNOTATION = "multihull.dev/endpoint"
 NODE_ADDRESS_PREFERENCE = ("ExternalIP", "InternalIP")
 SCALEDOWN_STABILIZATION_SECONDS = 300
 CPU_TARGET_UTILIZATION = 80
+IN_CLUSTER_HOST_ENV = "KUBERNETES_SERVICE_HOST"
+SERVICE_ACCOUNT_TOKEN = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+
+
+def kubeconfig_paths() -> list[Path]:
+    configured = os.environ.get("KUBECONFIG")
+    if configured:
+        return [Path(entry) for entry in configured.split(os.pathsep) if entry]
+    return [Path.home() / ".kube" / "config"]
+
+
+def uses_in_cluster_config(context: str | None) -> bool:
+    return (
+        context is None
+        and bool(os.environ.get(IN_CLUSTER_HOST_ENV))
+        and not any(path.exists() for path in kubeconfig_paths())
+    )
 
 
 class KubeClient(Protocol):
@@ -58,7 +75,12 @@ class DynamicKubeClient:
     def from_context(cls, context: str | None) -> DynamicKubeClient:
         from kubernetes import client, config, dynamic
 
-        api_client = config.new_client_from_config(context=context)
+        if uses_in_cluster_config(context):
+            configuration = client.Configuration()
+            config.load_incluster_config(client_configuration=configuration)
+            api_client = client.ApiClient(configuration)
+        else:
+            api_client = config.new_client_from_config(context=context)
         return cls(api_client, dynamic.DynamicClient(api_client), client.CoreV1Api(api_client))
 
     def _resource(self, api_version: str, kind: str) -> Any:
@@ -520,6 +542,11 @@ class KubernetesProvider:
             from kubernetes import config
         except ImportError:
             return CredHealth(ok=False, message="kubernetes client not installed")
+        if uses_in_cluster_config(self.context):
+            if SERVICE_ACCOUNT_TOKEN.exists():
+                return CredHealth(ok=True, message="in-cluster service account")
+            missing = f"in-cluster service account token missing at {SERVICE_ACCOUNT_TOKEN}"
+            return CredHealth(ok=False, message=missing)
         try:
             kubeconfig = os.environ.get("KUBECONFIG", str(Path.home() / ".kube" / "config"))
             contexts, active = config.list_kube_config_contexts(config_file=kubeconfig)

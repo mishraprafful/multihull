@@ -110,13 +110,24 @@ router:
 controller:
   enabled: false
   image:
-    repository: ghcr.io/mishraprafful/multihull
+    repository: ghcr.io/mishraprafful/multihull-controller
     tag: ""
     pullPolicy: IfNotPresent
+  # Secret whose key holds MULTIHULL_STATE_BACKEND. SQLite is the only backend
+  # today: a path or sqlite:///absolute/path.db.
   stateBackend:
     existingSecret: ""
     key: url
+    # Volume mounted at /var/lib/multihull/state for the SQLite file, such as
+    # {persistentVolumeClaim: {claimName: multihull-state}} with the URL
+    # sqlite:///var/lib/multihull/state/state.db. Without one a restart loses it.
+    volume: {}
   specConfigMap: ""
+  # Provider credentials as environment variables, such as
+  # [{secretRef: {name: modal-credentials}}] holding MODAL_TOKEN_ID and
+  # MODAL_TOKEN_SECRET. Kubernetes targets without a context use the pod's
+  # service account; the chart creates no RBAC for it.
+  envFrom: []
   grpcPort: 9443
   # The discovery stream needs TLS unless insecure is true.
   tls:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import signal
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated
@@ -26,7 +27,13 @@ from multihull.controller import (
 )
 from multihull.durations import format_duration, parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
-from multihull.state import LocalState
+from multihull.state import (
+    DEFAULT_STATE,
+    STATE_ENV,
+    StateBackend,
+    StateBackendError,
+    open_state,
+)
 from multihull.stream_security import DEFAULT_TOKEN_ENV, StreamSecurity, StreamSecurityError
 
 app = typer.Typer(
@@ -39,9 +46,15 @@ errors = Console(stderr=True)
 
 SpecArg = Annotated[Path, typer.Argument(help="Path to multihull.yaml")]
 DEFAULT_SPEC = Path("multihull.yaml")
-DEFAULT_STATE = Path(".multihull/state.db")
 DEFAULT_IMAGE = "ghcr.io/ORG/IMAGE:TAG"
-StateOpt = Annotated[Path, typer.Option("--state", help="State database")]
+StateOpt = Annotated[
+    str,
+    typer.Option(
+        "--state",
+        envvar=STATE_ENV,
+        help="State backend: a SQLite file path or sqlite:///absolute/path.db",
+    ),
+]
 SnapshotOutOpt = Annotated[Path, typer.Option("--snapshot-out", help="Snapshot file to write")]
 TargetOpt = Annotated[
     list[str] | None, typer.Option("--target", help="Limit to this target (repeatable)")
@@ -99,7 +112,7 @@ def reachable_providers(service: specmod.ServiceSpec) -> dict[str, Provider]:
     return providers
 
 
-def rebuild_state(service: specmod.ServiceSpec, state: LocalState) -> list[str]:
+def rebuild_state(service: specmod.ServiceSpec, state: StateBackend) -> list[str]:
     providers = reachable_providers(service)
     found = [
         result.provider
@@ -109,6 +122,14 @@ def rebuild_state(service: specmod.ServiceSpec, state: LocalState) -> list[str]:
     if found:
         engine.refresh(service.name, state, providers)
     return found
+
+
+def state_or_exit(url: str) -> StateBackend:
+    try:
+        return open_state(url)
+    except StateBackendError as exc:
+        errors.print(f"[red]--state ({STATE_ENV}): {exc}[/red]")
+        raise typer.Exit(2) from None
 
 
 def duration_or_exit(text: str, option: str) -> timedelta:
@@ -217,10 +238,10 @@ def plan(
     out: Annotated[
         Path, typer.Option(help="Directory for rendered payloads")
     ] = engine.DEFAULT_PLAN_DIR,
-    state_path: StateOpt = DEFAULT_STATE,
+    state_url: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_and_warn(path)
-    state = LocalState(state_path)
+    state = state_or_exit(state_url)
     plans = engine.plan(service, state, factory=provider_for)
     written = engine.write_plan_dir(plans, out)
     table = Table(title=f"plan {service.name}")
@@ -257,10 +278,10 @@ def colour_change(change: str) -> str:
 @app.command()
 def status(
     path: SpecArg = DEFAULT_SPEC,
-    state_path: StateOpt = DEFAULT_STATE,
+    state_url: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
-    state = LocalState(state_path)
+    state = state_or_exit(state_url)
     records = state.list(service.name)
     if not records:
         found = rebuild_state(service, state)
@@ -300,7 +321,7 @@ def deploy(
         str | None, typer.Option(help="Readiness timeout per target, e.g. 15m")
     ] = None,
     snapshot_out: SnapshotOutOpt = deploymod.DEFAULT_SNAPSHOT_PATH,
-    state_path: StateOpt = DEFAULT_STATE,
+    state_url: StateOpt = DEFAULT_STATE,
     image_digest: Annotated[str | None, typer.Option(help="Pin the image to this digest")] = None,
 ) -> None:
     service = load_and_warn(path)
@@ -310,7 +331,7 @@ def deploy(
         errors.print(f"[red]unknown targets: {', '.join(unknown)}[/red]")
         raise typer.Exit(2)
     ready_timeout = duration_or_exit(timeout, "--timeout") if timeout else None
-    state = LocalState(state_path)
+    state = state_or_exit(state_url)
     report = deploymod.deploy(
         service,
         state,
@@ -363,11 +384,11 @@ def destroy(
     target: TargetOpt = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
     snapshot_out: SnapshotOutOpt = deploymod.DEFAULT_SNAPSHOT_PATH,
-    state_path: StateOpt = DEFAULT_STATE,
+    state_url: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
     route_keys_or_exit(service)
-    state = LocalState(state_path)
+    state = state_or_exit(state_url)
     records = [r for r in state.list(service.name) if not target or r.provider in target]
     if not records:
         console.print(f"nothing to destroy for {service.name}")
@@ -402,7 +423,7 @@ def logs(
     provider: Annotated[str, typer.Option("--provider", "-p", help="Target provider name")] = "",
     since: Annotated[str, typer.Option(help="How far back to read, e.g. 10m")] = "10m",
     follow: Annotated[bool, typer.Option("--follow", "-f", help="Keep streaming")] = False,
-    state_path: StateOpt = DEFAULT_STATE,
+    state_url: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
     if not provider:
@@ -411,7 +432,7 @@ def logs(
     if unknown_targets(service, [provider]):
         errors.print(f"[red]unknown target {provider}[/red]")
         raise typer.Exit(2)
-    record = LocalState(state_path).get(service.name, provider)
+    record = state_or_exit(state_url).get(service.name, provider)
     if record is None:
         errors.print(f"[red]no state for {service.name}/{provider}; run hull deploy first[/red]")
         raise typer.Exit(1)
@@ -437,7 +458,7 @@ def controller(
         str, typer.Option("--grpc-listen", help="host:port for the discovery stream")
     ] = DEFAULT_GRPC_LISTEN,
     snapshot_out: SnapshotOutOpt = deploymod.DEFAULT_SNAPSHOT_PATH,
-    state_path: StateOpt = DEFAULT_STATE,
+    state_url: StateOpt = DEFAULT_STATE,
     degraded_cooldown: Annotated[
         str,
         typer.Option(
@@ -489,27 +510,34 @@ def controller(
     route_keys_or_exit(service)
     daemon = Controller(
         service,
-        LocalState(state_path),
+        state_or_exit(state_url),
         providers_for(service, live=True),
         snapshot_out=snapshot_out,
         interval=duration_or_exit(interval, "--interval"),
         degraded_cooldown=duration_or_exit(degraded_cooldown, "--degraded-cooldown"),
     )
     try:
-        asyncio.run(daemon.run(security, grpc_listen))
-    except KeyboardInterrupt:
+        asyncio.run(run_until_terminated(daemon, security, grpc_listen))
+    except (KeyboardInterrupt, asyncio.CancelledError):
         return
+
+
+async def run_until_terminated(daemon: Controller, security: StreamSecurity, listen: str) -> None:
+    task = asyncio.current_task()
+    if task is not None:
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+    await daemon.run(security, listen)
 
 
 @app.command()
 def snapshot(
     path: SpecArg = DEFAULT_SPEC,
     out: Annotated[Path, typer.Option(help="Snapshot file")] = Path("snapshot.json"),
-    state_path: StateOpt = DEFAULT_STATE,
+    state_url: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_or_exit(path)
     route_keys_or_exit(service)
-    state = LocalState(state_path)
+    state = state_or_exit(state_url)
     providers = providers_for(service, live=False)
     document = discovery.build_snapshot(service, state, providers)
     discovery.write_snapshot(document, out)

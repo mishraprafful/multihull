@@ -1,6 +1,7 @@
 {{- if .Values.controller.enabled }}
 {{- $tls := .Values.controller.tls | default dict }}
 {{- $token := .Values.controller.token | default dict }}
+{{- $stateVolume := .Values.controller.stateBackend.volume | default dict }}
 {{- if and .Values.controller.insecure (or $tls.secretName $tls.clientCaSecret) }}
 {{- fail "controller.insecure cannot be combined with controller.tls" }}
 {{- end }}
@@ -36,6 +37,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "multihull.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 10001
       containers:
         - name: controller
           image: {{ include "multihull.controllerImage" . | quote }}
@@ -61,6 +65,10 @@ spec:
             {{- end }}
             - "--token-env"
             - {{ include "multihull.tokenEnv" . | quote }}
+          {{- with .Values.controller.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: grpc
               containerPort: {{ .Values.controller.grpcPort }}
@@ -80,8 +88,12 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
-          {{- if or .Values.controller.specConfigMap $tls.secretName $tls.clientCaSecret }}
+          {{- if or .Values.controller.specConfigMap $tls.secretName $tls.clientCaSecret $stateVolume }}
           volumeMounts:
+            {{- if $stateVolume }}
+            - name: state
+              mountPath: /var/lib/multihull/state
+            {{- end }}
             {{- if .Values.controller.specConfigMap }}
             - name: spec
               mountPath: /etc/multihull/multihull.yaml
@@ -99,8 +111,12 @@ spec:
               readOnly: true
             {{- end }}
           {{- end }}
-      {{- if or .Values.controller.specConfigMap $tls.secretName $tls.clientCaSecret }}
+      {{- if or .Values.controller.specConfigMap $tls.secretName $tls.clientCaSecret $stateVolume }}
       volumes:
+        {{- if $stateVolume }}
+        - name: state
+          {{- toYaml $stateVolume | nindent 10 }}
+        {{- end }}
         {{- with .Values.controller.specConfigMap }}
         - name: spec
           configMap:

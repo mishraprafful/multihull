@@ -13,7 +13,7 @@ Uses the `kubernetes` Python client with server-side apply (field manager `multi
   kubernetes: {context: gke_acme_europe-west4_prod, namespace: inference}
 ```
 
-Credentials: the kubeconfig context named in the target.
+Credentials: the kubeconfig context named in the target. Without `context`, `hull` running in a pod with no kubeconfig uses the pod's service account, as the [in-cluster controller](/docs/router/controller-stream/#controller-in-the-cluster) does.
 
 ## Reaching the Service
 

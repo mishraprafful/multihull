@@ -485,7 +485,12 @@ class Controller:
         finally:
             for task in loops:
                 task.cancel()
+            self.close_streams()
             await server.stop(grace=5)
+
+    def close_streams(self) -> None:
+        for queue in list(self.subscribers):
+            queue.put_nowait(None)
 
 
 class DiscoveryServicer(pb_grpc.DiscoveryServicer):
