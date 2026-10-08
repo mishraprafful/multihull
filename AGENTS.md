@@ -25,7 +25,7 @@ Deploy always-warm GPU inference containers to many providers from one `multihul
 docs/design/   architecture plan and design docs
 docs/handover.md
 python/        multihull package: spec, providers, engine, state, controller, discovery, cli, sdk
-router/        Rust router crate(s)
+router/        Rust: multihull crate (router binary and library modules), test-only router-testkit
 proto/         discovery.proto shared by Python and Rust
 charts/        Helm chart, built-in Kubernetes kinds only
 examples/      sample multihull.yaml files
@@ -43,7 +43,7 @@ website/       Astro Starlight docs site
 
 - Self-documenting code: clear names and structure. No explanatory comments or docstrings unless asked.
 - Python 3.11+, pydantic v2, typer, httpx. Type hints everywhere.
-- Rust 2021 edition, tokio, hyper 1.x, tower, rustls, tonic. Keep `router-core` free of IO.
+- Rust 2021 edition, tokio, hyper 1.x, tower, rustls, tonic. Keep the `core` module free of IO; `tests/core_boundary.rs` enforces it.
 - Golden tests for every translator: spec in, native payload out.
 - Never write secrets into code, config, docs, tests or commit messages. Reference them by env var name or file location.
 

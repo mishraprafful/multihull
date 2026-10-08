@@ -23,7 +23,7 @@ key = "/etc/multihull/tls/tls.key"
 
 [log]
 format = "json"
-filter = "info,router_proxy=debug"
+filter = "info,multihull::proxy=debug"
 
 # Every duration below is in seconds (floats allowed, except the whole-second
 # windows ratio_window and budget_window). Each table is optional; the values

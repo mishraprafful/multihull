@@ -4,11 +4,11 @@ use anyhow::Context;
 use arc_swap::ArcSwap;
 use clap::Parser;
 use config::{Config, LogFormat};
-use router_core::Snapshot;
-use router_cp::Transport;
-use router_obs::{TracingConfig, TracingFormat};
-use router_proxy::ProxyState;
-use router_tls::TlsReloader;
+use multihull::core::Snapshot;
+use multihull::cp::Transport;
+use multihull::obs::{TracingConfig, TracingFormat};
+use multihull::proxy::ProxyState;
+use multihull::tls::TlsReloader;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -35,14 +35,14 @@ async fn main() -> anyhow::Result<()> {
         println!("config ok: {}", args.config.display());
         return Ok(());
     }
-    router_obs::init_tracing(&TracingConfig {
+    multihull::obs::init_tracing(&TracingConfig {
         format: match config.log.format {
             LogFormat::Text => TracingFormat::Text,
             LogFormat::Json => TracingFormat::Json,
         },
         default_filter: config.log.filter.clone(),
     });
-    let metrics_handle = router_obs::install_prometheus()
+    let metrics_handle = multihull::obs::install_prometheus()
         .map_err(|error| anyhow::anyhow!("installing prometheus recorder: {error}"))?;
     let tls = match &config.tls {
         Some(tls) => Some(Arc::new(
@@ -69,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
 
     let proxy_state = ProxyState::try_new(config.proxy_config(), snapshot.clone())
         .context("building upstream tls client")?;
-    let admin_state = router_admin::AdminState::new(snapshot.clone())
+    let admin_state = multihull::admin::AdminState::new(snapshot.clone())
         .with_proxy(proxy_state.clone())
         .with_metrics(metrics_handle);
 
@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
         })
     };
 
-    let probe_task = tokio::spawn(router_proxy::probe::run(proxy_state.clone()));
+    let probe_task = tokio::spawn(multihull::proxy::probe::run(proxy_state.clone()));
 
     let swap_task = {
         let snapshot = snapshot.clone();
@@ -127,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
 
     let admin_listen = config.admin_listen;
     let admin_task =
-        tokio::spawn(async move { router_admin::serve(admin_listen, admin_state).await });
+        tokio::spawn(async move { multihull::admin::serve(admin_listen, admin_state).await });
 
     let listener = TcpListener::bind(config.listen)
         .await
@@ -143,14 +143,14 @@ async fn main() -> anyhow::Result<()> {
     let proxy_task = match tls {
         Some(tls) => {
             spawn_tls_reload_on_sighup(tls.clone());
-            tokio::spawn(router_proxy::serve_tls(
+            tokio::spawn(multihull::proxy::serve_tls(
                 proxy_state,
                 listener,
                 tls,
                 shutdown_signal(),
             ))
         }
-        None => tokio::spawn(router_proxy::serve(
+        None => tokio::spawn(multihull::proxy::serve(
             proxy_state,
             listener,
             shutdown_signal(),
