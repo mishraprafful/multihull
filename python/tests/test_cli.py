@@ -287,3 +287,95 @@ def test_doctor_tolerates_missing_credentials(tmp_path: Path, monkeypatch) -> No
     assert result.exit_code == 1
     assert "gke-prod" in result.output and "FAIL" in result.output
     assert "runpod-eu" in result.output
+
+
+STATE_COMMANDS = {
+    "plan": (["plan", "{spec}", "--out", "{tmp}/plan"], 0),
+    "status": (["status", "{spec}"], 0),
+    "deploy": (["deploy", "{spec}", "--snapshot-out", "{tmp}/snapshot.json"], 0),
+    "destroy": (["destroy", "{spec}", "--yes", "--snapshot-out", "{tmp}/snapshot.json"], 0),
+    "logs": (["logs", "{spec}", "--provider", "gke-prod"], 1),
+    "controller": (
+        ["controller", "{spec}", "--snapshot-out", "{tmp}/snapshot.json", "--insecure"],
+        0,
+    ),
+    "snapshot": (["snapshot", "{spec}", "--out", "{tmp}/snapshot.json"], 0),
+}
+
+
+@pytest.fixture
+def state_command(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_registry: dict[str, FakeProvider],
+) -> tuple[list[str], int]:
+    async def never_serve(self: Controller, security: StreamSecurity, listen: str) -> None:
+        return None
+
+    monkeypatch.setattr(Controller, "run", never_serve)
+    monkeypatch.chdir(tmp_path)
+    spec = copy_fixture(tmp_path)
+    template, exit_code = STATE_COMMANDS[request.param]
+    return [arg.format(spec=spec, tmp=tmp_path) for arg in template], exit_code
+
+
+@pytest.mark.parametrize("state_command", sorted(STATE_COMMANDS), indirect=True)
+def test_state_backend_comes_from_the_environment(
+    state_command: tuple[list[str], int], tmp_path: Path
+) -> None:
+    args, exit_code = state_command
+    from_env = tmp_path / "env" / "state.db"
+    result = runner.invoke(app, args, env={"MULTIHULL_STATE_BACKEND": f"sqlite://{from_env}"})
+    assert result.exit_code == exit_code, result.output
+    assert from_env.exists()
+    assert not (tmp_path / ".multihull" / "state.db").exists()
+
+
+@pytest.mark.parametrize("state_command", sorted(STATE_COMMANDS), indirect=True)
+def test_state_flag_overrides_the_environment(
+    state_command: tuple[list[str], int], tmp_path: Path
+) -> None:
+    args, exit_code = state_command
+    from_env = tmp_path / "env" / "state.db"
+    from_flag = tmp_path / "flag" / "state.db"
+    result = runner.invoke(
+        app,
+        [*args, "--state", str(from_flag)],
+        env={"MULTIHULL_STATE_BACKEND": f"sqlite://{from_env}"},
+    )
+    assert result.exit_code == exit_code, result.output
+    assert from_flag.exists()
+    assert not from_env.exists()
+
+
+@pytest.mark.parametrize("state_command", sorted(STATE_COMMANDS), indirect=True)
+def test_state_defaults_to_the_local_file(
+    state_command: tuple[list[str], int], tmp_path: Path
+) -> None:
+    args, exit_code = state_command
+    result = runner.invoke(app, args, env={"MULTIHULL_STATE_BACKEND": None})
+    assert result.exit_code == exit_code, result.output
+    assert (tmp_path / ".multihull" / "state.db").exists()
+
+
+@pytest.mark.parametrize("source", ["env", "flag"])
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("postgres://hull:hunter2@db.internal/multihull", "planned but not implemented yet"),
+        ("redis://cache:6379/0", "unsupported state backend scheme 'redis'"),
+    ],
+)
+@pytest.mark.parametrize("state_command", sorted(STATE_COMMANDS), indirect=True)
+def test_bad_state_backend_exits_with_a_clear_error(
+    state_command: tuple[list[str], int], tmp_path: Path, url: str, reason: str, source: str
+) -> None:
+    args, _ = state_command
+    env = {"COLUMNS": "200", "MULTIHULL_STATE_BACKEND": url if source == "env" else None}
+    flag = ["--state", url] if source == "flag" else []
+    result = runner.invoke(app, [*args, *flag], env=env)
+    assert result.exit_code == 2, result.output
+    assert reason in result.output
+    assert "hunter2" not in result.output and "Traceback" not in result.output
+    assert not (tmp_path / ".multihull" / "state.db").exists()
