@@ -40,7 +40,7 @@ The router retries only when all of these hold:
 
 A 408 counts as `Transient` like 502 to 504, so a POST without an `Idempotency-Key` gets the 408 back rather than a retry: the model may already have started.
 
-Retries go to a different provider, at most `maxRetries` per request (default 2), within a per-route retry budget described below. When every untried provider has an open circuit, the retry goes back to a provider already tried that answered and whose circuit is still closed: a Modal URL or a Kubernetes Service spreads requests over replicas, so a second try usually lands on a healthy one, while a provider with an open circuit is known to fail. A connect failure never retries the same endpoint.
+Retries go to a different provider, at most `maxRetries` per request (default 2), within a per-route retry budget described below. When every untried provider has an open circuit, or none of them can take the request (a half-open circuit refusing the trial, no concurrency headroom), the retry goes back to a provider already tried that answered and whose circuit is still closed: a Modal URL or a Kubernetes Service spreads requests over replicas, so a second try usually lands on a healthy one, while a provider with an open circuit is known to fail. A connect failure never retries the same endpoint.
 
 ## When the fallback fails too
 

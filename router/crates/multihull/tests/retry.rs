@@ -1,10 +1,12 @@
 mod common;
 
+use bytes::Bytes;
 use common::{
-    closed_port_url, endpoint, post, single_route, start_proxy, start_proxy_configured,
+    closed_port_url, endpoint, post, send, single_route, start_proxy, start_proxy_configured,
     RunningProxy,
 };
-use hyper::StatusCode;
+use http_body_util::Full;
+use hyper::{Request, StatusCode};
 use multihull::core::snapshot::Endpoint;
 use multihull::proxy::{PhaseTimeouts, ProxyConfig};
 use router_testkit::{MockUpstream, MockUpstreamConfig};
@@ -107,6 +109,43 @@ async fn keyed_request_timeout_is_retried_on_an_untried_healthy_provider_first()
     assert_eq!(reply.header("x-hull-attempts"), Some("2"));
     assert_eq!(primary.request_count(), 1);
     assert_eq!(secondary.request_count(), 1);
+}
+
+#[tokio::test]
+async fn keyed_request_5xx_is_retried_on_the_same_provider_when_the_untried_one_cannot_take_it() {
+    let primary = MockUpstream::start(
+        MockUpstreamConfig::default().stalling_first(1, Duration::from_secs(5)),
+    )
+    .await
+    .unwrap();
+    let secondary = MockUpstream::start(
+        MockUpstreamConfig::default().failing_first(1, StatusCode::INTERNAL_SERVER_ERROR),
+    )
+    .await
+    .unwrap();
+    let mut busy = endpoint("kind", "kind", primary.url(), 1);
+    busy.max_concurrency = 1;
+    let proxy = start_proxy(vec![busy, endpoint("modal", "modal", secondary.url(), 2)]).await;
+    let occupying = tokio::spawn({
+        let url = proxy.url(COMPLETIONS);
+        async move {
+            let request = Request::post(url)
+                .body(Full::new(Bytes::from_static(b"{}")))
+                .unwrap();
+            send(request).await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(primary.request_count(), 1);
+
+    let reply = post(&proxy, COMPLETIONS, &[("idempotency-key", "k-500")], b"{}").await;
+
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.header("x-hull-provider"), Some("modal"));
+    assert_eq!(reply.header("x-hull-attempts"), Some("2"));
+    assert_eq!(primary.request_count(), 1);
+    assert_eq!(secondary.request_count(), 2);
+    assert_eq!(occupying.await.unwrap().status, 200);
 }
 
 #[tokio::test]
