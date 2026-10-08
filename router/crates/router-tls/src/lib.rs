@@ -51,6 +51,18 @@ pub fn root_store(extra_ca: Option<&Path>) -> Result<RootCertStore, TlsError> {
     Ok(roots)
 }
 
+pub fn pinned_root_store(ca: &Path) -> Result<RootCertStore, TlsError> {
+    let certs = certificates_from_file(ca)?;
+    if certs.is_empty() {
+        return Err(TlsError::NoCertificates(ca.to_path_buf()));
+    }
+    let mut roots = RootCertStore::empty();
+    for cert in certs {
+        roots.add(cert)?;
+    }
+    Ok(roots)
+}
+
 pub fn client_config(extra_ca: Option<&Path>) -> Result<ClientConfig, TlsError> {
     Ok(ClientConfig::builder_with_provider(crypto_provider())
         .with_safe_default_protocol_versions()?
@@ -58,22 +70,63 @@ pub fn client_config(extra_ca: Option<&Path>) -> Result<ClientConfig, TlsError> 
         .with_no_client_auth())
 }
 
-pub fn https_client(
-    connect_timeout: Duration,
-    extra_ca: Option<&Path>,
-) -> Result<HttpsClient, TlsError> {
+pub struct ClientIdentity<'a> {
+    pub cert: &'a Path,
+    pub key: &'a Path,
+}
+
+pub fn authenticated_client_config(
+    pinned_ca: Option<&Path>,
+    identity: Option<ClientIdentity<'_>>,
+) -> Result<ClientConfig, TlsError> {
+    let roots = match pinned_ca {
+        Some(ca) => pinned_root_store(ca)?,
+        None => root_store(None)?,
+    };
+    let builder = ClientConfig::builder_with_provider(crypto_provider())
+        .with_safe_default_protocol_versions()?
+        .with_root_certificates(roots);
+    Ok(match identity {
+        Some(identity) => {
+            let (certs, key) = certified_key_from_files(identity.cert, identity.key)?;
+            builder.with_client_auth_cert(certs, key)?
+        }
+        None => builder.with_no_client_auth(),
+    })
+}
+
+fn http_connector(connect_timeout: Duration) -> HttpConnector {
     let mut http = HttpConnector::new();
     http.set_connect_timeout(Some(connect_timeout));
     http.set_nodelay(true);
     http.enforce_http(false);
+    http
+}
+
+pub fn h2_connector(connect_timeout: Duration, tls: ClientConfig) -> HttpsConnector<HttpConnector> {
+    HttpsConnectorBuilder::new()
+        .with_tls_config(tls)
+        .https_or_http()
+        .enable_http2()
+        .wrap_connector(http_connector(connect_timeout))
+}
+
+pub fn https_client(
+    connect_timeout: Duration,
+    extra_ca: Option<&Path>,
+) -> Result<HttpsClient, TlsError> {
+    Ok(https_client_with(connect_timeout, client_config(extra_ca)?))
+}
+
+pub fn https_client_with(connect_timeout: Duration, tls: ClientConfig) -> HttpsClient {
     let connector = HttpsConnectorBuilder::new()
-        .with_tls_config(client_config(extra_ca)?)
+        .with_tls_config(tls)
         .https_or_http()
         .enable_all_versions()
-        .wrap_connector(http);
-    Ok(Client::builder(hyper_util::rt::TokioExecutor::new())
+        .wrap_connector(http_connector(connect_timeout));
+    Client::builder(hyper_util::rt::TokioExecutor::new())
         .pool_idle_timeout(Duration::from_secs(90))
-        .build(connector))
+        .build(connector)
 }
 
 pub fn certificates_from_file(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsError> {
@@ -111,7 +164,10 @@ pub fn server_config_from_pem(cert_pem: &[u8], key_pem: &[u8]) -> Result<ServerC
     build_server_config(certs, key)
 }
 
-pub fn server_config(cert: &Path, key: &Path) -> Result<ServerConfig, TlsError> {
+fn certified_key_from_files(
+    cert: &Path,
+    key: &Path,
+) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), TlsError> {
     let certs = certificates_from_file(cert)?;
     if certs.is_empty() {
         return Err(TlsError::NoCertificates(cert.to_path_buf()));
@@ -124,6 +180,11 @@ pub fn server_config(cert: &Path, key: &Path) -> Result<ServerConfig, TlsError> 
         path: key.to_path_buf(),
         source,
     })?;
+    Ok((certs, key))
+}
+
+pub fn server_config(cert: &Path, key: &Path) -> Result<ServerConfig, TlsError> {
+    let (certs, key) = certified_key_from_files(cert, key)?;
     build_server_config(certs, key)
 }
 
@@ -245,6 +306,43 @@ mod tests {
         let (cert, key) = self_signed();
         assert!(server_config_from_pem(cert.as_bytes(), key.as_bytes()).is_ok());
         assert!(server_config_from_pem(b"nope", key.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn pinned_roots_hold_only_the_given_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cert, key) = self_signed();
+        let ca = dir.path().join("ca.pem");
+        std::fs::write(&ca, &cert).unwrap();
+        assert_eq!(pinned_root_store(&ca).unwrap().len(), 1);
+        std::fs::write(&ca, b"not pem").unwrap();
+        assert!(matches!(
+            pinned_root_store(&ca),
+            Err(TlsError::NoCertificates(_))
+        ));
+        assert!(matches!(
+            pinned_root_store(&dir.path().join("missing.pem")),
+            Err(TlsError::Io { .. })
+        ));
+
+        std::fs::write(&ca, &cert).unwrap();
+        let cert_path = dir.path().join("client.crt");
+        let key_path = dir.path().join("client.key");
+        std::fs::write(&cert_path, &cert).unwrap();
+        std::fs::write(&key_path, &key).unwrap();
+        let identity = || ClientIdentity {
+            cert: &cert_path,
+            key: &key_path,
+        };
+        let config = authenticated_client_config(Some(&ca), Some(identity())).unwrap();
+        assert!(config.client_auth_cert_resolver.has_certs());
+        let anonymous = authenticated_client_config(None, None).unwrap();
+        assert!(!anonymous.client_auth_cert_resolver.has_certs());
+        std::fs::write(&key_path, b"not a key").unwrap();
+        assert!(matches!(
+            authenticated_client_config(Some(&ca), Some(identity())),
+            Err(TlsError::Pem { .. })
+        ));
     }
 
     #[test]

@@ -5,7 +5,17 @@ node_id = "router-eu-1"
 max_buffered_body_bytes = 1048576
 
 [snapshot]
+# file://PATH (or a bare path), grpcs://HOST:PORT for the hull controller stream,
+# or https://URL polled every 10 s. A snapshot can carry provider credentials,
+# so keep a snapshot file at mode 0600.
 source = "file://./snapshot.json"
+# For grpcs:// and https:// sources:
+# ca = "/etc/multihull/discovery/ca.crt"           # trust only this CA bundle instead of the public roots
+# client_cert = "/etc/multihull/discovery/tls.crt" # client certificate for mTLS, with client_key
+# client_key = "/etc/multihull/discovery/tls.key"
+# token_env = "MULTIHULL_DISCOVERY_TOKEN"          # env var holding the bearer token
+# Plaintext grpc:// and http:// sources start only with insecure = true (local development).
+# insecure = false
 
 [tls]
 cert = "/etc/multihull/tls/tls.crt"

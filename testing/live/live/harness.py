@@ -7,13 +7,14 @@ import shlex
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from e2e.harness import READY_HEALTH, Router
+from e2e.harness import READY_HEALTH, Router, TomlValue
 from multihull.providers.base import SERVICE_LABEL, Ref
 from multihull.providers.modal import redact
 from multihull.state import LocalState
@@ -257,13 +258,21 @@ class LiveDeployment:
 
 
 class LiveRouter(Router):
-    def __init__(self, binary: Path, workdir: Path, snapshot: Path, expected: int) -> None:
+    def __init__(
+        self,
+        binary: Path,
+        workdir: Path,
+        snapshot: Mapping[str, TomlValue],
+        env: Mapping[str, str],
+        expected: int,
+    ) -> None:
         super().__init__(
             binary,
             workdir / "router.toml",
             workdir / LOG_DIR / "router.log",
-            f"file://{snapshot}",
+            snapshot,
             tuning=ROUTER_TUNING,
+            env=env,
         )
         self.expected = expected
 

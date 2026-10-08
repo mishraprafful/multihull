@@ -1,6 +1,6 @@
 # Local end-to-end harness
 
-Layer 3 of the testing strategy: three `docker` targets running the mock model server, `hull controller` streaming snapshots over gRPC, the release router binary in front, an OpenAI client driving load while faults are injected.
+Layer 3 of the testing strategy: three `docker` targets running the mock model server, `hull controller` streaming snapshots over gRPC with mTLS and a bootstrap token, the release router binary in front, an OpenAI client driving load while faults are injected.
 
 ## Run
 
@@ -20,9 +20,10 @@ Env: `E2E_ROUTER_BIN` (skip the cargo build), `E2E_MOCK_IMAGE` (skip the docker 
 | `sweeper` | session | removes containers labelled `multihull.dev/service=e2e-three` left by a crashed run |
 | `workdir` | session | temp dir with `multihull.yaml`, `multihull-sticky.yaml`, `multihull-auth.yaml` (route keys from `file:route-api-keys`, written by `test_14` with fake keys), `.multihull/` |
 | `deployment` | session | `hull deploy --apply --wait`, yields targets and mock handles, `hull destroy --yes` at teardown |
-| `controller` | session | `hull controller --interval 2s --degraded-cooldown 5s`, restartable with another spec |
+| `stream_credentials` | session | CA, controller and router certificates and a bootstrap token generated per run (`e2e/stream.py`); keys never leave the temp dir |
+| `controller` | session | `hull controller --interval 2s --degraded-cooldown 5s` with `--tls-cert`, `--tls-key`, `--client-ca` and the token in `MULTIHULL_DISCOVERY_TOKEN`, restartable with another spec |
 | `reset_faults` | function, autouse | restarts stopped containers, resets every knob, waits for docker health before and after each test |
-| `router` | function | fresh router per test, `grpc` source by default, `file` via the `router_source` indirect param, extra `router.toml` tables via `@pytest.mark.router_tuning(probe={...})`; attaches router and controller logs on failure |
+| `router` | function | fresh router per test, `grpcs` source with `ca`, `client_cert`, `client_key` and `token_env` by default, `file` via the `router_source` indirect param, extra `router.toml` tables via `@pytest.mark.router_tuning(probe={...})`; attaches router and controller logs on failure |
 | `client`, `stream` | function | `RouterClient` for the router and the streaming parametrization |
 
 Helpers: `deployment.mock(name).control(**knobs)` and `.stats()`, `deployment.stop_container(name)` and `start_container(name)`, `router.endpoints()`, `router.metrics()` (parsed Prometheus text), `load(client, n, stream, concurrency, idempotency_key)` returning per-request `Outcome`s, `stream_raw(base_url, ...)` returning the raw SSE `data:` frames, `wait_until(pred, timeout)`, `EndpointSampler(router, provider)` (context manager) recording `/debug/endpoints` circuit and probe state in the background, with the times each poll was sent and answered.

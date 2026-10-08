@@ -49,6 +49,44 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s:%s" .Values.controller.image.repository (default .Chart.AppVersion .Values.controller.image.tag) }}
 {{- end }}
 
+{{- define "multihull.tokenEnv" -}}
+MULTIHULL_DISCOVERY_TOKEN
+{{- end }}
+
+{{- define "multihull.snapshotTlsSecret" -}}
+{{- (.Values.router.snapshot.tls | default dict).secretName | default "" }}
+{{- end }}
+
+{{- define "multihull.snapshotTokenSecret" -}}
+{{- (.Values.router.snapshot.token | default dict).existingSecret | default "" }}
+{{- end }}
+
+{{- define "multihull.snapshotSource" -}}
+{{- $snapshot := .Values.router.snapshot }}
+{{- if eq $snapshot.type "http" }}
+{{- if not (or (hasPrefix "https://" $snapshot.value) (hasPrefix "http://" $snapshot.value)) }}
+{{- fail (printf "router.snapshot.value must be an http:// or https:// URL for type http, got %q" $snapshot.value) }}
+{{- end }}
+{{- if and (hasPrefix "http://" $snapshot.value) (include "multihull.snapshotTlsSecret" .) }}
+{{- fail "router.snapshot.tls needs an https:// URL" }}
+{{- end }}
+{{- $snapshot.value }}
+{{- else if eq $snapshot.type "grpc" }}
+{{- $scheme := ternary "grpcs" "grpc" (ne (include "multihull.snapshotTlsSecret" .) "") }}
+{{- $address := "" }}
+{{- if regexMatch "^[^/:]+:[0-9]+$" (toString $snapshot.value) }}
+{{- $address = $snapshot.value }}
+{{- else if .Values.controller.enabled }}
+{{- $address = printf "%s-controller:%v" (include "multihull.fullname" .) .Values.controller.grpcPort }}
+{{- else }}
+{{- fail (printf "router.snapshot.value must be host:port for type grpc, or enable the controller; got %q" (toString $snapshot.value)) }}
+{{- end }}
+{{- printf "%s://%s" $scheme $address }}
+{{- else }}
+{{- fail (printf "router.snapshot.type must be file, http or grpc, got %q" $snapshot.type) }}
+{{- end }}
+{{- end }}
+
 {{- define "multihull.tomlValue" -}}
 {{- $value := . -}}
 {{- if and (kindIs "string" $value) (regexMatch "^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?$" $value) -}}
