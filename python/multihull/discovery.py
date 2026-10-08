@@ -182,6 +182,18 @@ def file_snapshot(
     return snapshot
 
 
+def snapshot_after_destroy(
+    spec: ServiceSpec,
+    state: StateBackend,
+    providers: Mapping[str, Provider],
+    out: str | Path | None,
+) -> dict[str, Any]:
+    snapshot = file_snapshot(spec, state, providers, out)
+    if not state.list(spec.name):
+        snapshot["routes"] = []
+    return snapshot
+
+
 def routes_without_endpoints(snapshot: dict[str, Any]) -> list[str]:
     return [route["id"] for route in snapshot["routes"] if not route["endpoints"]]
 

@@ -266,7 +266,7 @@ class Service:
     def destroy(self, target: Collection[str] | None = None) -> list[DestroyResult]:
         providers = self.providers(live=True)
         results = engine.destroy(self.name, self.state, providers, only=target)
-        snapshot = discovery.file_snapshot(
+        snapshot = discovery.snapshot_after_destroy(
             self.validated(), self.state, providers, self.snapshot_path
         )
         discovery.write_snapshot(snapshot, self.snapshot_path)

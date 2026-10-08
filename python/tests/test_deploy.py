@@ -217,6 +217,22 @@ def test_destroy_cli(tmp_path: Path, fake_registry: dict[str, FakeProvider]) -> 
     )
 
 
+def test_destroying_every_target_removes_the_route_from_the_snapshot(
+    tmp_path: Path, fake_registry: dict[str, FakeProvider]
+) -> None:
+    path = spec_copy(tmp_path)
+    snapshot_out = tmp_path / "snapshot.json"
+    base = ["--state", str(tmp_path / "state.db"), "--snapshot-out", str(snapshot_out)]
+    assert runner.invoke(app, ["deploy", str(path), "--apply", *base]).exit_code == 0
+    deployed = json.loads(snapshot_out.read_text())
+
+    result = runner.invoke(app, ["destroy", str(path), "--yes", *base])
+    assert result.exit_code == 0, result.output
+    destroyed = json.loads(snapshot_out.read_text())
+    assert destroyed["routes"] == []
+    assert destroyed["version"] > deployed["version"]
+
+
 def test_a_controller_continues_above_the_version_hull_deploy_wrote(
     llama_spec: ServiceSpec, tmp_path: Path, fake_registry: dict[str, FakeProvider]
 ) -> None:

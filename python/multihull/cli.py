@@ -411,7 +411,7 @@ def destroy(
             result.message,
         )
     console.print(table)
-    document = discovery.file_snapshot(service, state, providers, snapshot_out)
+    document = discovery.snapshot_after_destroy(service, state, providers, snapshot_out)
     console.print(f"wrote {discovery.write_snapshot(document, snapshot_out)}")
     if not all(r.ok for r in results):
         raise typer.Exit(1)
