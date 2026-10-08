@@ -268,13 +268,13 @@ def test_setup_dockerfile_commands_reach_from_registry(
     shim = "RUN ln -s /usr/bin/python3 /usr/local/bin/python"
     raw["targets"][1]["modal"]["setupDockerfileCommands"] = [shim]
     rendered = render_app_spec(mock_modal_target(ServiceSpec.model_validate(raw)))
-    assert rendered["image"]["setup_dockerfile_commands"] == [shim]
+    assert rendered["image"]["setup_dockerfile_commands"] == ["ENTRYPOINT []", shim]
     deploy_with_sdk(rendered)
-    assert fake_modal.images[0].setup_dockerfile_commands == [shim]
+    assert fake_modal.images[0].setup_dockerfile_commands == ["ENTRYPOINT []", shim]
     plain = render_app_spec(mock_modal_target(mock_kind_modal_spec))
-    assert plain["image"]["setup_dockerfile_commands"] == []
+    assert plain["image"]["setup_dockerfile_commands"] == ["ENTRYPOINT []"]
     deploy_with_sdk(plain)
-    assert fake_modal.images[1].setup_dockerfile_commands == []
+    assert fake_modal.images[1].setup_dockerfile_commands == ["ENTRYPOINT []"]
 
 
 def test_rediscover_looks_up_the_per_target_app(fake_modal: FakeModal) -> None:

@@ -15,7 +15,7 @@ Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a
 Credentials: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or `~/.modal.toml`.
 
 Requirements:
-- `container.command` must be set. Modal does not run the image `CMD`.
+- `container.command` must be set. Modal does not run the image `CMD`, and the translator resets the image `ENTRYPOINT` (`ENTRYPOINT []` is the first setup Dockerfile line), because Modal starts its own runtime process in the container; an entrypoint such as the public vLLM image's `python3 -m vllm.entrypoints.openai.api_server` would otherwise swallow Modal's arguments and crash on start.
 - The server must listen on `0.0.0.0`.
 - The Python running `hull deploy` must match the image's Python minor version, because the server class is serialized with cloudpickle.
 - An empty `resources.gpu` runs the container on CPU.

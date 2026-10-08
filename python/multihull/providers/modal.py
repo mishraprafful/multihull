@@ -56,6 +56,7 @@ CREDENTIALS_TIMEOUT_SECONDS = 10.0
 REDACTED = "<redacted>"
 IMAGE_BUILDER_VERSION = "2025.06"
 IMAGE_BUILDER_VERSION_ENV = "MODAL_IMAGE_BUILDER_VERSION"
+RESET_ENTRYPOINT = "ENTRYPOINT []"
 HEALTH_PATH_KEY = "health_path"
 DEFAULT_HEALTH_PATH = "/health"
 HEALTH_TIMEOUT_SECONDS = 5.0
@@ -198,7 +199,7 @@ def render_app_spec(desired: Target) -> dict[str, Any]:
             "ref": desired.image_ref,
             "secret": registry_secret_names(block.registrySecret),
             "builder_version": image_builder_version(),
-            "setup_dockerfile_commands": list(block.setupDockerfileCommands),
+            "setup_dockerfile_commands": [RESET_ENTRYPOINT, *block.setupDockerfileCommands],
         },
         "gpu": modal_gpu(desired),
         "memory_mib": memory_to_mib(desired.service.resources.memory),
