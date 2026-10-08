@@ -14,7 +14,7 @@ Coding agents: read [AGENTS.md](AGENTS.md) instead; it covers the same rules in 
 - Router policies: scoring, circuits, retry budgets, sticky routing. Keep the router's `core` module free of IO (`tests/core_boundary.rs` enforces it).
 - Docs: the Astro Starlight site under `website/` and the design docs under `docs/design/`.
 
-Read [docs/design/architecture-plan.md](docs/design/architecture-plan.md) before changing `python/`, `router/` or `proto/`. [docs/handover.md](docs/handover.md) holds current state and next steps.
+Read [docs/design/architecture-plan.md](docs/design/architecture-plan.md) before changing `python/`, `router/` or `proto/`. [docs/handover.md](docs/handover.md) holds current state and next steps. Runbooks live under `docs/runbooks/`: [CI runner images](docs/runbooks/ci.md), [kind suite and live smoke](docs/runbooks/live-smoke.md), [cutting a release](docs/runbooks/release.md).
 
 ## Development setup
 
