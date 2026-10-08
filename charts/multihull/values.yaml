@@ -122,6 +122,11 @@ controller:
     # sqlite:///var/lib/multihull/state/state.db. Without one a restart loses it.
     volume: {}
   specConfigMap: ""
+  # Provider credentials as environment variables, such as
+  # [{secretRef: {name: modal-credentials}}] holding MODAL_TOKEN_ID and
+  # MODAL_TOKEN_SECRET. Kubernetes targets without a context use the pod's
+  # service account; the chart creates no RBAC for it.
+  envFrom: []
   grpcPort: 9443
   # The discovery stream needs TLS unless insecure is true.
   tls:
