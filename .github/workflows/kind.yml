@@ -106,3 +106,67 @@ jobs:
             ${{ runner.temp }}/live/summary.json
             ${{ runner.temp }}/live/results.xml
           if-no-files-found: ignore
+
+  in-cluster:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CLUSTER: multihull-in-cluster
+      CONTROLLER_IMAGE: multihull-controller:kind
+      ROUTER_IMAGE: multihull-router:kind
+    steps:
+      - uses: actions/checkout@v7
+      - uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: python
+          file: python/Dockerfile
+          load: true
+          tags: ${{ env.CONTROLLER_IMAGE }}
+          cache-from: type=gha,scope=controller
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: router/Dockerfile
+          load: true
+          tags: ${{ env.ROUTER_IMAGE }}
+          cache-from: type=gha,scope=router
+      - run: docker build -t "$MOCK_IMAGE" testing/mock-server
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Controller and router from the chart, images built above
+        run: >
+          uv run --project testing/live pytest -v
+          -c testing/live/pyproject.toml testing/live/in_cluster
+          --junitxml "$RUNNER_TEMP/in-cluster/results.xml"
+        env:
+          LIVE_KIND_CLUSTER: ${{ env.CLUSTER }}
+          LIVE_CONTROLLER_IMAGE: ${{ env.CONTROLLER_IMAGE }}
+          LIVE_ROUTER_IMAGE: ${{ env.ROUTER_IMAGE }}
+          LIVE_MOCK_IMAGE: ${{ env.MOCK_IMAGE }}
+          LIVE_WORKDIR: ${{ runner.temp }}/in-cluster
+      - name: Cluster state
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/in-cluster/logs"
+          kubectl get all,events --all-namespaces > "$RUNNER_TEMP/in-cluster/logs/cluster.txt" 2>&1 || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: in-cluster-logs
+          path: |
+            ${{ runner.temp }}/in-cluster/logs
+            ${{ runner.temp }}/in-cluster/in-cluster/multihull.yaml
+            ${{ runner.temp }}/in-cluster/results.xml
+          if-no-files-found: ignore
