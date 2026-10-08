@@ -4,7 +4,20 @@
 
 Deploy always-warm GPU inference containers to many providers from one `multihull.yaml`, serve them behind one URL, and fail over between providers per request.
 
-A Python control plane translates the spec into each provider's native resources (Kubernetes, Modal, RunPod, Baseten, Replicate). A stateless Rust router scores endpoints, retries across providers and keeps sessions sticky.
+A Python control plane translates the spec into each provider's native resources. A stateless Rust router scores endpoints, retries across providers and keeps sessions sticky.
+
+**Status (0.1.0):** Kubernetes and Modal deploy from one spec and fail over per request, proven with the mock model server on CPU. RunPod, Baseten and Replicate render plans only. No GPU run yet. See [what is proven and what is not](docs/releases/0.1.0.md#what-is-proven-and-what-is-not).
+
+## Providers
+
+| Provider | 0.1.0 |
+|---|---|
+| Kubernetes | Working: deploy, status, scale, logs, destroy |
+| Modal | Working: deploy, status, scale, logs, destroy |
+| Docker | Working, for laptops and CI |
+| RunPod | Render-only: `hull plan` works, `apply` is not implemented |
+| Baseten | Render-only |
+| Replicate | Render-only |
 
 ## Principles
 
@@ -16,19 +29,17 @@ A Python control plane translates the spec into each provider's native resources
 
 ```sh
 uv tool install multihull
-hull init                       # detects Dockerfile, vLLM or TGI; writes multihull.yaml
-hull doctor                     # checks credentials and GPU availability per target
+hull init                       # detects a Dockerfile; writes multihull.yaml
+hull doctor                     # checks credentials per target
 hull plan                       # renders native payloads to .multihull/plan/, shows diff
 export LLAMA_8B_API_KEYS=...    # route keys hull_<id>_<secret>; deploy refuses a route with none
 hull deploy                     # applies all targets concurrently, waits for ready
 hull status
   gke-prod    Ready  2/2  L4    https://gke.int/llama
   modal-main  Ready  1/1  A10G  https://acme--multihull-llama-8b.modal.run
-  runpod-eu   Ready  1/1  L4    https://api.runpod.ai/v2/abc/
-hull failover test -p gke-prod  # drains the primary for 60 s, reports traffic shift
 ```
 
-Status: v0.1 scaffold. `hull deploy`, `destroy`, `logs`, `failover test` and `controller` are not implemented yet; see the handover for what works today.
+Then run the router against the snapshot `hull deploy` wrote, or `hull controller` and the Helm chart: see the [router overview](https://multihull.pages.dev/docs/router/overview/). Releases: [CHANGELOG.md](CHANGELOG.md), [release notes](docs/releases/0.1.0.md), [release runbook](docs/runbooks/release.md).
 
 ## Repository
 
