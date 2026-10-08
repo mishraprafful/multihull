@@ -139,7 +139,7 @@ GPU classes are a normalised enum (`L4, A10G, A100-40, A100-80, H100, H200, B200
 | concurrency | KEDA trigger target | `@modal.concurrent(max_inputs=)` | LB endpoint, `scalerType: REQUEST_COUNT` | `concurrency_target` | n/a |
 | health | readiness/liveness probes | `startup_timeout`; router probes `web_url + path` | `/ping` semantics on `PORT_HEALTH` (204 warming, 200 ready) | `readiness_endpoint`, `liveness_endpoint` | provider-managed; router probes |
 | secrets | `Secret` + `envFrom` | `modal.Secret.from_dict`, named `multihull-<svc>` | template `env` | truss `secrets` | deployment env |
-| endpoint | LoadBalancer Service or Gateway `HTTPRoute` (built-in kinds) | `Function.web_url` + proxy-auth headers | `https://api.runpod.ai/v2/<id>/` | model predict URL | deployment predictions URL |
+| endpoint | `kubernetes.endpoint`, LoadBalancer Service address, NodePort or cluster DNS (Ingress or Gateway `HTTPRoute` planned, see #116) | `Function.web_url` + proxy-auth headers | `https://api.runpod.ai/v2/<id>/` | model predict URL | deployment predictions URL |
 
 ## Control plane (Python)
 
@@ -175,7 +175,7 @@ class Provider(Protocol):
 Every resource a translator creates is tagged `multihull.dev/service=<name>` (label, Modal app name prefix, RunPod template name, Baseten model name) so `rediscover` can rebuild state if the backend is lost.
 
 **Per-provider notes**
-- **Kubernetes**: `kubernetes` client, server-side apply with field manager `multihull`, built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and concurrency set), optional Gateway API HTTPRoute or Ingress. Ref = namespace + names.
+- **Kubernetes**: `kubernetes` client, server-side apply with field manager `multihull`, built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and concurrency set) and Secret. No Ingress or Gateway API HTTPRoute in 0.1.0 (planned, see #116). Ref = namespace + names.
 - **Modal**: build `modal.App` programmatically, `Image.from_registry` pinned by digest, class with `@modal.web_server` that execs the container command, `app.deploy(name=f"multihull-{svc}")` from the SDK. Endpoint from `web_url`; proxy-auth tokens as inject headers. Ref = app name + environment.
 - **RunPod**: `runpod` SDK where available, REST otherwise: template (image, env, ports) then load-balancing endpoint with `workersMin/Max`, `gpuIds`, `dataCenterIds`. Ref = template id + endpoint id.
 - **Baseten**: generate truss config (`base_image`, `docker_server`, `resources`, autoscaling), `truss.push` via library, promote via management API. Ref = model id + deployment id.
