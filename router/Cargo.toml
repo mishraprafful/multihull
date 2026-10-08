@@ -1,15 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/router-core",
-    "crates/router-proxy",
-    "crates/router-cp",
-    "crates/router-auth",
-    "crates/router-obs",
-    "crates/router-admin",
-    "crates/router-testkit",
-    "crates/router-tls",
     "crates/multihull",
+    "crates/router-testkit",
 ]
 
 [workspace.package]
@@ -21,14 +14,7 @@ homepage = "https://multihull.pages.dev"
 documentation = "https://multihull.pages.dev"
 
 [workspace.dependencies]
-router-core = { path = "crates/router-core", version = "0.0.1" }
-router-proxy = { path = "crates/router-proxy", version = "0.0.1" }
-router-cp = { path = "crates/router-cp", version = "0.0.1" }
-router-auth = { path = "crates/router-auth", version = "0.0.1" }
-router-obs = { path = "crates/router-obs", version = "0.0.1" }
-router-admin = { path = "crates/router-admin", version = "0.0.1" }
-router-testkit = { path = "crates/router-testkit", version = "0.0.1" }
-router-tls = { path = "crates/router-tls", version = "0.0.1" }
+router-testkit = { path = "crates/router-testkit" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "fs", "signal", "io-util"] }
 hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
