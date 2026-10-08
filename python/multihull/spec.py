@@ -127,6 +127,7 @@ class ModalBlock(SpecModel):
     environment: str = "main"
     region: str | None = None
     registrySecret: RegistrySecret | None = None
+    setupDockerfileCommands: list[str] = []
 
 
 class RunpodBlock(SpecModel):
