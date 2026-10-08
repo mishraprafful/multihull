@@ -293,7 +293,7 @@ multihull/
   docs/design/        principles.md, architecture.md, spec.md, translators.md, control-plane.md, data-plane.md, roadmap.md, prior-art.md
   proto/              discovery.proto
   python/             pyproject (uv), multihull/{spec,providers,engine,state,controller,discovery,cli,sdk}, tests/golden/
-  router/             Cargo workspace: router-core, router-proxy, router-cp, router-auth, router-obs, router-admin, router-testkit, router-bin
+  router/             Cargo workspace: multihull crate (the only crates.io package: binary plus modules core, proxy, cp, auth, obs, admin, tls) and unpublished router-testkit
   charts/multihull/   Helm: router Deployment + Service, optional controller Deployment; built-in kinds only
   examples/llama-8b/  multihull.yaml, Dockerfile
   website/            Astro Starlight, Open water theme tokens
