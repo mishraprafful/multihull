@@ -10,7 +10,7 @@ First release. The `v0.1.0` tag dates this section. Human-facing notes: [docs/re
 
 - `multihull.yaml` spec (pydantic v2) with JSON Schema export and the `hull` CLI: `init`, `validate`, `schema`, `plan`, `deploy`, `status`, `destroy`, `logs`, `snapshot`, `controller`, `doctor` (#3, #6).
 - Kubernetes translator: server-side apply of Deployment, Service and HPA (KEDA ScaledObject when installed), `serviceType`, `nodePort` and `endpoint` options, in-cluster service account when no kubeconfig exists (#3, #31, #101).
-- Modal translator: `Image.from_registry` pinned by digest, `@modal.web_server` class, `registrySecret` named by env vars, image builder pinned to `2025.06`, authenticated credential check in `hull doctor` (#3, #31, #37).
+- Modal translator: `Image.from_registry` pinned by digest, `@modal.web_server` class, `registrySecret` named by env vars, image builder pinned to `2025.06`, authenticated credential check in `hull doctor`, `setupDockerfileCommands` for images without `python` on `PATH` (#3, #31, #37, #114).
 - Docker translator and the mock model server as the free failover layer for laptops and CI (#23, #24).
 - RunPod, Baseten and Replicate translators render plans and golden payloads only (#3).
 - SQLite state backend; `--state` on every state-opening command, defaulting to `MULTIHULL_STATE_BACKEND`, then `.multihull/state.db` (#3, #101).
@@ -22,7 +22,7 @@ First release. The `v0.1.0` tag dates this section. Human-facing notes: [docs/re
 - Helm chart `charts/multihull`: router Deployment, Service, ConfigMap, PodDisruptionBudget and optional controller. Values added after the scaffold: `router.tuning`, `router.extraConfig`, `router.snapshot.tls`, `router.snapshot.token`, `router.snapshot.insecure`, `controller.image`, `controller.tls`, `controller.token`, `controller.insecure`, `controller.stateBackend`, `controller.envFrom` (#29, #84, #87, #101).
 - Images `ghcr.io/mishraprafful/multihull-router`, `multihull-controller` and `multihull-mock-server`; chart at `oci://ghcr.io/mishraprafful/charts/multihull` (#31, #90, #101).
 - Release pipeline on `v*` tags: GitHub release with router binaries for linux amd64, linux arm64 and macOS arm64, PyPI and crates.io through trusted publishing, chart push to GHCR (#5, #44, #90, #100).
-- Test harnesses: local e2e, kind suite, in-cluster suite and the live Modal smoke workflow (#25, #31, #101).
+- Test harnesses: local e2e, kind suite, in-cluster suite, the live Modal smoke workflow and the manual GPU live run workflow (#25, #31, #101, #114).
 - Docs site at https://multihull.pages.dev with PR previews (#16, #26, #81).
 
 ### Changed
@@ -35,6 +35,7 @@ First release. The `v0.1.0` tag dates this section. Human-facing notes: [docs/re
 - The TTFT baseline adapts only from healthy windows; a slowdown lasting `pressure.ttft_rebaseline_after` becomes the new baseline, and `Degraded` is re-sent while it lasts (#96).
 - `hull validate`, `plan` and `deploy` warn when fallbacks sit below the 1.4 overprovision floor (#37).
 - Streams hitting `timeouts.total` end with a non-retryable `total_timeout` event and do not count against the endpoint (#86).
+- Modal apps are named `multihull-<service>-<provider>`, so two Modal targets in one service get two apps (#114).
 
 ### Fixed
 
@@ -59,7 +60,7 @@ First release. The `v0.1.0` tag dates this section. Human-facing notes: [docs/re
 - RunPod, Baseten and Replicate are render-only: `apply`, `destroy`, `status` and `scale` raise not implemented.
 - SQLite is the only state backend. `s3://`, `gs://` and `postgres://` URLs exit with a not-implemented error.
 - The chart ships no RBAC for the controller and cannot mount a kubeconfig for other clusters.
-- No GPU run yet (#49). `hull failover test`, hedging, cost-aware placement and per-key rate limits are planned, not built.
+- No GPU run yet: `live-gpu.yml` exists but has not been executed (#49). `hull failover test`, hedging, cost-aware placement and per-key rate limits are planned, not built.
 - Images and the chart are private until the public launch.
 
 [Unreleased]: https://github.com/mishraprafful/multihull/commits/main
