@@ -18,10 +18,13 @@ class FakeSecret:
 class FakeImage:
     ref: str
     secret: FakeSecret | None
+    setup_dockerfile_commands: list[str] = field(default_factory=list)
     env_vars: dict[str, str] = field(default_factory=dict)
 
     def env(self, values: dict[str, str]) -> FakeImage:
-        return FakeImage(self.ref, self.secret, {**self.env_vars, **values})
+        return FakeImage(
+            self.ref, self.secret, self.setup_dockerfile_commands, {**self.env_vars, **values}
+        )
 
 
 @dataclass
@@ -76,8 +79,13 @@ class FakeModal:
     async def _client_from_env(self) -> FakeModalClient:
         return self.client
 
-    def _from_registry(self, ref: str, secret: FakeSecret | None = None) -> FakeImage:
-        image = FakeImage(ref, secret)
+    def _from_registry(
+        self,
+        ref: str,
+        secret: FakeSecret | None = None,
+        setup_dockerfile_commands: list[str] | None = None,
+    ) -> FakeImage:
+        image = FakeImage(ref, secret, list(setup_dockerfile_commands or []))
         self.images.append(image)
         return image
 

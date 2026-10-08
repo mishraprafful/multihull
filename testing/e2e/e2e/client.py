@@ -77,8 +77,15 @@ def resolve_key(source: KeySource, index: int) -> str | None:
 
 
 class RouterClient:
-    def __init__(self, base_url: str, timeout: float = 120.0, api_key: str = NO_AUTH_KEY) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 120.0,
+        api_key: str = NO_AUTH_KEY,
+        model: str = MODEL,
+    ) -> None:
         self.base_url = base_url
+        self.model = model
         self.openai = openai.OpenAI(
             base_url=f"{base_url}/v1",
             api_key=api_key,
@@ -101,7 +108,7 @@ class RouterClient:
         outcome = Outcome(index=index, stream=stream, started_at=time.monotonic())
         try:
             raw = self.openai.chat.completions.with_raw_response.create(
-                model=MODEL,
+                model=self.model,
                 messages=[{"role": "user", "content": f"request {index}"}],
                 stream=stream,
                 max_tokens=max_tokens,
@@ -180,12 +187,14 @@ def stream_raw(
     idempotency_key: str | None = None,
     max_tokens: int = 8,
     timeout: float = 120.0,
+    api_key: str = NO_AUTH_KEY,
+    model: str = MODEL,
 ) -> RawStream:
-    headers = {"Host": ROUTE_HOST, "Authorization": f"Bearer {NO_AUTH_KEY}"}
+    headers = {"Host": ROUTE_HOST, "Authorization": f"Bearer {api_key}"}
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key
     body = {
-        "model": MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": f"request {index}"}],
         "stream": True,
         "max_tokens": max_tokens,

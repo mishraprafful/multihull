@@ -151,7 +151,7 @@ def test_deploy_cli_apply_reports_failure(
         "context": "gke_acme_europe-west4_prod",
         "connect": True,
     }
-    assert fake_registry["modal"].kwargs == {"dry_run": False}
+    assert fake_registry["modal"].kwargs == {"dry_run": False, "provider_name": "modal-main"}
     endpoints = json.loads(snapshot_out.read_text())["routes"][0]["endpoints"]
     assert [e["provider"] for e in endpoints] == ["gke-prod", "runpod-eu"]
 

@@ -3,7 +3,7 @@ title: Modal
 description: Serverless containers via the Modal Python SDK.
 ---
 
-Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a serialized class with `@modal.web_server` that execs the container command, then `app.deploy(name=f"multihull-{svc}")`. `destroy` runs `modal app stop`, since the SDK has no stop call. Needs `modal>=1.6`.
+Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a serialized class with `@modal.web_server` that execs the container command, then `app.deploy(name=f"multihull-{svc}-{provider}")`, so two Modal targets in one service get two apps. `destroy` runs `modal app stop`, since the SDK has no stop call. Needs `modal>=1.6`.
 
 ```yaml
 - provider: modal-main
@@ -20,6 +20,12 @@ Requirements:
 - The Python running `hull deploy` must match the image's Python minor version, because the server class is serialized with cloudpickle.
 - An empty `resources.gpu` runs the container on CPU.
 - Deploys pin Modal's image builder to `2025.06`, whatever the workspace default. Modal then mounts its client at runtime instead of running `pip install` in the image, so images without `pip` (a uv venv first on `PATH`, for example) work. `MODAL_IMAGE_BUILDER_VERSION` overrides it.
+- Modal expects `python` on `PATH`. For an image that ships only `python3` (the public vLLM images, for example), `modal.setupDockerfileCommands` adds Dockerfile lines after `FROM`, passed to `Image.from_registry(setup_dockerfile_commands=...)`:
+
+```yaml
+modal:
+  setupDockerfileCommands: ["RUN ln -s /usr/bin/python3 /usr/local/bin/python"]
+```
 
 ## Private registries
 

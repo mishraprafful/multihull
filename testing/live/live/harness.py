@@ -16,7 +16,7 @@ import yaml
 
 from e2e.harness import READY_HEALTH, Router, TomlValue
 from multihull.providers.base import SERVICE_LABEL, Ref
-from multihull.providers.modal import redact
+from multihull.providers.modal import redact, stop_app
 from multihull.state import LocalState
 
 LIVE_ROOT = Path(__file__).resolve().parents[1]
@@ -179,11 +179,16 @@ class LiveDeployment:
         self.document = document
         self.deploy_seconds = 0.0
         self.image_builds: dict[str, Path] = {}
-        secondary = [t for t in document["targets"] if t["provider"] != PRIMARY]
-        self.secondary = str(secondary[0]["provider"])
-        self.secondary_type = str(secondary[0]["type"])
-        kind_target = next(t for t in document["targets"] if t["provider"] == PRIMARY)
-        self.namespace = str(kind_target["kubernetes"]["namespace"])
+        ordered = sorted(document["targets"], key=lambda t: int(t.get("priority", 0)))
+        self.primary = str(ordered[0]["provider"])
+        self.primary_type = str(ordered[0]["type"])
+        self.secondary = str(ordered[1]["provider"])
+        self.secondary_type = str(ordered[1]["type"])
+        kube = next((t for t in document["targets"] if t["type"] == "kubernetes"), None)
+        self.namespace = str(kube["kubernetes"]["namespace"]) if kube else ""
+
+    def providers_of_type(self, provider_type: str) -> list[str]:
+        return [str(t["provider"]) for t in self.document["targets"] if t["type"] == provider_type]
 
     @property
     def service(self) -> str:
@@ -212,10 +217,20 @@ class LiveDeployment:
         command = [sys.executable, "-m", "multihull.cli", "doctor", SPEC_NAME]
         return run_logged(command, self.hull_log, cwd=self.workdir, timeout=120)
 
-    def deploy(self) -> subprocess.CompletedProcess[str]:
+    def deploy(
+        self, ready_timeout: str | None = None, timeout: float = 1800
+    ) -> subprocess.CompletedProcess[str]:
         started = time.monotonic()
+        options = ["--timeout", ready_timeout] if ready_timeout else []
         result = self.hull(
-            "deploy", SPEC_NAME, "--apply", "--wait", "--snapshot-out", str(self.snapshot_path)
+            "deploy",
+            SPEC_NAME,
+            "--apply",
+            "--wait",
+            "--snapshot-out",
+            str(self.snapshot_path),
+            *options,
+            timeout=timeout,
         )
         self.deploy_seconds = time.monotonic() - started
         if result.returncode != 0:
@@ -243,6 +258,11 @@ class LiveDeployment:
             "destroy", SPEC_NAME, "--yes", "--snapshot-out", str(self.snapshot_path), timeout=600
         )
 
+    def stop_modal_app(self, provider: str) -> str:
+        ref = self.refs()[provider]
+        stop_app(ref.ids["app"], ref.ids.get("environment", "main"))
+        return ref.ids["app"]
+
     def logs(self, provider: str, since: str = "30m") -> subprocess.CompletedProcess[str]:
         return self.hull("logs", SPEC_NAME, "--provider", provider, "--since", since, timeout=300)
 
@@ -265,13 +285,14 @@ class LiveRouter(Router):
         snapshot: Mapping[str, TomlValue],
         env: Mapping[str, str],
         expected: int,
+        tuning: Mapping[str, Mapping[str, bool | int | float | str]] = ROUTER_TUNING,
     ) -> None:
         super().__init__(
             binary,
             workdir / "router.toml",
             workdir / LOG_DIR / "router.log",
             snapshot,
-            tuning=ROUTER_TUNING,
+            tuning=tuning,
             env=env,
         )
         self.expected = expected

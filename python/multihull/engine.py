@@ -72,7 +72,7 @@ def provider_kwargs(target: TargetSpec, live: bool) -> dict[str, Any]:
         context = target.kubernetes.context if target.kubernetes else None
         return {"context": context, "connect": live}
     if target.type == "modal":
-        return {"dry_run": not live}
+        return {"dry_run": not live, "provider_name": target.provider}
     if target.type == "docker":
         return {"provider_name": target.provider}
     return {}

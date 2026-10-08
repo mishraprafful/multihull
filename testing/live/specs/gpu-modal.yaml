@@ -1,0 +1,56 @@
+apiVersion: multihull/v1
+name: live-gpu
+
+container:
+  image: vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c
+  command:
+    - python3
+    - -m
+    - vllm.entrypoints.openai.api_server
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+    - --model
+    - Qwen/Qwen2.5-1.5B-Instruct
+    - --served-model-name
+    - qwen2.5-1.5b-instruct
+    - --max-model-len
+    - "4096"
+    - --gpu-memory-utilization
+    - "0.6"
+    - --max-num-seqs
+    - "8"
+    - --enforce-eager
+  port: 8000
+  health: {path: /health, initialDelaySeconds: 600}
+  env: {VLLM_LOGGING_LEVEL: INFO}
+
+resources:
+  gpu: [L4]
+  gpuCount: 1
+  memory: 16Gi
+
+scaling:
+  concurrency: 4
+  replicas: {min: 1, max: 1}
+
+targets:
+  - provider: modal-a
+    type: modal
+    priority: 1
+    modal:
+      environment: main
+      setupDockerfileCommands: ["RUN ln -s /usr/bin/python3 /usr/local/bin/python"]
+  - provider: modal-b
+    type: modal
+    priority: 2
+    modal:
+      environment: main
+      setupDockerfileCommands: ["RUN ln -s /usr/bin/python3 /usr/local/bin/python"]
+
+route:
+  hostname: llama.local
+  protocol: openai
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}
+  auth: {apiKeys: {from: env:LIVE_API_KEYS}}

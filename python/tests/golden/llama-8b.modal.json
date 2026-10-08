@@ -1,5 +1,5 @@
 {
-  "app_name": "multihull-llama-8b",
+  "app_name": "multihull-llama-8b-modal-main",
   "environment": "main",
   "region": "eu",
   "tags": {
@@ -8,7 +8,8 @@
   "image": {
     "ref": "ghcr.io/acme/vllm-llama:1.4.0",
     "secret": null,
-    "builder_version": "2025.06"
+    "builder_version": "2025.06",
+    "setup_dockerfile_commands": []
   },
   "gpu": "L4",
   "memory_mib": 32768,
@@ -20,7 +21,7 @@
   "web_server": {
     "port": 8000,
     "startup_timeout": 120,
-    "label": "multihull-llama-8b"
+    "label": "multihull-llama-8b-modal-main"
   },
   "command": [
     "vllm",
@@ -31,7 +32,7 @@
     "VLLM_LOGGING_LEVEL": "INFO"
   },
   "secret": {
-    "name": "multihull-llama-8b",
+    "name": "multihull-llama-8b-modal-main",
     "keys": [
       "hf-token"
     ]
