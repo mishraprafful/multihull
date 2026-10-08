@@ -18,10 +18,10 @@ Prerequisites: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` repository secrets (see
 ## What runs, in order
 
 1. Modal credential preflight (same authenticated call as `hull doctor`), router release build.
-2. `hull doctor`, then `hull deploy --apply --wait --timeout <remaining budget>`. Modal builds the image once (the spec adds one Dockerfile line, a `python` symlink, because the vLLM image ships only `python3` and Modal expects `python` on `PATH`), pulls it on both targets, and vLLM loads the model. Startup window: `health.initialDelaySeconds: 600`, mapped to the web server's `startup_timeout`.
+2. `hull doctor`, then `hull deploy --apply --wait --timeout <remaining budget>`. Modal builds the image once (the translator resets the image `ENTRYPOINT`, and the spec adds a `python` symlink because the vLLM image ships only `python3` and Modal expects `python` on `PATH`), pulls it on both targets, and vLLM loads the model. Startup window: `health.initialDelaySeconds: 600`, mapped to the web server's `startup_timeout`. A target is Ready once a container runs and `web_url/health` answers 200.
 3. One raw streaming `/v1/chat/completions` (asserts SSE chunks with text and a final `[DONE]`), 5 plain and 3 streamed requests through the SDK, one plain answer checked for content. All on `modal-a`, zero failovers.
 4. `hull logs -p` for both targets.
-5. `modal app stop` on the primary's app, wait for the router to take the endpoint out (probe down, circuit open or health not ready), then 10 plain and 3 streamed requests: all on `modal-b`, zero client errors, zero server errors.
+5. `modal app stop` on the primary's app, wait for the router to take the endpoint out (probe down, circuit open or health down), then 10 plain and 3 streamed requests: all on `modal-b`, zero client errors, zero server errors.
 6. `hull destroy`, then `modal app list` must show no running `multihull-live-<run id>` app.
 
 About 22 requests in total. It is a correctness run, not a load test.
@@ -58,6 +58,9 @@ modal app stop multihull-live-<run id>-modal-b --env main --yes
 
 Or sweep everything from live runs: `cd testing/live && uv run python -m live.sweep --prefix multihull-live-`. The daily sweeper in `live-smoke.yml` stops any `multihull-live-` app older than two hours. Check the Modal dashboard afterwards: a running app is the only thing that costs money once the job is gone.
 
-## Not yet run
+## Observed in the first runs (2026-10-08)
 
-The workflow has not been executed. Unverified until the first run: that Modal accepts the vLLM image with the `python` symlink, how long the first image build takes, and what a stopped app's endpoint returns to the router's probe.
+- Modal accepts the vLLM v0.11.0 image with the `python` symlink once the image `ENTRYPOINT` is reset; with the image's own entrypoint every container exited with `api_server.py: error: unrecognized arguments: ... -m modal._container_entrypoint` (run 37809376724).
+- First deploy with an image build: Ready after 306 s; with the image cached: 91 s. Inside the container, vLLM's API server listens about 75 s after start (model load 17 s).
+- A stopped app answers `404 modal-http: invalid function call` to the probe and to requests. The controller reports it `unknown`, which the router still routes; the router takes the endpoint out after three failed probes (about 14 s). Requests sent in that window get the 404 back (4xx is not retried).
+- Passing run 37813589815: 2 m 13 s, 23 requests, 0 client errors, 0.06 USD estimated.

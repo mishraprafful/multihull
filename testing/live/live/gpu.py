@@ -24,6 +24,7 @@ DEPLOY_READY_SECONDS = 15 * 60
 EJECTION_SECONDS = 180
 ROUTER_TUNING: dict[str, dict[str, bool | int | float | str]] = {"timeouts": {"first_byte": 30}}
 READY_HEALTH = "ready"
+ROUTABLE_HEALTH = frozenset({READY_HEALTH, "degraded", "draining", "unspecified"})
 
 
 class BudgetExceeded(RuntimeError):
@@ -142,7 +143,7 @@ def running_apps(
 def ejected(entry: dict[str, Any]) -> bool:
     probe = entry.get("probe") or {}
     return (
-        entry.get("health") != READY_HEALTH
+        entry.get("health") not in ROUTABLE_HEALTH
         or entry.get("circuit") == "open"
         or probe.get("state") == "down"
     )
