@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Multihull is pre-alpha (0.0.1). Fixes land on `main` first.
+Multihull is pre-alpha (0.1.0). Fixes land on `main` first.
 
 | Version | Receives security fixes |
 |---|---|

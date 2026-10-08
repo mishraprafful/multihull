@@ -1,11 +1,11 @@
 use anyhow::Context;
-use router_core::circuit::CircuitConfig;
-use router_core::limit::AdmissionQueue;
-use router_core::pressure::PressureConfig;
-use router_core::probe::ProbeConfig;
-use router_core::retry::RetryConfig;
-use router_cp::{SnapshotSource, SourceSecurity};
-use router_proxy::PhaseTimeouts;
+use multihull::core::circuit::CircuitConfig;
+use multihull::core::limit::AdmissionQueue;
+use multihull::core::pressure::PressureConfig;
+use multihull::core::probe::ProbeConfig;
+use multihull::core::retry::RetryConfig;
+use multihull::cp::{SnapshotSource, SourceSecurity};
+use multihull::proxy::PhaseTimeouts;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -144,8 +144,8 @@ impl Config {
             .map_err(|message| anyhow::anyhow!("invalid tuning: {message}"))
     }
 
-    pub fn proxy_config(&self) -> router_proxy::ProxyConfig {
-        router_proxy::ProxyConfig {
+    pub fn proxy_config(&self) -> multihull::proxy::ProxyConfig {
+        multihull::proxy::ProxyConfig {
             listen: self.listen,
             timeouts: self.timeouts.clone(),
             max_buffered_body_bytes: self.max_buffered_body_bytes,
@@ -180,11 +180,11 @@ mod tests {
         assert_eq!(config.proxy_config(), documented_defaults());
     }
 
-    fn documented_defaults() -> router_proxy::ProxyConfig {
-        router_proxy::ProxyConfig {
+    fn documented_defaults() -> multihull::proxy::ProxyConfig {
+        multihull::proxy::ProxyConfig {
             listen: default_listen(),
             region: Some("eu".to_string()),
-            ..router_proxy::ProxyConfig::default()
+            ..multihull::proxy::ProxyConfig::default()
         }
     }
 

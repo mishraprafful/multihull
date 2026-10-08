@@ -8,7 +8,6 @@ description = "Mock upstream with fault injection for Multihull router tests."
 publish = false
 
 [dependencies]
-router-tls = { workspace = true }
 bytes = { workspace = true }
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }

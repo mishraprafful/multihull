@@ -20,6 +20,7 @@ Rules for entries
 - Test counts: Python 150 passed, 1 skipped; Rust 215; e2e 27 rows; kind suite 16; mock server 40.
 - PR 87 (draft, issue 46) secures the discovery stream: `hull controller` serves TLS (`--tls-cert`, `--tls-key`), optional mTLS (`--client-ca`) and a bootstrap token from `MULTIHULL_DISCOVERY_TOKEN` checked per stream, and refuses plaintext without `--insecure`. The router's `[snapshot]` takes `ca`, `client_cert`, `client_key`, `token_env` and `insecure`. The chart renders them from `controller.tls`, `controller.token`, `router.snapshot.tls`, `router.snapshot.token` and the `insecure` opt-ins, and fails the render otherwise. e2e and kind generate a CA, certificates and a token per run.
 - Test counts on PR 87: Python 225 passed, 1 skipped; Rust 254; e2e 35 rows; kind suite 27; chart render checks 29; mock server 40.
+- Issue 47 (branch `refactor/single-router-crate`): the router is one crate, `multihull` at `router/crates/multihull`: the binary plus library modules `core`, `proxy`, `cp`, `auth`, `obs`, `admin`, `tls`. `router-testkit` stays an unpublished path dev-dependency. `tests/core_boundary.rs` keeps `core` free of IO and of other modules. `release.yml` publishes only `multihull`; the CI router job runs `cargo publish -p multihull --dry-run --locked`. Workspace, Python package and chart are at 0.1.0, untagged. Rust tests: 257 before the fold, 258 after (same 257 plus the boundary test).
 - Package names claimed: `multihull` 0.0.1 placeholders on PyPI (pages.dev links) and crates.io (GitHub homepage until the next version), uploaded from commit `fbdf211` so no private source was published. The owner reports trusted publishers configured for `release.yml` with environment `release`; this cannot be checked through the public APIs.
 - Logo explorations (PR 28) closed unmerged; the original three-hull mark stays.
 - GitHub repo `mishraprafful/multihull` is private. `multihull.dev` is not owned; all URLs use `multihull.pages.dev`.
@@ -55,41 +56,42 @@ Rules for entries
 | 2026-10-08 | The chart fails the render when the controller has no TLS and no `controller.insecure`, or a grpc or http source would be plaintext without `router.snapshot.insecure` | Secure default; the CI and kind chart steps pass explicit TLS values |
 | 2026-10-07 | An upstream 408 is Transient, retried only for idempotent or keyed requests; when every untried provider is open, a retry returns to a tried provider that answered and is still closed, before the panic pool | Live run 37678680863: Modal's 408s were forwarded as Fatal, yet Modal logged about 5 s of execution for them, so a keyless POST may already have reached the model; retries spent on kind (circuit open, probe down) turned recoverable Modal timeouts into 502s |
 | 2026-10-08 | The TTFT baseline adapts only from healthy windows; a slowdown lasting `pressure.ttft_rebaseline_after` (default 3600 s) becomes the new baseline | Issue 91: adapting on degraded windows silenced a sustained 3x slowdown after about three windows and let the controller scale back mid-incident. A time bound, not a window count, lets a permanent latency change stop the signal independent of traffic rate; one hour favours reliability over cost |
+| 2026-10-08 | Fold the internal router crates into modules of the one `multihull` crate; only `multihull` goes to crates.io, first release 0.1.0 | Owner's call on issue 47: `cargo publish --workspace` could not succeed (internal crates `publish = false`, `router-core` taken on crates.io); one package keeps one version and one trusted publisher |
+| 2026-10-08 | The crate reads `discovery.proto` through a symlink at `router/crates/multihull/proto/`, and ships its tests | Cargo packages the symlink target, so the published crate builds without the repo's `proto/`; excluding `tests/` makes every dry run warn once per test target |
 
 ## Open questions
 
 - Public or private repo at launch. Currently private.
 - Domain for docs. `multihull.dev` is not owned; the site uses `multihull.pages.dev`.
-- How to publish the router crate: release the internal crates under `multihull-` names (`router-core` is taken on crates.io), or fold them into the single `multihull` crate.
 
 ## Next steps
 
 1. GPU live run: the llama-8b example on a Modal GPU behind the router, triggered by the owner. kind has no GPUs, so a Kubernetes GPU run needs a real cluster.
 2. RunPod, Baseten and Replicate `apply` implementations (currently render-only) with the translator conformance suite from the plan.
-3. Release 0.1.0 preparation: bump versions past 0.0.1, rework the `release.yml` crates job (see open question) onto trusted publishing, and list the Helm chart on Artifact Hub once the repo is public.
+3. Release 0.1.0: the owner tags `v0.1.0` after issue 47 merges; the first run proves the PyPI and crates.io trusted publishers. List the Helm chart on Artifact Hub once the repo is public.
 4. Work through the TODO list below.
 5. Owner, optional: `modal workspace settings set image-builder-version 2025.06` so other Modal projects in the workspace get the new builder.
 
 ## TODO from the PR 29 review
 
 **Probes can mask a failing model (do these together, plus a new harness row where /health returns 200 but inference returns 503 and the circuit must still open and stay open):**
-- [x] `router/crates/router-proxy/src/runtime.rs:98`: `ProbeTransition::CameUp` calls `circuit.restore()`, closing from open and skipping backoff and the half-open trial; it also fires on Unknown to Up about 15 s after startup, force-closing a circuit live 5xx traffic opened. Restore only on Down to Up caused by a probe ejection, and move to half-open rather than closed.
-- [x] `router/crates/router-core/src/circuit.rs:255`: probe successes count toward closing half-open and `close()` resets `backoff_n`, so /health alone can close the circuit. Require at least one admitted-request success, or count probe successes separately.
-- [x] `router/crates/router-proxy/src/runtime.rs:127`: half-open `admit()` ignores the prober, so requests reach an endpoint probes still report down. Treat probe-down as open in admit and the peek-based gates while probes are enabled.
-- [x] `router/crates/router-proxy/src/body.rs:86`: a mid-stream disconnect is recorded after the Success recorded at first byte (handler.rs:192), giving an exact 0.5 error ratio that strict `>` in `should_trip` never exceeds. For streamed responses record the outcome when the body ends.
+- [x] `router/crates/multihull/src/proxy/runtime.rs:98`: `ProbeTransition::CameUp` calls `circuit.restore()`, closing from open and skipping backoff and the half-open trial; it also fires on Unknown to Up about 15 s after startup, force-closing a circuit live 5xx traffic opened. Restore only on Down to Up caused by a probe ejection, and move to half-open rather than closed.
+- [x] `router/crates/multihull/src/core/circuit.rs:255`: probe successes count toward closing half-open and `close()` resets `backoff_n`, so /health alone can close the circuit. Require at least one admitted-request success, or count probe successes separately.
+- [x] `router/crates/multihull/src/proxy/runtime.rs:127`: half-open `admit()` ignores the prober, so requests reach an endpoint probes still report down. Treat probe-down as open in admit and the peek-based gates while probes are enabled.
+- [x] `router/crates/multihull/src/proxy/body.rs:86`: a mid-stream disconnect is recorded after the Success recorded at first byte (handler.rs:192), giving an exact 0.5 error ratio that strict `>` in `should_trip` never exceeds. For streamed responses record the outcome when the body ends.
 
 **Router config and probing:**
-- [ ] `router/crates/router-core/src/snapshot.rs:205` (also `router-proxy/src/probe.rs:35`): a health path without a leading slash builds a probe URL with the wrong host and ejects every endpoint. Prepend `/` in `health_path()` and validate `Health.path` in `python/multihull/spec.py`.
-- [ ] `router/crates/router-core/src/circuit.rs:77`: `panic_threshold` accepts 0.0 and rejects 1.0. Use (0, 1] and revisit the test that rejects 1.0.
-- [ ] `router/crates/router-core/src/pressure.rs:30`: NaN or infinity pass `ttft_degrade_factor` validation. Require finite and greater than 1.
-- [ ] `router/crates/router-core/src/retry.rs:30` and circuit.rs ratio window: fractional windows are truncated to whole seconds by `as_secs()`. Reject non-integer windows or bucket on milliseconds.
-- [x] `router/crates/router-proxy/src/body.rs:203`: hitting `timeouts.total` is reported as a retryable upstream disconnect and counted against the endpoint. Skip the circuit record and emit a distinct non-retryable error type. Done in PR 86.
-- [x] `router/crates/router-proxy/src/handler.rs:587` (predates PR 29): `admit()` spends the half-open trial before `try_reserve` checks headroom. Reserve first, then admit. Done in PR 86.
+- [ ] `router/crates/multihull/src/core/snapshot.rs:205` (also `proxy/probe.rs:35`): a health path without a leading slash builds a probe URL with the wrong host and ejects every endpoint. Prepend `/` in `health_path()` and validate `Health.path` in `python/multihull/spec.py`.
+- [ ] `router/crates/multihull/src/core/circuit.rs:77`: `panic_threshold` accepts 0.0 and rejects 1.0. Use (0, 1] and revisit the test that rejects 1.0.
+- [ ] `router/crates/multihull/src/core/pressure.rs:30`: NaN or infinity pass `ttft_degrade_factor` validation. Require finite and greater than 1.
+- [ ] `router/crates/multihull/src/core/retry.rs:30` and circuit.rs ratio window: fractional windows are truncated to whole seconds by `as_secs()`. Reject non-integer windows or bucket on milliseconds.
+- [x] `router/crates/multihull/src/proxy/body.rs:203`: hitting `timeouts.total` is reported as a retryable upstream disconnect and counted against the endpoint. Skip the circuit record and emit a distinct non-retryable error type. Done in PR 86.
+- [x] `router/crates/multihull/src/proxy/handler.rs:587` (predates PR 29): `admit()` spends the half-open trial before `try_reserve` checks headroom. Reserve first, then admit. Done in PR 86.
 - [ ] RunPod and Baseten translators inject no provider auth and Baseten's base URL ends in `/production/predict`, so their probes and traffic will fail once implemented; fix with their `apply` work.
 
 **Controller:**
 - [ ] `python/multihull/controller.py:277`: scale-back and Degraded handling run in parallel `to_thread` workers with no lock. Serialise both with one lock and re-check `last_degraded_at` before each step down.
-- [x] `python/multihull/controller.py:231`: scale-back treats silence as recovery, but the router sends Degraded once per pressure episode (`router-core/src/pressure.rs:162`). Re-send while pressure holds, or gate scale-back on the degraded provider's health. Queue pressure re-sends since PR 85, TTFT since issue 91.
+- [x] `python/multihull/controller.py:231`: scale-back treats silence as recovery, but the router sends Degraded once per pressure episode (`core/pressure.rs:162`). Re-send while pressure holds, or gate scale-back on the degraded provider's health. Queue pressure re-sends since PR 85, TTFT since issue 91.
 - [ ] `python/multihull/controller.py:74`: raised floors live only in memory and are lost on restart. Persist them in the state backend or seed from observed desired replicas.
 
 **Chart:**
@@ -102,11 +104,17 @@ Rules for entries
 - [x] `testing/e2e/tests/test_10_degraded.py:64`: `scale_before` counts all scale lines but slices only scale-back lines. Count scale-back lines separately. Done in PR 35.
 - [ ] Docs still say the `upstream_disconnected` event is planned and the retry budget is not configurable (`website/src/content/docs/docs/concepts/targets-and-failover.mdx` lines 47 and 53, `docs/design/architecture-plan.md:236`, `docs/design/testing-strategy.md:56`); PR 29 made both exist. (The e2e README part is done.)
 
-Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some of them in `body.rs`, `handler.rs` and `controller.py`.
+Line numbers refer to `main` at PR 29 (`08a3b2f`), paths to the module layout after issue 47; the blocker fixes shift some of them in `body.rs`, `handler.rs` and `controller.py`.
 
 ## Session log
 
 ### 2026-10-08
+- Issue 47 on `refactor/single-router-crate`: folded the seven internal router crates into modules of `multihull` with `git mv`, so history follows. Test names match one for one (257); the new `core_boundary` test makes 258.
+- `router-testkit` builds its mock upstream's rustls config itself, so it no longer depends on router code and stays a path dev-dependency without a version, which `cargo publish` strips.
+- The admin and obs Prometheus tests now share one process, so they share one installed recorder (`obs::prometheus::process_recorder`). Log filters name `multihull::proxy`, not `router_proxy`.
+- Local gates on the branch: fmt, clippy, Rust 258, Python 225 passed and 1 skipped, e2e 36 passed, `docker build -f router/Dockerfile .` reports `multihull 0.1.0`.
+- `cargo publish -p multihull --dry-run --locked` passes with no warnings beyond the dry run itself. On an already published version it only warns, so PR CI stays green after a release.
+- The chart's `Chart.yaml` moved to 0.1.0; `testing/*` and `website/` package versions are internal and stay as they were.
 - Issues 92, 93 (branch `test/e2e-isolation-and-test02`): e2e runs are isolated by `E2E_RUN_ID` (service, containers, labels, sweeper, temp dir, router node id, host port block), so concurrent runs on one machine no longer collide. `test_02` accepts a `transient` or `probe` failover from primary: PR 86's first e2e attempt failed because the controller marked the stopped primary down before any request reached it, and the probe then ejected it.
 - Issue 95: `publish-crates` gains `contents: read` (job-level `permissions` set unlisted scopes to none, so checkout failed on the private repo); no other job has the pattern. `kind.yml` pins Helm v4.3.0 like the chart and release jobs.
 - Issue 46 on PR 87 (draft): TLS, mTLS and a bootstrap token for the controller stream, router `[snapshot]` TLS and token keys, plaintext only with an explicit opt-in. The gRPC source dials through `router-tls` with a custom tonic connector; tonic's own TLS features stay off.

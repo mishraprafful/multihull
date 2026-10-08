@@ -35,7 +35,7 @@ Status: v0.1 scaffold. `hull deploy`, `destroy`, `logs`, `failover test` and `co
 | Path | Contents |
 |---|---|
 | `python/` | `multihull` package: spec, providers, engine, state, `hull` CLI |
-| `router/` | Rust workspace: router-core, proxy, discovery client, admin, `multihull` binary |
+| `router/` | `multihull` crate (router binary; modules `core`, `proxy`, `cp`, `auth`, `obs`, `admin`, `tls`) and test-only `router-testkit` |
 | `proto/` | `discovery.proto` shared by Python and Rust |
 | `charts/multihull/` | Helm chart, built-in Kubernetes kinds only |
 | `examples/` | Sample `multihull.yaml` files |

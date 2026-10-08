@@ -5,6 +5,9 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -147,7 +150,7 @@ impl MockUpstream {
         cert_pem: &[u8],
         key_pem: &[u8],
     ) -> std::io::Result<Self> {
-        let server_config = router_tls::server_config_from_pem(cert_pem, key_pem)
+        let server_config = server_config_from_pem(cert_pem, key_pem)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
         Self::start_with_tls(config, Some(TlsAcceptor::from(Arc::new(server_config)))).await
     }
@@ -253,6 +256,21 @@ impl Drop for MockUpstream {
             let _ = tx.send(true);
         }
     }
+}
+
+fn server_config_from_pem(
+    cert_pem: &[u8],
+    key_pem: &[u8],
+) -> Result<ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
+    let certs = CertificateDer::pem_slice_iter(cert_pem).collect::<Result<Vec<_>, _>>()?;
+    let key = PrivateKeyDer::from_pem_slice(key_pem)?;
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()?
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?;
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    Ok(config)
 }
 
 #[derive(Clone)]
