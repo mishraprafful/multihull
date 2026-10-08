@@ -553,6 +553,7 @@ fn pick_endpoint(
         }
     }
     pick_untried(state, untried, &tried.endpoints, preset, rng)
+        .or_else(|| pick_tried_again(state, route, tried, preset, rng))
 }
 
 fn pick_tried_again(
