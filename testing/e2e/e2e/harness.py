@@ -19,6 +19,7 @@ import yaml
 
 from e2e.metrics import Metrics
 from e2e.mock import MockHandle
+from e2e.stream import StreamCredentials
 from e2e.waiting import wait_until
 from multihull.providers.base import SERVICE_LABEL, Ref
 from multihull.state import LocalState
@@ -119,7 +120,7 @@ class Process:
         self.cwd = cwd
         self.popen: subprocess.Popen[bytes] | None = None
 
-    def spawn(self, command: list[str]) -> None:
+    def spawn(self, command: list[str], env: Mapping[str, str] | None = None) -> None:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fd = os.open(self.log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
         self.popen = subprocess.Popen(
@@ -127,7 +128,7 @@ class Process:
             cwd=self.cwd,
             stdout=log_fd,
             stderr=subprocess.STDOUT,
-            env={**os.environ, "PYTHONUNBUFFERED": "1", "COLUMNS": "200"},
+            env={**os.environ, "PYTHONUNBUFFERED": "1", "COLUMNS": "200", **(env or {})},
         )
         os.close(log_fd)
 
@@ -305,9 +306,17 @@ def sweep_containers(docker_client: Any) -> list[str]:
 
 
 class Controller(Process):
-    def __init__(self, workdir: Path, log_dir: Path) -> None:
+    def __init__(
+        self,
+        workdir: Path,
+        log_dir: Path,
+        credentials: StreamCredentials,
+        expected_endpoints: int = len(TARGETS),
+    ) -> None:
         super().__init__("controller", log_dir / "controller.log", cwd=workdir)
         self.workdir = workdir
+        self.credentials = credentials
+        self.expected_endpoints = expected_endpoints
         self.port = free_port()
         self.spec_path = workdir / SPEC_NAME
 
@@ -344,10 +353,15 @@ class Controller(Process):
                 interval,
                 "--degraded-cooldown",
                 degraded_cooldown,
+                *self.credentials.controller_args(),
                 *state_args(self.workdir),
-            ]
+            ],
+            env=self.credentials.env,
         )
         wait_until(self.snapshot_ready, 60, message="controller snapshot")
+
+    def router_snapshot(self) -> dict[str, TomlValue]:
+        return dict(self.credentials.router_snapshot(self.address))
 
     def restart(self, spec_path: Path | None = None) -> None:
         self.stop()
@@ -368,7 +382,7 @@ class Controller(Process):
         if document is None:
             return False
         endpoints = [e for route in document["routes"] for e in route["endpoints"]]
-        return len(endpoints) == len(TARGETS)
+        return len(endpoints) == self.expected_endpoints
 
 
 TomlValue = bool | int | float | str
@@ -395,14 +409,14 @@ def write_router_config(
     path: Path,
     listen_port: int,
     admin_port: int,
-    source: str,
+    snapshot: Mapping[str, TomlValue],
     first_byte_seconds: int = 3,
     log_filter: str = "info",
     tuning: Mapping[str, Mapping[str, TomlValue]] | None = None,
 ) -> Path:
     overrides = {name: dict(entries) for name, entries in (tuning or {}).items()}
     tables: dict[str, dict[str, TomlValue]] = {
-        "snapshot": {"source": source},
+        "snapshot": dict(snapshot),
         "timeouts": {"first_byte": first_byte_seconds, **overrides.pop("timeouts", {})},
         "log": {"format": "json", "filter": log_filter},
         **overrides,
@@ -427,14 +441,16 @@ class Router(Process):
         binary: Path,
         config_path: Path,
         log_path: Path,
-        source: str,
+        snapshot: Mapping[str, TomlValue],
         tuning: Mapping[str, Mapping[str, TomlValue]] | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__("router", log_path)
         self.binary = binary
         self.config_path = config_path
-        self.source = source
+        self.snapshot = dict(snapshot)
         self.tuning = dict(tuning or {})
+        self.env = dict(env or {})
         self.listen_port = free_port()
         self.admin_port = free_port()
         self.http = httpx.Client(timeout=5.0)
@@ -449,9 +465,9 @@ class Router(Process):
 
     def start(self) -> None:
         write_router_config(
-            self.config_path, self.listen_port, self.admin_port, self.source, tuning=self.tuning
+            self.config_path, self.listen_port, self.admin_port, self.snapshot, tuning=self.tuning
         )
-        self.spawn([str(self.binary), "--config", str(self.config_path)])
+        self.spawn([str(self.binary), "--config", str(self.config_path)], env=self.env)
 
     def healthz(self) -> bool:
         try:

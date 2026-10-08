@@ -47,6 +47,7 @@ jobs:
             chart:
               - 'charts/**'
               - 'router/**'
+              - 'python/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/release.yml'
             mock_server:
@@ -133,6 +134,8 @@ jobs:
           --set controller.enabled=true
           --set controller.stateBackend.existingSecret=multihull-state
           --set controller.specConfigMap=multihull-spec
+          --set controller.tls.secretName=multihull-controller-tls
+          --set controller.token.existingSecret=multihull-discovery-token
           > /dev/null
       - name: Package the chart as a release would, without pushing
         run: charts/package.sh "v0.0.0-ci.$GITHUB_RUN_NUMBER" "$RUNNER_TEMP/chart"
@@ -147,9 +150,15 @@ jobs:
           workspaces: router
       - run: cargo build -p multihull
         working-directory: router
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+      - run: uv sync --locked --project python
       - run: charts/multihull/tests/render.sh
         env:
           MULTIHULL_BIN: ${{ github.workspace }}/router/target/debug/multihull
+          HULL: uv run --project ${{ github.workspace }}/python hull
 
   mock-server:
     needs: changes

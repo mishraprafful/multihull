@@ -18,10 +18,12 @@ from e2e.harness import (
     Controller,
     Deployment,
     Router,
+    TomlValue,
     host_ports,
     rewrite_spec,
     sweep_containers,
 )
+from e2e.stream import StreamCredentials, generate_credentials
 
 E2E_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = E2E_ROOT.parents[1]
@@ -114,8 +116,15 @@ def deployment(
 
 
 @pytest.fixture(scope="session")
-def controller(deployment: Deployment, workdir: Path) -> Iterator[Controller]:
-    process = Controller(workdir, workdir / "logs")
+def stream_credentials(tmp_path_factory: pytest.TempPathFactory) -> StreamCredentials:
+    return generate_credentials(tmp_path_factory.mktemp("stream-tls"))
+
+
+@pytest.fixture(scope="session")
+def controller(
+    deployment: Deployment, workdir: Path, stream_credentials: StreamCredentials
+) -> Iterator[Controller]:
+    process = Controller(workdir, workdir / "logs", stream_credentials)
     process.start()
     try:
         yield process
@@ -131,19 +140,20 @@ def reset_faults(deployment: Deployment, controller: Controller) -> Iterator[Non
 
 
 @pytest.fixture
-def router_source(request: pytest.FixtureRequest, controller: Controller) -> str:
+def router_source(request: pytest.FixtureRequest, controller: Controller) -> dict[str, TomlValue]:
     kind = getattr(request, "param", "grpc")
     if kind == "file":
-        return f"file://{controller.snapshot_path}"
-    return f"grpc://{controller.address}"
+        return {"source": f"file://{controller.snapshot_path}"}
+    return controller.router_snapshot()
 
 
 @pytest.fixture
 def router(
     request: pytest.FixtureRequest,
     router_binary: Path,
-    router_source: str,
+    router_source: dict[str, TomlValue],
     controller: Controller,
+    stream_credentials: StreamCredentials,
     tmp_path: Path,
 ) -> Iterator[Router]:
     marker = request.node.get_closest_marker("router_tuning")
@@ -153,6 +163,7 @@ def router(
         tmp_path / "router.log",
         router_source,
         tuning=marker.kwargs if marker else None,
+        env=stream_credentials.env,
     )
     process.start()
     try:

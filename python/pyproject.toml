@@ -38,7 +38,7 @@ Documentation = "https://multihull.pages.dev"
 Repository = "https://github.com/mishraprafful/multihull"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "grpcio-tools>=1.66"]
+dev = ["pytest>=8", "ruff>=0.6", "grpcio-tools>=1.66", "cryptography>=43"]
 
 [build-system]
 requires = ["hatchling"]

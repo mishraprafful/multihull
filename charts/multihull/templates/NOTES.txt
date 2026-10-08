@@ -8,7 +8,7 @@ Inspect live endpoints via the admin listener:
 
 Snapshot source: {{ .Values.router.snapshot.type }}
 {{- if .Values.controller.enabled }}
-Controller: enabled, streaming snapshots from {{ include "multihull.fullname" . }}-controller:{{ .Values.controller.grpcPort }}
+Controller: enabled, streaming snapshots from {{ include "multihull.fullname" . }}-controller:{{ .Values.controller.grpcPort }} ({{ if .Values.controller.insecure }}plaintext, controller.insecure=true{{ else }}TLS{{ if .Values.controller.tls.clientCaSecret }} with client certificates{{ end }}{{ end }})
 {{- else }}
 Controller: disabled (set controller.enabled=true and controller.stateBackend.existingSecret to run hull controller)
 {{- end }}

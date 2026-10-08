@@ -1,10 +1,12 @@
+use crate::security::BearerToken;
 use crate::source::SnapshotError;
 use bytes::Bytes;
-use http::header::{ETAG, IF_NONE_MATCH};
+use http::header::{AUTHORIZATION, ETAG, IF_NONE_MATCH};
 use http::{HeaderValue, Request, StatusCode};
 use http_body_util::{BodyExt, Full};
 use router_core::Snapshot;
 use router_tls::HttpsClient;
+use rustls::ClientConfig;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -13,17 +15,15 @@ pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub fn client() -> Result<HttpsClient, SnapshotError> {
-    Ok(router_tls::https_client(CONNECT_TIMEOUT, None)?)
+pub fn client(tls: ClientConfig) -> HttpsClient {
+    router_tls::https_client_with(CONNECT_TIMEOUT, tls)
 }
 
 pub async fn poll(
-    url: String,
+    mut poller: Poller,
     interval: Duration,
-    client: HttpsClient,
     tx: watch::Sender<Arc<Snapshot>>,
 ) -> Result<(), SnapshotError> {
-    let mut poller = Poller::new(url, client);
     let mut ticker = tokio::time::interval(interval.max(Duration::from_millis(10)));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -49,6 +49,7 @@ pub async fn poll(
 pub struct Poller {
     url: String,
     client: HttpsClient,
+    token: Option<BearerToken>,
     etag: Option<HeaderValue>,
 }
 
@@ -57,8 +58,14 @@ impl Poller {
         Self {
             url,
             client,
+            token: None,
             etag: None,
         }
+    }
+
+    pub fn with_token(mut self, token: Option<BearerToken>) -> Self {
+        self.token = token;
+        self
     }
 
     pub fn etag(&self) -> Option<&HeaderValue> {
@@ -67,6 +74,9 @@ impl Poller {
 
     pub async fn fetch(&mut self) -> Result<Option<Snapshot>, SnapshotError> {
         let mut request = Request::get(&self.url);
+        if let Some(token) = &self.token {
+            request = request.header(AUTHORIZATION, token.header_value().clone());
+        }
         if let Some(etag) = &self.etag {
             request = request.header(IF_NONE_MATCH, etag.clone());
         }
@@ -102,6 +112,10 @@ mod tests {
     use super::*;
     use router_testkit::{MockUpstream, MockUpstreamConfig};
 
+    fn anonymous_client() -> HttpsClient {
+        client(router_tls::client_config(None).unwrap())
+    }
+
     fn snapshot_json(version: u64) -> String {
         format!(
             r#"{{"version":{version},"routes":[{{"id":"r","endpoints":[{{"id":"e{version}","url":"http://127.0.0.1:1"}}]}}]}}"#
@@ -119,7 +133,8 @@ mod tests {
         let upstream = MockUpstream::start(served(1)).await.unwrap();
         let (tx, mut rx) = watch::channel(Arc::new(Snapshot::default()));
         let url = format!("{}/snapshot.json", upstream.url());
-        let task = tokio::spawn(poll(url, Duration::from_millis(30), client().unwrap(), tx));
+        let poller = Poller::new(url, anonymous_client());
+        let task = tokio::spawn(poll(poller, Duration::from_millis(30), tx));
 
         tokio::time::timeout(Duration::from_secs(5), rx.changed())
             .await
@@ -154,7 +169,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut poller = Poller::new(upstream.url(), client().unwrap());
+        let mut poller = Poller::new(upstream.url(), anonymous_client());
         assert!(matches!(poller.fetch().await, Err(SnapshotError::Http(_))));
         upstream.reconfigure(MockUpstreamConfig::default().with_body("{not json"));
         assert!(matches!(poller.fetch().await, Err(SnapshotError::Http(_))));

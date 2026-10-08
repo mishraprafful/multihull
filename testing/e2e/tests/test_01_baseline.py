@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 
 from e2e.client import RouterClient, failures, load, providers_of
-from e2e.harness import Router, endpoint_id
+from e2e.harness import Router, TomlValue, endpoint_id
 
 
 @pytest.mark.parametrize("router_source", ["grpc", "file"], indirect=True)
 def test_all_requests_land_on_primary_without_errors(
-    router: Router, client: RouterClient, stream: bool, router_source: str
+    router: Router, client: RouterClient, stream: bool, router_source: dict[str, TomlValue]
 ) -> None:
     outcomes = load(client, 50, stream=stream, concurrency=4)
 

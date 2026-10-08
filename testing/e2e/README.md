@@ -1,6 +1,6 @@
 # Local end-to-end harness
 
-Layer 3 of the testing strategy: three `docker` targets running the mock model server, `hull controller` streaming snapshots over gRPC, the release router binary in front, an OpenAI client driving load while faults are injected.
+Layer 3 of the testing strategy: three `docker` targets running the mock model server, `hull controller` streaming snapshots over gRPC with mTLS and a bootstrap token, the release router binary in front, an OpenAI client driving load while faults are injected.
 
 ## Run
 
@@ -31,9 +31,10 @@ To clean up after a crashed run, rerun with the same `E2E_RUN_ID` (the sweeper r
 | `sweeper` | session | removes this run's containers (`multihull.dev/service=e2e-three-<id>`) left by a crashed run with the same id |
 | `workdir` | session | temp dir `multihull-e2e-<id>` with `multihull.yaml`, `multihull-sticky.yaml`, `multihull-auth.yaml` (route keys from `file:route-api-keys`, written by `test_14` with fake keys), `.multihull/` |
 | `deployment` | session | `hull deploy --apply --wait`, yields targets and mock handles, `hull destroy --yes` at teardown |
-| `controller` | session | `hull controller --interval 2s --degraded-cooldown 5s`, restartable with another spec |
+| `stream_credentials` | session | CA, controller and router certificates and a bootstrap token generated per run (`e2e/stream.py`); keys never leave the temp dir |
+| `controller` | session | `hull controller --interval 2s --degraded-cooldown 5s` with `--tls-cert`, `--tls-key`, `--client-ca` and the token in `MULTIHULL_DISCOVERY_TOKEN`, restartable with another spec |
 | `reset_faults` | function, autouse | restarts stopped containers, resets every knob, waits for docker health before and after each test |
-| `router` | function | fresh router per test, `grpc` source by default, `file` via the `router_source` indirect param, extra `router.toml` tables via `@pytest.mark.router_tuning(probe={...})`; attaches router and controller logs on failure |
+| `router` | function | fresh router per test, `grpcs` source with `ca`, `client_cert`, `client_key` and `token_env` by default, `file` via the `router_source` indirect param, extra `router.toml` tables via `@pytest.mark.router_tuning(probe={...})`; attaches router and controller logs on failure |
 | `client`, `stream` | function | `RouterClient` for the router and the streaming parametrization |
 
 Helpers: `endpoint_id(provider)` (router endpoint id `e2e-three-<id>/<provider>`, for metrics labels and debug output), `deployment.mock(name).control(**knobs)` and `.stats()`, `deployment.stop_container(name)` and `start_container(name)`, `router.endpoints()`, `router.metrics()` (parsed Prometheus text), `load(client, n, stream, concurrency, idempotency_key)` returning per-request `Outcome`s, `stream_raw(base_url, ...)` returning the raw SSE `data:` frames, `wait_until(pred, timeout)`, `EndpointSampler(router, provider)` (context manager) recording `/debug/endpoints` circuit and probe state in the background, with the times each poll was sent and answered.
@@ -51,4 +52,5 @@ Create `tests/test_NN_name.py` (modules run in numeric order), request `deployme
 - The stopped-container row (`test_02`) does not require a `transient` failover: the controller's health check can mark the primary down before any request reaches the stopped container, and the router's probe then ejects it. It asserts zero client errors, traffic after the stop only on secondary or tertiary, an open primary circuit, and at least one `transient` or `probe` failover from primary.
 - The "flapping every 2 s" row is not implemented.
 - The degraded row sets `pressure.resend_every = 1`, reads `admission.max_wait` and `pressure` from `/debug/config` and waits up to `max_wait + sustained + resend_every` plus two housekeeping ticks for a second router `degraded signal` log line while the load still runs, then for the controller. It asserts that the first scale-back comes at least one cooldown after the last `Degraded`, so none happens while pressure holds. Only the `Degraded` signal and the logged scale attempts are asserted; the docker provider refuses `min > 1`, so the controller records the raised floor as intent, and the scale-back step (`--degraded-cooldown 5s` in the harness) is also observed as a refused attempt.
+- The TTFT degraded row (`test_10`, second test) sets `pressure.ttft_window = 5` and `resend_every = 1`, takes a baseline with the primary at 300 ms, slows it to 1200 ms for three cooldowns while load runs, and asserts the controller keeps receiving `TTFT_P95` `Degraded` (no gap of a cooldown) and attempts no scale-back until the primary is fast again. It then waits, with load still running, for the scale-back of both raised fallbacks at least one cooldown after the last `Degraded`.
 - Mock `__stats` count health probes too, so scenarios assert on router metrics and response headers rather than on `by_status`.

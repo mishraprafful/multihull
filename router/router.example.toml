@@ -5,7 +5,17 @@ node_id = "router-eu-1"
 max_buffered_body_bytes = 1048576
 
 [snapshot]
+# file://PATH (or a bare path), grpcs://HOST:PORT for the hull controller stream,
+# or https://URL polled every 10 s. A snapshot can carry provider credentials,
+# so keep a snapshot file at mode 0600.
 source = "file://./snapshot.json"
+# For grpcs:// and https:// sources:
+# ca = "/etc/multihull/discovery/ca.crt"           # trust only this CA bundle instead of the public roots
+# client_cert = "/etc/multihull/discovery/tls.crt" # client certificate for mTLS, with client_key
+# client_key = "/etc/multihull/discovery/tls.key"
+# token_env = "MULTIHULL_DISCOVERY_TOKEN"          # env var holding the bearer token
+# Plaintext grpc:// and http:// sources start only with insecure = true (local development).
+# insecure = false
 
 [tls]
 cert = "/etc/multihull/tls/tls.crt"
@@ -66,11 +76,16 @@ sustained = 2
 resend_every = 30
 # Pressure forgotten after this long without samples.
 stale_after = 10
-# TTFT p95 above baseline * factor over ttft_window samples sends Degraded(TtftP95).
+# TTFT p95 above baseline * factor over ttft_window samples sends Degraded(TtftP95),
+# re-sent every resend_every while new samples arrive, until a window is healthy again.
 # The factor must be finite and greater than 1.
 ttft_degrade_factor = 2.0
 ttft_window = 50
+# Only healthy windows move the baseline, by this share of the difference.
 ttft_baseline_smoothing = 0.2
+# A slowdown that lasts this long becomes the new baseline and stops Degraded(TtftP95).
+# Longer keeps raised floors through long incidents; shorter accepts a permanent shift sooner.
+ttft_rebaseline_after = 3600
 
 [probe]
 # Active health probe per endpoint: GET <endpoint url><health_path from the snapshot, default /health>.

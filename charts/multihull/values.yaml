@@ -7,9 +7,29 @@ router:
   listen: 8080
   admin: 9090
   region: ""
+  # Where the router reads endpoint snapshots. Snapshots can carry provider
+  # credentials (Modal proxy tokens), so grpc and http sources need TLS or an
+  # explicit insecure opt-in.
   snapshot:
+    # file, grpc or http.
     type: file
+    # file: snapshot path. grpc: controller host:port; leave the default to use
+    # the in-chart controller. http: http:// or https:// URL.
     value: /var/lib/multihull/snapshot.json
+    tls:
+      # Secret mounted at /etc/multihull/discovery for grpc and https sources:
+      # ca.crt is the only CA trusted for the source and, with clientCertificate,
+      # tls.crt and tls.key are the router's mTLS client certificate. A grpc
+      # source becomes grpcs:// when this is set.
+      secretName: ""
+      clientCertificate: true
+    token:
+      # Secret holding the bootstrap token the router sends as
+      # "authorization: Bearer"; exposed as MULTIHULL_DISCOVERY_TOKEN.
+      existingSecret: ""
+      key: token
+    # Allow a plaintext grpc:// or http:// source. Local development only.
+    insecure: false
   tls:
     secretName: ""
   # router.toml tuning tables, see router/router.example.toml. Durations are
@@ -43,6 +63,7 @@ router:
       ttft_degrade_factor: 2.0
       ttft_window: 50
       ttft_baseline_smoothing: 0.2
+      ttft_rebaseline_after: 3600
     probe:
       enabled: true
       interval: 5
@@ -97,6 +118,20 @@ controller:
     key: url
   specConfigMap: ""
   grpcPort: 9443
+  # The discovery stream needs TLS unless insecure is true.
+  tls:
+    # Secret with tls.crt and tls.key the stream serves. Its SAN must match the
+    # host routers dial, <release>-multihull-controller by default.
+    secretName: ""
+    # Secret with ca.crt; routers must present a client certificate it signed (mTLS).
+    clientCaSecret: ""
+  token:
+    # Secret holding the bootstrap token checked on every stream; exposed as
+    # MULTIHULL_DISCOVERY_TOKEN. TLS needs clientCaSecret, this token or both.
+    existingSecret: ""
+    key: token
+  # Serve the stream in plaintext (hull controller --insecure). Local development only.
+  insecure: false
   resources:
     requests:
       cpu: 100m

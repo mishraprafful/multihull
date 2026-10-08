@@ -67,10 +67,10 @@ npm run build
 helm lint charts/multihull
 helm template multihull charts/multihull > /dev/null
 (cd router && cargo build --release -p multihull)
-charts/multihull/tests/render.sh
+HULL="uv run --project $PWD/python hull" charts/multihull/tests/render.sh
 ```
 
-`render.sh` renders `router.toml` with the value files in `charts/multihull/tests/values/` and loads each with `multihull --check-config`. Helm may be absent locally; CI installs it and runs these for you.
+`render.sh` renders `router.toml` with the value files in `charts/multihull/tests/values/` and the TLS, token and plaintext opt-in cases, and loads each with `multihull --check-config`. It also checks the controller Deployment's command against `hull controller --help`, and that refused values fail the render. Helm may be absent locally; CI installs it and runs these for you.
 
 ## Running tests
 
