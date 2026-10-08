@@ -7,7 +7,7 @@ import shlex
 import subprocess
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -265,6 +265,13 @@ class LiveDeployment:
 
     def logs(self, provider: str, since: str = "30m") -> subprocess.CompletedProcess[str]:
         return self.hull("logs", SPEC_NAME, "--provider", provider, "--since", since, timeout=300)
+
+    def capture_logs(self, providers: Iterable[str]) -> None:
+        for provider in providers:
+            try:
+                self.logs(provider)
+            except (OSError, subprocess.SubprocessError):
+                continue
 
     def records(self) -> dict[str, Any]:
         return {r.provider: r for r in LocalState(self.workdir / STATE_PATH).list(self.service)}
