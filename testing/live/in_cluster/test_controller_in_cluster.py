@@ -17,21 +17,15 @@ from live.in_cluster import (
     RouterForward,
 )
 
+TERMINATION_GRACE = 30
 STATE_PROBE = (
     f"import os; print(os.path.exists({STATE_FILE!r}), os.path.exists({DEFAULT_STATE_FILE!r}))"
 )
 
 
-def listening_line(cluster: InCluster) -> str | None:
+def controller_line(cluster: InCluster, needle: str) -> str | None:
     for line in cluster.pod_logs(CONTROLLER).splitlines():
-        if "discovery stream listening" in line:
-            return line
-    return None
-
-
-def first_snapshot_line(cluster: InCluster) -> str | None:
-    for line in cluster.pod_logs(CONTROLLER).splitlines():
-        if "snapshot version 1:" in line:
+        if needle in line:
             return line
     return None
 
@@ -54,7 +48,10 @@ def ready_endpoint(router: RouterForward) -> dict[str, Any] | None:
 
 def test_controller_serves_tls_with_client_certificates_and_a_token(release: InCluster) -> None:
     line = wait_until(
-        lambda: listening_line(release), 60, interval=1, message="controller listening"
+        lambda: controller_line(release, "discovery stream listening"),
+        60,
+        interval=1,
+        message="controller listening",
     )
     assert f"listening on port {GRPC_PORT}" in line
     assert f"(TLS with client certificates, bearer token from {TOKEN_ENV})" in line
@@ -104,13 +101,23 @@ def test_requests_reach_the_workload_through_the_in_cluster_router(
 def test_state_on_the_volume_survives_a_controller_restart(
     release: InCluster, router: RouterForward
 ) -> None:
-    release.restart_controller()
+    seconds = release.restart_controller()
+    assert seconds < TERMINATION_GRACE, f"restart took {seconds:.0f}s: SIGTERM was ignored"
     line = wait_until(
-        lambda: first_snapshot_line(release), 90, interval=1, message="restarted controller"
+        lambda: controller_line(release, "snapshot version 1:"),
+        90,
+        interval=1,
+        message="first snapshot of the restarted controller",
     )
     assert f"{PROVIDER}=healthy/1" in line
     result = release.exec_controller("python", "-c", STATE_PROBE)
     assert result.stdout.split() == ["True", "False"], result.stderr
+    wait_until(
+        lambda: controller_line(release, "hello from"),
+        90,
+        interval=1,
+        message="router reconnecting to the restarted controller",
+    )
     assert ready_endpoint(router) is not None
 
 

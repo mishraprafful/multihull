@@ -5,6 +5,7 @@ import os
 import secrets
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -376,7 +377,8 @@ class InCluster:
         described = self.kubectl("describe", "pods", namespace=RELEASE_NAMESPACE)
         (self.logs / "pods.txt").write_text(described.stdout + described.stderr)
 
-    def restart_controller(self) -> None:
+    def restart_controller(self) -> float:
+        started = time.monotonic()
         self.kubectl_ok(
             "rollout", "restart", f"deployment/{CONTROLLER}", namespace=RELEASE_NAMESPACE
         )
@@ -387,6 +389,7 @@ class InCluster:
             "--timeout=180s",
             namespace=RELEASE_NAMESPACE,
         )
+        return time.monotonic() - started
 
     def exec_controller(self, *command: str) -> subprocess.CompletedProcess[str]:
         return self.kubectl(
