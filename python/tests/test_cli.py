@@ -149,6 +149,20 @@ def test_snapshot_command(tmp_path: Path, monkeypatch) -> None:
     assert snapshot["routes"][0]["endpoints"][0]["provider"] == "modal-main"
 
 
+def test_snapshot_command_never_writes_a_lower_version(tmp_path: Path) -> None:
+    path = copy_fixture(tmp_path)
+    out = tmp_path / "snapshot.json"
+    ahead = 10**12
+    out.write_text(json.dumps({"version": ahead, "routes": []}))
+    args = ["snapshot", str(path), "--out", str(out), "--state", str(tmp_path / "state.db")]
+
+    assert runner.invoke(app, args).exit_code == 0
+    first = json.loads(out.read_text())["version"]
+    assert first > ahead
+    assert runner.invoke(app, args).exit_code == 0
+    assert json.loads(out.read_text())["version"] > first
+
+
 def test_snapshot_command_rejects_a_malformed_route_key(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LLAMA_API_KEYS", "hull_fixture_one,hull_bad-id_leakedsecretvalue")
     out = tmp_path / "snapshot.json"
@@ -230,7 +244,7 @@ def test_controller_stops_cleanly_on_sigterm(tmp_path: Path) -> None:
         )
         try:
             deadline = time.monotonic() + 30
-            while not snapshot.exists() and process.poll() is None:
+            while "discovery stream listening" not in log.read_text() and process.poll() is None:
                 assert time.monotonic() < deadline, log.read_text()
                 time.sleep(0.1)
             assert process.poll() is None, log.read_text()

@@ -58,6 +58,7 @@ pub async fn watch(path: PathBuf, tx: watch::Sender<Arc<Snapshot>>) -> Result<()
         while events_rx.try_recv().is_ok() {}
         match load(&path) {
             Ok(snapshot) => {
+                let (snapshot, _) = crate::cp::guard::apply(&tx.borrow(), snapshot);
                 let changed = tx.borrow().version != snapshot.version || **tx.borrow() != snapshot;
                 if changed {
                     tracing::info!(version = snapshot.version, "snapshot reloaded from file");
@@ -192,6 +193,46 @@ mod tests {
         let bad = dir.path().join("bad.json");
         std::fs::write(&bad, b"{not json").unwrap();
         assert!(matches!(load(&bad), Err(SnapshotError::Json { .. })));
+    }
+
+    fn write_document(path: &Path, json: &str) {
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, json).unwrap();
+        std::fs::rename(&tmp, path).unwrap();
+    }
+
+    async fn next_snapshot(rx: &mut watch::Receiver<Arc<Snapshot>>) -> Arc<Snapshot> {
+        tokio::time::timeout(Duration::from_secs(5), rx.changed())
+            .await
+            .expect("snapshot reloaded")
+            .unwrap();
+        rx.borrow_and_update().clone()
+    }
+
+    #[tokio::test]
+    async fn watch_keeps_endpoints_when_a_route_loses_them_and_drops_a_removed_route() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.json");
+        write_snapshot(&path, 1);
+        let (tx, mut rx) = watch::channel(Arc::new(Snapshot::default()));
+        let task = tokio::spawn(watch(path.clone(), tx));
+        assert_eq!(next_snapshot(&mut rx).await.version, 1);
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        write_document(
+            &path,
+            r#"{"version":2,"routes":[{"id":"r","endpoints":[]}]}"#,
+        );
+        let kept = next_snapshot(&mut rx).await;
+        assert_eq!(kept.version, 2);
+        assert_eq!(kept.routes[0].endpoints[0].id, "e1");
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        write_document(&path, r#"{"version":3,"routes":[]}"#);
+        let removed = next_snapshot(&mut rx).await;
+        assert_eq!(removed.version, 3);
+        assert!(removed.routes.is_empty());
+        task.abort();
     }
 
     #[tokio::test]

@@ -22,6 +22,8 @@ The router is stateless. It reads a static `router.toml` and a dynamic endpoint 
 
 The gRPC stream and HTTPS URLs take a CA bundle, a client certificate and a bearer token under `[snapshot]`; plaintext `grpc://` and `http://` need `insecure = true`. See [Controller stream](/docs/router/controller-stream/).
 
+The router nacks a streamed snapshot older than the one it holds. From any source, a route that arrives with no endpoints keeps the endpoints the router holds; removing the route from the snapshot stops serving it. See [Versions and empty routes](/docs/router/controller-stream/#versions-and-empty-routes).
+
 The last snapshot is persisted to disk and served indefinitely on control-plane loss, with an alert after 1 h.
 
 ## Configuration

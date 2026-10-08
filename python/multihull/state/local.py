@@ -33,6 +33,13 @@ MIGRATIONS = (
         PRIMARY KEY (service, provider)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS snapshot_versions (
+        service TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 COLUMNS = "service, provider, ref, image_digest, spec_hash, last_status, updated_at"
@@ -47,10 +54,14 @@ class LocalState:
         with self._connect() as conn:
             migrate(conn)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.path, isolation_level=None)
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            yield conn
+        finally:
+            conn.close()
 
     def get(self, service: str, provider: str) -> StateRecord | None:
         with self._connect() as conn:
@@ -126,6 +137,26 @@ class LocalState:
                 "DELETE FROM floors WHERE service = ? AND provider = ?", (service, provider)
             )
 
+    def snapshot_version(self, service: str) -> int:
+        with self._connect() as conn:
+            return stored_snapshot_version(conn, service)
+
+    def advance_snapshot_version(self, service: str, at_least: int) -> int:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                version = max(stored_snapshot_version(conn, service) + 1, at_least)
+                conn.execute(
+                    "INSERT OR REPLACE INTO snapshot_versions (service, version, updated_at) "
+                    "VALUES (?, ?, ?)",
+                    (service, version, utcnow().isoformat()),
+                )
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+            conn.execute("COMMIT")
+        return version
+
     @contextmanager
     def lock(self) -> Iterator[None]:
         with self.lock_path.open("a+") as handle:
@@ -158,6 +189,13 @@ def row_to_floor(row: tuple) -> Floor:
         pre_degraded_min=pre_degraded_min,
         updated_at=datetime.fromisoformat(updated_at),
     )
+
+
+def stored_snapshot_version(conn: sqlite3.Connection, service: str) -> int:
+    row = conn.execute(
+        "SELECT version FROM snapshot_versions WHERE service = ?", (service,)
+    ).fetchone()
+    return row[0] if row else 0
 
 
 def schema_version(conn: sqlite3.Connection) -> int:

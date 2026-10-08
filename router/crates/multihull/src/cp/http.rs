@@ -30,6 +30,7 @@ pub async fn poll(
         ticker.tick().await;
         match poller.fetch().await {
             Ok(Some(snapshot)) => {
+                let (snapshot, _) = crate::cp::guard::apply(&tx.borrow(), snapshot);
                 let changed = tx.borrow().version != snapshot.version || **tx.borrow() != snapshot;
                 if changed {
                     tracing::info!(version = snapshot.version, url = %poller.url, "snapshot fetched");
@@ -160,6 +161,46 @@ mod tests {
             result,
             Ok(Ok(Err(SnapshotError::ReceiverDropped)))
         ));
+    }
+
+    #[tokio::test]
+    async fn poll_keeps_endpoints_when_a_route_loses_them_and_drops_a_removed_route() {
+        let upstream = MockUpstream::start(served(1)).await.unwrap();
+        let (tx, mut rx) = watch::channel(Arc::new(Snapshot::default()));
+        let url = format!("{}/snapshot.json", upstream.url());
+        let task = tokio::spawn(poll(
+            Poller::new(url, anonymous_client()),
+            Duration::from_millis(30),
+            tx,
+        ));
+        assert_eq!(next_snapshot(&mut rx).await.version, 1);
+
+        upstream.reconfigure(
+            MockUpstreamConfig::default()
+                .with_body(r#"{"version":2,"routes":[{"id":"r","endpoints":[]}]}"#)
+                .with_etag("\"v2\""),
+        );
+        let kept = next_snapshot(&mut rx).await;
+        assert_eq!(kept.version, 2);
+        assert_eq!(kept.routes[0].endpoints[0].id, "e1");
+
+        upstream.reconfigure(
+            MockUpstreamConfig::default()
+                .with_body(r#"{"version":3,"routes":[]}"#)
+                .with_etag("\"v3\""),
+        );
+        let removed = next_snapshot(&mut rx).await;
+        assert_eq!(removed.version, 3);
+        assert!(removed.routes.is_empty());
+        task.abort();
+    }
+
+    async fn next_snapshot(rx: &mut watch::Receiver<Arc<Snapshot>>) -> Arc<Snapshot> {
+        tokio::time::timeout(Duration::from_secs(5), rx.changed())
+            .await
+            .expect("snapshot fetched")
+            .unwrap();
+        rx.borrow_and_update().clone()
     }
 
     #[tokio::test]
