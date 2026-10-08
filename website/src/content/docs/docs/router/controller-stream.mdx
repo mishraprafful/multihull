@@ -45,6 +45,21 @@ token_env = "MULTIHULL_DISCOVERY_TOKEN"
 - An `https://` snapshot URL takes the same keys and sends the same bearer token.
 - A snapshot file needs none of them, but keep it at mode `0600` when it carries credentials.
 
+## Versions and empty routes
+
+A router nacks a streamed snapshot older than the one it holds (`stale: router holds version N`), so versions never go backwards:
+
+- `hull controller` stores the last version it published in the state backend and continues from it after a restart. It also starts above the version in its `--snapshot-out` file.
+- Every router `Hello` carries the version it holds. The controller never publishes below the highest one reported; a controller that lost its state republishes the same routes above it. A stream gets snapshots only after its `Hello`.
+- `hull deploy`, `hull destroy` and `hull snapshot` write the largest of the stored version plus one, the existing file's version plus one, and the Unix time in seconds, and store it, so the controller continues above them.
+
+Empty endpoint sets never stop serving:
+
+- The controller never publishes a route with no endpoints while the spec declares targets. It rediscovers missing targets by label first; if it still finds none, it keeps its last snapshot (after a restart, publishes nothing) and logs an error on every reconcile.
+- The router keeps the endpoints it holds for a route that arrives with none, applies the rest of the snapshot, logs a warning and nacks with the route's name. File and URL sources apply the same rule.
+- To stop serving a route on purpose, remove it from the snapshot. `hull destroy` does that once no target of the service is left.
+- File and URL sources have no stale check, so restoring an older file rolls the router back.
+
 ## Helm chart
 
 The chart mounts cert-manager style Secrets (`tls.crt`, `tls.key`, `ca.crt`) and refuses to render a plaintext stream unless you opt in.
@@ -113,7 +128,7 @@ controller:
 | `controller.envFrom` | Container `envFrom`, for provider credentials |
 
 - Every `hull` command that opens state takes `--state`, defaulting to `MULTIHULL_STATE_BACKEND`, then `.multihull/state.db`. SQLite is the only backend today: a path, `sqlite:///absolute/path.db` or `sqlite:relative/path.db`. `s3://`, `gs://` and `postgres://` fail as not implemented yet; other schemes fail as unsupported. Neither error repeats the URL.
-- Without `controller.stateBackend.volume` the database lives in the container, and a restart loses the refs and raised floors. `hull status` rediscovers refs from labels.
+- Without `controller.stateBackend.volume` the database lives in the container, and a restart loses the refs, raised floors and snapshot version. The controller then rediscovers refs from labels before it publishes and continues above the versions routers report, so routers keep serving meanwhile.
 - Kubernetes targets without `context` use the pod's service account when no kubeconfig exists. The chart creates no RBAC: bind its ServiceAccount to a role that can `get`, `list` and `patch` Deployments, `get` and `list` Services and Nodes, and `get` and `patch` HorizontalPodAutoscalers. The chart cannot mount a kubeconfig for targets in other clusters yet.
 - On SIGTERM the controller ends every router stream, stops and exits 0; routers reconnect with backoff and keep their last snapshot meanwhile.
 
