@@ -5,7 +5,7 @@ import time
 import pytest
 
 from e2e.client import Outcome, RouterClient, failures, load, load_for, providers_of
-from e2e.harness import Deployment, Router
+from e2e.harness import Deployment, Router, endpoint_id
 from e2e.sampler import EndpointSampler
 from e2e.waiting import wait_until
 
@@ -18,7 +18,7 @@ CIRCUIT = {
     "half_open_ramp": 3,
     "probe_successes_to_close": 3,
 }
-PRIMARY = "e2e-three/primary"
+PRIMARY = endpoint_id("primary")
 CONCURRENCY = 4
 FAULT_SECONDS = 10
 TRIAL_GAP = 1.0
