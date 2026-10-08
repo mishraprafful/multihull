@@ -111,6 +111,15 @@ def test_an_existing_state_file_is_migrated_in_place(tmp_path: Path) -> None:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
+def test_every_call_closes_its_connection(tmp_path: Path) -> None:
+    state = LocalState(tmp_path / "state.db")
+    state.put(StateRecord("svc", "gke", "{}", None, "h"))
+    state.list("svc")
+    state.list_floors("svc")
+    state.advance_snapshot_version("svc", 1)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["state.db"]
+
+
 def test_snapshot_versions_only_move_forward(tmp_path: Path) -> None:
     state = LocalState(tmp_path / "state.db")
     assert state.snapshot_version("svc") == 0

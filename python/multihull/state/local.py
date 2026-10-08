@@ -54,10 +54,14 @@ class LocalState:
         with self._connect() as conn:
             migrate(conn)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.path, isolation_level=None)
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            yield conn
+        finally:
+            conn.close()
 
     def get(self, service: str, provider: str) -> StateRecord | None:
         with self._connect() as conn:
