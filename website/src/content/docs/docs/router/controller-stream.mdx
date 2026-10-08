@@ -115,7 +115,7 @@ controller:
 - Every `hull` command that opens state takes `--state`, defaulting to `MULTIHULL_STATE_BACKEND`, then `.multihull/state.db`. SQLite is the only backend today: a path, `sqlite:///absolute/path.db` or `sqlite:relative/path.db`. `s3://`, `gs://` and `postgres://` fail as not implemented yet; other schemes fail as unsupported. Neither error repeats the URL.
 - Without `controller.stateBackend.volume` the database lives in the container, and a restart loses the refs and raised floors. `hull status` rediscovers refs from labels.
 - Kubernetes targets without `context` use the pod's service account when no kubeconfig exists. The chart creates no RBAC: bind its ServiceAccount to a role that can `get`, `list` and `patch` Deployments, `get` and `list` Services and Nodes, and `get` and `patch` HorizontalPodAutoscalers. The chart cannot mount a kubeconfig for targets in other clusters yet.
-- The controller exits cleanly on SIGTERM.
+- On SIGTERM the controller ends every router stream, stops and exits 0; routers reconnect with backoff and keep their last snapshot meanwhile.
 
 ## Local development
 
