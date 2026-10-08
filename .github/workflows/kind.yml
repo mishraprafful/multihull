@@ -51,6 +51,12 @@ jobs:
             --set controller.enabled=true \
             --set controller.stateBackend.existingSecret=multihull-state \
             --set controller.specConfigMap=multihull-spec \
+            --set controller.tls.secretName=multihull-controller-tls \
+            --set controller.tls.clientCaSecret=multihull-discovery-ca \
+            --set controller.token.existingSecret=multihull-discovery-token \
+            --set router.snapshot.type=grpc \
+            --set router.snapshot.tls.secretName=multihull-router-discovery \
+            --set router.snapshot.token.existingSecret=multihull-discovery-token \
             | kubectl apply --dry-run=server --namespace default -f -
       - uses: astral-sh/setup-uv@v10.2.0
         with:

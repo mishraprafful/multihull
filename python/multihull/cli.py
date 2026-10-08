@@ -27,6 +27,7 @@ from multihull.controller import (
 from multihull.durations import format_duration, parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
 from multihull.state import LocalState
+from multihull.stream_security import DEFAULT_TOKEN_ENV, StreamSecurity, StreamSecurityError
 
 app = typer.Typer(
     name="hull",
@@ -445,10 +446,45 @@ def controller(
         ),
     ] = format_duration(DEFAULT_DEGRADED_COOLDOWN),
     log_level: Annotated[str, typer.Option(help="Python log level")] = "INFO",
+    tls_cert: Annotated[
+        Path | None,
+        typer.Option("--tls-cert", help="PEM certificate chain the discovery stream serves"),
+    ] = None,
+    tls_key: Annotated[
+        Path | None, typer.Option("--tls-key", help="PEM private key for --tls-cert")
+    ] = None,
+    client_ca: Annotated[
+        Path | None,
+        typer.Option(
+            "--client-ca",
+            help="PEM CA bundle; routers must present a client certificate it signed (mTLS)",
+        ),
+    ] = None,
+    token_env: Annotated[
+        str,
+        typer.Option(
+            "--token-env",
+            help="Env var holding the bootstrap token routers send as 'authorization: Bearer'",
+        ),
+    ] = DEFAULT_TOKEN_ENV,
+    insecure: Annotated[
+        bool,
+        typer.Option(
+            "--insecure",
+            help="Serve the discovery stream in plaintext; local development only",
+        ),
+    ] = False,
 ) -> None:
     logging.basicConfig(
         level=log_level.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
+    try:
+        security = StreamSecurity.from_options(tls_cert, tls_key, client_ca, token_env, insecure)
+        if security.tls:
+            security.server_credentials()
+    except StreamSecurityError as exc:
+        errors.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from None
     service = load_or_exit(path)
     route_keys_or_exit(service)
     daemon = Controller(
@@ -460,7 +496,7 @@ def controller(
         degraded_cooldown=duration_or_exit(degraded_cooldown, "--degraded-cooldown"),
     )
     try:
-        asyncio.run(daemon.run(grpc_listen))
+        asyncio.run(daemon.run(security, grpc_listen))
     except KeyboardInterrupt:
         return
 

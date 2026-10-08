@@ -19,6 +19,7 @@ from multihull.controller import Controller
 from multihull.providers.base import Ref, ScaleRefused
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
+from multihull.stream_security import StreamSecurity
 from tests.conftest import no_keys_message
 from tests.fakes import FakeProvider
 
@@ -473,7 +474,7 @@ def test_grpc_stream_hello_snapshot_and_degraded(llama_spec: ServiceSpec, tmp_pa
     controller, _ = make_controller(llama_spec, tmp_path, providers)
 
     async def scenario() -> None:
-        server, port = await controller.serve("127.0.0.1:0")
+        server, port = await controller.serve("127.0.0.1:0", StreamSecurity(insecure=True))
         outgoing: asyncio.Queue[pb.RouterMessage | None] = asyncio.Queue()
 
         async def requests() -> AsyncIterator[pb.RouterMessage]:

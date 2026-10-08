@@ -4,6 +4,7 @@ use router_core::limit::AdmissionQueue;
 use router_core::pressure::PressureConfig;
 use router_core::probe::ProbeConfig;
 use router_core::retry::RetryConfig;
+use router_cp::{SnapshotSource, SourceSecurity};
 use router_proxy::PhaseTimeouts;
 use serde::Deserialize;
 use std::net::SocketAddr;
@@ -47,6 +48,32 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct SnapshotConfig {
     pub source: String,
+    #[serde(default)]
+    pub ca: Option<PathBuf>,
+    #[serde(default)]
+    pub client_cert: Option<PathBuf>,
+    #[serde(default)]
+    pub client_key: Option<PathBuf>,
+    #[serde(default)]
+    pub token_env: Option<String>,
+    #[serde(default)]
+    pub insecure: bool,
+}
+
+impl SnapshotConfig {
+    pub fn parsed_source(&self) -> anyhow::Result<SnapshotSource> {
+        Ok(SnapshotSource::parse(&self.source)?)
+    }
+
+    pub fn security(&self) -> SourceSecurity {
+        SourceSecurity {
+            ca: self.ca.clone(),
+            client_cert: self.client_cert.clone(),
+            client_key: self.client_key.clone(),
+            token_env: self.token_env.clone(),
+            insecure: self.insecure,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -107,6 +134,11 @@ impl Config {
     }
 
     fn validate(&self) -> anyhow::Result<()> {
+        let source = self.snapshot.parsed_source().context("[snapshot] source")?;
+        self.snapshot
+            .security()
+            .check(&source)
+            .context("[snapshot]")?;
         self.proxy_config()
             .validate()
             .map_err(|message| anyhow::anyhow!("invalid tuning: {message}"))
@@ -243,8 +275,47 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_table_carries_tls_token_and_insecure_settings() {
+        let config = Config::parse(
+            "[snapshot]\nsource = \"grpcs://controller:7700\"\nca = \"/etc/multihull/discovery/ca.crt\"\nclient_cert = \"/etc/multihull/discovery/tls.crt\"\nclient_key = \"/etc/multihull/discovery/tls.key\"\ntoken_env = \"MULTIHULL_DISCOVERY_TOKEN\"\n",
+        )
+        .unwrap();
+        let security = config.snapshot.security();
+        assert_eq!(
+            security.ca.as_deref(),
+            Some(Path::new("/etc/multihull/discovery/ca.crt"))
+        );
+        assert_eq!(
+            security.client_key.as_deref(),
+            Some(Path::new("/etc/multihull/discovery/tls.key"))
+        );
+        assert_eq!(
+            security.token_env.as_deref(),
+            Some("MULTIHULL_DISCOVERY_TOKEN")
+        );
+        assert!(!security.insecure);
+
+        let error = format!(
+            "{:#}",
+            Config::parse("[snapshot]\nsource = \"grpc://controller:7700\"\n").unwrap_err()
+        );
+        assert!(error.contains("insecure = true"), "{error}");
+        let plaintext =
+            Config::parse("[snapshot]\nsource = \"grpc://controller:7700\"\ninsecure = true\n")
+                .unwrap();
+        assert!(plaintext.snapshot.insecure);
+        let error = format!(
+            "{:#}",
+            Config::parse("[snapshot]\nsource = \"grpcs://c:1\"\nclient_cert = \"/c\"\n")
+                .unwrap_err()
+        );
+        assert!(error.contains("together"), "{error}");
+        assert!(Config::parse("[snapshot]\nsource = \"ftp://c\"\n").is_err());
+    }
+
+    #[test]
     fn minimal_config_uses_defaults() {
-        let config = Config::parse("[snapshot]\nsource = \"grpc://controller:7777\"\n").unwrap();
+        let config = Config::parse("[snapshot]\nsource = \"grpcs://controller:7777\"\n").unwrap();
         assert_eq!(config.listen, default_listen());
         assert_eq!(config.timeouts, PhaseTimeouts::default());
         assert_eq!(config.max_buffered_body_bytes, 1024 * 1024);

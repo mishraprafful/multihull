@@ -22,18 +22,40 @@ data:
     {{- end }}
 
     [snapshot]
-    {{- if eq .Values.router.snapshot.type "file" }}
-    source = {{ printf "file://%s" .Values.router.snapshot.value | quote }}
-    {{- else if eq .Values.router.snapshot.type "http" }}
-    source = {{ .Values.router.snapshot.value | quote }}
-    {{- else if eq .Values.router.snapshot.type "grpc" }}
-    {{- if and .Values.controller.enabled (not .Values.router.snapshot.value) }}
-    source = {{ printf "grpc://%s-controller:%v" (include "multihull.fullname" .) .Values.controller.grpcPort | quote }}
-    {{- else }}
-    source = {{ printf "grpc://%s" .Values.router.snapshot.value | quote }}
+    {{- $snapshot := .Values.router.snapshot }}
+    {{- $tlsSecret := include "multihull.snapshotTlsSecret" . }}
+    {{- $tokenSecret := include "multihull.snapshotTokenSecret" . }}
+    {{- if eq $snapshot.type "file" }}
+    {{- if or $tlsSecret $tokenSecret $snapshot.insecure }}
+    {{- fail "router.snapshot.tls, router.snapshot.token and router.snapshot.insecure apply to grpc and http sources, not to a snapshot file" }}
     {{- end }}
+    source = {{ printf "file://%s" $snapshot.value | quote }}
     {{- else }}
-    {{- fail (printf "router.snapshot.type must be file, http or grpc, got %q" .Values.router.snapshot.type) }}
+    {{- $source := include "multihull.snapshotSource" . }}
+    {{- $plaintext := or (hasPrefix "grpc://" $source) (hasPrefix "http://" $source) }}
+    {{- if and $snapshot.insecure $tlsSecret }}
+    {{- fail "router.snapshot.insecure cannot be combined with router.snapshot.tls.secretName" }}
+    {{- end }}
+    {{- if and $plaintext (not $snapshot.insecure) }}
+    {{- fail (printf "router.snapshot source %s is plaintext and the snapshot can carry provider credentials: set router.snapshot.tls.secretName (grpc) or use an https:// URL (http), or set router.snapshot.insecure=true for local development only" $source) }}
+    {{- end }}
+    {{- if and (not $plaintext) $snapshot.insecure }}
+    {{- fail "router.snapshot.insecure only permits plaintext grpc:// and http:// sources" }}
+    {{- end }}
+    source = {{ $source | quote }}
+    {{- if $tlsSecret }}
+    ca = "/etc/multihull/discovery/ca.crt"
+    {{- if $snapshot.tls.clientCertificate }}
+    client_cert = "/etc/multihull/discovery/tls.crt"
+    client_key = "/etc/multihull/discovery/tls.key"
+    {{- end }}
+    {{- end }}
+    {{- if $tokenSecret }}
+    token_env = {{ include "multihull.tokenEnv" . | quote }}
+    {{- end }}
+    {{- if $snapshot.insecure }}
+    insecure = true
+    {{- end }}
     {{- end }}
     {{- if .Values.router.tls.secretName }}
 

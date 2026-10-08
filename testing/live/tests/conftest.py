@@ -10,6 +10,8 @@ import docker
 import pytest
 
 from e2e.client import RouterClient
+from e2e.harness import Controller
+from e2e.stream import StreamCredentials, generate_credentials
 from live.capture import (
     AFTER_DEPLOY,
     AFTER_DESTROY,
@@ -62,7 +64,7 @@ def attach_logs(request: pytest.FixtureRequest, workdir: Path) -> Iterator[None]
     report = getattr(request.node, "report_call", None)
     if report is None or not report.failed:
         return
-    for name in ("router.log", "hull.log", "kubectl.log"):
+    for name in ("router.log", "controller.log", "hull.log", "kubectl.log"):
         path = workdir / LOG_DIR / name
         if path.exists():
             tail = "\n".join(path.read_text(errors="replace").splitlines()[-80:])
@@ -186,10 +188,40 @@ def deployment(live: LiveDeployment, kind: Kind, recorder: Recorder) -> Iterator
 
 
 @pytest.fixture(scope="session")
+def stream_credentials(workdir: Path) -> StreamCredentials:
+    return generate_credentials(workdir / "tls")
+
+
+@pytest.fixture(scope="session")
+def controller(
+    deployment: LiveDeployment, stream_credentials: StreamCredentials
+) -> Iterator[Controller]:
+    process = Controller(
+        deployment.workdir, deployment.workdir / LOG_DIR, stream_credentials, expected_endpoints=2
+    )
+    process.start()
+    try:
+        yield process
+    finally:
+        process.stop()
+
+
+@pytest.fixture(scope="session")
 def router(
-    router_binary: Path, deployment: LiveDeployment, kind: Kind, recorder: Recorder
+    router_binary: Path,
+    deployment: LiveDeployment,
+    controller: Controller,
+    stream_credentials: StreamCredentials,
+    kind: Kind,
+    recorder: Recorder,
 ) -> Iterator[LiveRouter]:
-    process = LiveRouter(router_binary, deployment.workdir, deployment.snapshot_path, expected=2)
+    process = LiveRouter(
+        router_binary,
+        deployment.workdir,
+        controller.router_snapshot(),
+        stream_credentials.env,
+        expected=2,
+    )
     process.start()
     try:
         process.wait_ready(timeout=120)

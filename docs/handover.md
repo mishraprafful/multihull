@@ -18,6 +18,8 @@ Rules for entries
 - Docs live at https://multihull.pages.dev, deployed by `.github/workflows/docs.yml` on pushes to `main`. PRs touching `website/`, `docs/`, `python/` or the workflow get a preview and one sticky comment; `docs-preview-sweep.yml` deletes previews older than 24 hours. Cloudflare secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are repository secrets.
 - CI runs path-filtered jobs for python, router, website, chart, mock-server and e2e (whole suite, no `-x`, no retries), plus `kind.yml` (kind primary, docker secondary, chart dry run) on every PR touching `python/`, `router/`, `proto/`, `testing/` or `charts/`. Release workflow gated by the `release` environment and `PUBLISH_ENABLED`; its `publish-chart` job runs `charts/package.sh` (chart `version` and `appVersion` from the tag, semver checked, lint, router image tag check), waits for the matching router image, then pushes to `oci://ghcr.io/mishraprafful/charts/multihull` with `GITHUB_TOKEN`. The CI chart job runs the same script with a fake version and never pushes. Helm is pinned to v4.3.0 in both. GitHub-hosted runners are pinned to `ubuntu-24.04`; `runner-canary.yml` runs the Python tests, Rust tests and docs build weekly on `ubuntu-26.04` (see `docs/runbooks/ci.md`).
 - Test counts: Python 150 passed, 1 skipped; Rust 215; e2e 27 rows; kind suite 16; mock server 40.
+- PR 87 (draft, issue 46) secures the discovery stream: `hull controller` serves TLS (`--tls-cert`, `--tls-key`), optional mTLS (`--client-ca`) and a bootstrap token from `MULTIHULL_DISCOVERY_TOKEN` checked per stream, and refuses plaintext without `--insecure`. The router's `[snapshot]` takes `ca`, `client_cert`, `client_key`, `token_env` and `insecure`. The chart renders them from `controller.tls`, `controller.token`, `router.snapshot.tls`, `router.snapshot.token` and the `insecure` opt-ins, and fails the render otherwise. e2e and kind generate a CA, certificates and a token per run.
+- Test counts on PR 87: Python 225 passed, 1 skipped; Rust 254; e2e 35 rows; kind suite 27; chart render checks 29; mock server 40.
 - Package names claimed: `multihull` 0.0.1 placeholders on PyPI (pages.dev links) and crates.io (GitHub homepage until the next version), uploaded from commit `fbdf211` so no private source was published. The owner reports trusted publishers configured for `release.yml` with environment `release`; this cannot be checked through the public APIs.
 - Logo explorations (PR 28) closed unmerged; the original three-hull mark stays.
 - GitHub repo `mishraprafful/multihull` is private. `multihull.dev` is not owned; all URLs use `multihull.pages.dev`.
@@ -48,6 +50,9 @@ Rules for entries
 | 2026-10-07 | Pulling one digest-pinned registry image is the only image path; no Modal-side builds | Owner's call after weighing `Image.from_dockerfile`: failover must land on byte-identical containers |
 | 2026-10-07 | Modal deploys pin image builder `2025.06`; `MODAL_IMAGE_BUILDER_VERSION` overrides | The workspace default 2023.12 builder runs pip inside the image, and uv-based images have no pip |
 | 2026-10-07 | Placeholders published by hand from `fbdf211`; real releases go through trusted publishing | Publishing `main` would expose private source, and the crate depends on internal crates that cannot be published |
+| 2026-10-08 | The discovery stream is TLS by default; plaintext needs `--insecure` on the controller and `insecure = true` in `router.toml`, including `http://` snapshot URLs; TLS needs a client CA, a bootstrap token or both | Snapshots carry Modal proxy tokens (issue 46) |
+| 2026-10-08 | `[snapshot] ca` replaces the public webpki roots instead of adding to them | A private controller CA should be the only trust anchor for a stream that carries credentials |
+| 2026-10-08 | The chart fails the render when the controller has no TLS and no `controller.insecure`, or a grpc or http source would be plaintext without `router.snapshot.insecure` | Secure default; the CI and kind chart steps pass explicit TLS values |
 | 2026-10-07 | An upstream 408 is Transient, retried only for idempotent or keyed requests; when every untried provider is open, a retry returns to a tried provider that answered and is still closed, before the panic pool | Live run 37678680863: Modal's 408s were forwarded as Fatal, yet Modal logged about 5 s of execution for them, so a keyless POST may already have reached the model; retries spent on kind (circuit open, probe down) turned recoverable Modal timeouts into 502s |
 
 ## Open questions
@@ -87,8 +92,9 @@ Rules for entries
 - [ ] `python/multihull/controller.py:74`: raised floors live only in memory and are lost on restart. Persist them in the state backend or seed from observed desired replicas.
 
 **Chart:**
-- [ ] `charts/multihull/templates/configmap.yaml:44`: `extraConfig` is appended after `[retry]`, so its top-level keys land inside that table and the router refuses to start. Render it before the first table, or add values for `upstream_ca` and `max_buffered_body_bytes`.
-- [ ] `charts/multihull/templates/configmap.yaml:40`: tuning values rendered raw; large integers become Go floats (`1e+06`) and string durations are unquoted. Format by type or use toToml, and guard a null `router.tuning` with `default dict`.
+- [x] `charts/multihull/templates/configmap.yaml:44`: `extraConfig` is appended after `[retry]`, so its top-level keys land inside that table and the router refuses to start. Render it before the first table, or add values for `upstream_ca` and `max_buffered_body_bytes`.
+- [x] `charts/multihull/templates/configmap.yaml:40`: tuning values rendered raw; large integers become Go floats (`1e+06`) and string durations are unquoted. Format by type or use toToml, and guard a null `router.tuning` with `default dict`. Both done in PR 84.
+- [ ] `charts/multihull/templates/controller-deployment.yaml`: the chart sets `MULTIHULL_STATE_BACKEND`, but `hull controller` never reads it and only knows `--state` (local SQLite), so the in-cluster controller has no state backend yet.
 
 **Harness and docs:**
 - [x] `testing/e2e/tests/test_03_health_503.py:53`: the 20 percent leak allowance is timing dependent. Sample the circuit during load and assert it is never closed while probes report down.
@@ -101,6 +107,11 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`); the blocker fixes shift some 
 
 ### 2026-10-08
 - Issue 95: `publish-crates` gains `contents: read` (job-level `permissions` set unlisted scopes to none, so checkout failed on the private repo); no other job has the pattern. `kind.yml` pins Helm v4.3.0 like the chart and release jobs.
+- Issue 46 on PR 87 (draft): TLS, mTLS and a bootstrap token for the controller stream, router `[snapshot]` TLS and token keys, plaintext only with an explicit opt-in. The gRPC source dials through `router-tls` with a custom tonic connector; tonic's own TLS features stay off.
+- New tests: Python server auth (good, wrong, missing token, mTLS, untrusted CA, CLI refusals) with certificates generated by `cryptography` at test time; `router-cp/tests/secure_sources.rs` against a tonic test server with rustls; e2e `test_15` (wrong token, no client certificate, foreign CA, plaintext opt-in). No keys are committed.
+- Chart: the controller Deployment passed `--spec` and `--listen`, which `hull controller` never had. Fixed, and `render.sh` now checks the rendered command against `hull controller --help`. TLS and token values added with refusal cases.
+- Lesson: when another agent runs the e2e suite, its sweeper removes every `e2e-three` container, so check `docker ps` before starting a local run.
+- Lesson: kind can use its own `--kubeconfig` file so a local run never changes the user's current kube context.
 - PR 86 (issues 53, 54): a stream reaching `timeouts.total` feeds no circuit and ends with a non-retryable `total_timeout` event or trailer; selection reserves headroom before taking the half-open trial. Each fix has a test that failed first.
 - PR 90 (issue 48): release tags push the chart to `oci://ghcr.io/mishraprafful/charts/multihull`, `images.yml` tags images with the release version (no `latest`), docs gained "Install from OCI" in the router overview.
 - Decision: one script, `charts/package.sh`, packages for both CI and release, so the PR dry run exercises the release path. It rejects tags that are not `v<semver>`, and build metadata, because `+` is not valid in an image tag.

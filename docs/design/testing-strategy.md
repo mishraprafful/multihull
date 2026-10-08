@@ -40,7 +40,7 @@ Add a `docker` provider type. It is a real translator: `apply` runs a container 
 The suite (`testing/e2e/`, pytest) does the following for each scenario:
 
 1. `hull deploy --apply` an example spec with three `docker` targets at priorities 1, 2, 3.
-2. Start `hull controller` with the gRPC stream and the Rust router binary pointed at it.
+2. Start `hull controller` with the gRPC stream over mTLS (a CA, certificates and bootstrap token generated per run) and the Rust router binary pointed at it.
 3. Drive load through the router with an OpenAI client, streaming and non-streaming, while applying a fault to one target through the mock server's control endpoint or by stopping the container.
 4. Assert on the client side and on router metrics.
 
@@ -65,7 +65,7 @@ CI runs this on every PR that touches `python/`, `router/` or `testing/`. Target
 
 ## Layer 4: Kubernetes end to end
 
-`kind.yml`, on every PR touching code. One kind cluster is the primary and a `docker` target the secondary (spec `testing/live/specs/kind-docker.yaml`). The mock server runs on CPU, so the spec sets no GPU; the Service is a NodePort mapped to host port 30080 through kind `extraPortMappings`. Steps: `hull doctor`, deploy and wait ready, route through the release router from a file snapshot, scale the primary Deployment to zero under load, assert zero client 5xx and traffic on docker, scale back, assert recovery, `hull logs`, `hull destroy` leaves nothing. The chart is applied with `--dry-run=server` against the same cluster. Not yet covered: `rediscover`, KEDA, and the chart serving traffic in cluster.
+`kind.yml`, on every PR touching code. One kind cluster is the primary and a `docker` target the secondary (spec `testing/live/specs/kind-docker.yaml`). The mock server runs on CPU, so the spec sets no GPU; the Service is a NodePort mapped to host port 30080 through kind `extraPortMappings`. Steps: `hull doctor`, deploy and wait ready, run `hull controller` over mTLS with a generated CA and token and route through the release router on its stream, scale the primary Deployment to zero under load, assert zero client 5xx and traffic on docker, scale back, assert recovery, `hull logs`, `hull destroy` leaves nothing. The chart is applied with `--dry-run=server` against the same cluster. Not yet covered: `rediscover`, KEDA, and the chart serving traffic in cluster.
 
 ## Layer 5: live smoke
 

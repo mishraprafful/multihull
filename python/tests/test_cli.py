@@ -15,6 +15,7 @@ from multihull.controller import Controller
 from multihull.providers import docker as dockermod
 from multihull.providers.base import Ref
 from multihull.state import LocalState, StateRecord
+from multihull.stream_security import StreamSecurity
 from tests.conftest import FIXTURES, no_keys_message
 from tests.fake_docker import FakeDockerClient
 from tests.fake_modal import FakeAuthError, FakeModal
@@ -173,7 +174,7 @@ def test_commands_refuse_a_route_whose_key_source_yields_no_keys(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def never_serve(self: Controller, listen: str) -> None:
+    async def never_serve(self: Controller, security: StreamSecurity, listen: str) -> None:
         return None
 
     monkeypatch.setattr(Controller, "run", never_serve)
@@ -184,7 +185,7 @@ def test_commands_refuse_a_route_whose_key_source_yields_no_keys(
         "deploy": ["deploy", str(path), "--snapshot-out", str(out)],
         "destroy": ["destroy", str(path), "--yes", "--snapshot-out", str(out)],
         "snapshot": ["snapshot", str(path), "--out", str(out)],
-        "controller": ["controller", str(path), "--snapshot-out", str(out)],
+        "controller": ["controller", str(path), "--snapshot-out", str(out), "--insecure"],
     }[command]
     result = runner.invoke(
         app, [*args, "--state", str(tmp_path / "state.db")], env={"COLUMNS": "1000"}
