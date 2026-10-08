@@ -18,6 +18,7 @@ from e2e.harness import (
     Controller,
     Deployment,
     Router,
+    endpoint_id,
 )
 from e2e.waiting import wait_until
 
@@ -35,7 +36,7 @@ SLOW_TTFT_MS = 1200
 SLOWDOWN_SECONDS = 3 * DEGRADED_COOLDOWN_SECONDS
 RECOVERY_SECONDS = 2 * DEGRADED_COOLDOWN_SECONDS + 2
 LOAD_LIMIT_SECONDS = 90
-PRIMARY_DEGRADED = "degraded e2e-three/primary: "
+PRIMARY_DEGRADED = f"degraded {endpoint_id('primary')}: "
 
 
 def logged_at(line: str) -> datetime:
@@ -66,7 +67,7 @@ def router_ttft_signals(router: Router) -> list[str]:
 
 def primary_ttft_samples(router: Router) -> float:
     return router.metrics().total(
-        "router_upstream_ttft_seconds_count", endpoint="e2e-three/primary"
+        "router_upstream_ttft_seconds_count", endpoint=endpoint_id("primary")
     )
 
 
