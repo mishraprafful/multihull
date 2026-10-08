@@ -109,7 +109,7 @@ router:
 controller:
   enabled: false
   image:
-    repository: ghcr.io/mishraprafful/multihull
+    repository: ghcr.io/mishraprafful/multihull-controller
     tag: ""
     pullPolicy: IfNotPresent
   stateBackend:
