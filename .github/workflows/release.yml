@@ -96,6 +96,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: release
     permissions:
+      contents: read
       id-token: write
     defaults:
       run:
