@@ -75,11 +75,35 @@ class ImageBuild(BaseModel):
 class ModalInfo(BaseModel):
     app_name: str
     environment: str
+    provider: str = ""
     app_id: str | None = None
     web_url: str | None = None
     dashboard_url: str | None = None
     states: list[ModalState] = Field(default_factory=list)
     image_builds: list[ImageBuild] = Field(default_factory=list)
+
+
+class GpuCost(BaseModel):
+    gpu: str
+    targets: int
+    hourly_usd: float
+    price_date: str
+    price_source: str
+    budget_usd: float
+    max_minutes: int
+    started_at: float | None = None
+    stopped_at: float | None = None
+
+    def wall_clock_minutes(self, now: float) -> float:
+        if self.started_at is None:
+            return 0.0
+        return max(0.0, (self.stopped_at or now) - self.started_at) / 60
+
+    def gpu_minutes(self, now: float) -> float:
+        return self.wall_clock_minutes(now) * self.targets
+
+    def estimate_usd(self, now: float) -> float:
+        return self.gpu_minutes(now) / 60 * self.hourly_usd
 
 
 class RouterState(BaseModel):
@@ -100,6 +124,8 @@ class RunSummary(BaseModel):
     scenarios: list[Scenario] = Field(default_factory=list)
     kube: list[KubeSnapshot] = Field(default_factory=list)
     modal: ModalInfo | None = None
+    modal_apps: list[ModalInfo] = Field(default_factory=list)
+    cost: GpuCost | None = None
     router: RouterState | None = None
     destroy: str = ""
 
@@ -116,6 +142,9 @@ class RunSummary(BaseModel):
 
     def has_modal_state(self, label: str) -> bool:
         return self.modal is not None and any(s.label == label for s in self.modal.states)
+
+    def modal_app(self, provider: str) -> ModalInfo | None:
+        return next((info for info in self.modal_apps if info.provider == provider), None)
 
     def save(self, workdir: Path) -> None:
         workdir.mkdir(parents=True, exist_ok=True)
@@ -303,7 +332,7 @@ def render_modal(info: ModalInfo, cleanup: list[str]) -> list[str]:
     else:
         dashboard = "-"
     lines = [
-        "### Modal",
+        f"### Modal ({info.provider})" if info.provider else "### Modal",
         "",
         *table(
             ["App", "App id", "Environment", "Endpoint", "Dashboard"],
@@ -359,26 +388,55 @@ def render_router(state: RouterState) -> list[str]:
     return lines
 
 
+def render_cost(cost: GpuCost, now: float) -> list[str]:
+    lines = ["### Cost", ""]
+    if cost.started_at is None:
+        lines.append(
+            f"No GPU container started, so only Modal's image build was billed. "
+            f"Budget: {cost.budget_usd:.0f} USD per run."
+        )
+        return [*lines, ""]
+    wall = cost.wall_clock_minutes(now)
+    estimate = cost.estimate_usd(now)
+    verdict = "within" if estimate <= cost.budget_usd else "OVER"
+    lines.extend(
+        [
+            f"About {estimate:.2f} USD: {cost.targets} x {cost.gpu} for {wall:.1f} wall-clock "
+            f"minutes from deploy to destroy ({cost.gpu_minutes(now):.1f} GPU minutes) at "
+            f"{cost.hourly_usd:.2f} USD per GPU hour ({cost.price_source}, read "
+            f"{cost.price_date}). CPU, memory and the image build are extra, cents each.",
+            "",
+            f"Budget: {cost.budget_usd:.0f} USD per run, {verdict} budget. The harness aborts "
+            f"and destroys after {cost.max_minutes} minutes (`max_minutes`).",
+        ]
+    )
+    return [*lines, ""]
+
+
 def render(
     summary: RunSummary,
     job_status: str | None = None,
     cleanup: list[str] | None = None,
     artifact: str | None = None,
+    now: float | None = None,
 ) -> str:
     lines = [f"## Live suite: {summary.spec} ({summary.service})", ""]
     lines.extend(render_glance(summary, job_status))
-    lines.extend(["### Kubernetes (kind)", ""])
-    for snapshot in summary.kube:
-        lines.extend(render_kube(snapshot))
-    if not summary.kube:
-        lines.extend(["No state captured.", ""])
+    if summary.cost is not None:
+        lines.extend(render_cost(summary.cost, now or time.time()))
+    if summary.kube or summary.cost is None:
+        lines.extend(["### Kubernetes (kind)", ""])
+        for snapshot in summary.kube:
+            lines.extend(render_kube(snapshot))
+        if not summary.kube:
+            lines.extend(["No state captured.", ""])
     destroy = [f"Suite destroy: {summary.destroy}"] if summary.destroy else []
-    if summary.modal is not None:
-        lines.extend(render_modal(summary.modal, [*destroy, *(cleanup or [])]))
-    elif destroy or cleanup:
-        lines.extend(
-            ["### Cleanup", "", *(f"- {line}" for line in [*destroy, *(cleanup or [])]), ""]
-        )
+    cleanup_lines = [*destroy, *(cleanup or [])]
+    apps = [*([summary.modal] if summary.modal is not None else []), *summary.modal_apps]
+    for index, info in enumerate(apps):
+        lines.extend(render_modal(info, cleanup_lines if index == len(apps) - 1 else []))
+    if not apps and cleanup_lines:
+        lines.extend(["### Cleanup", "", *(f"- {line}" for line in cleanup_lines), ""])
     if summary.router is not None:
         lines.extend(render_router(summary.router))
     if artifact:
@@ -438,6 +496,8 @@ def publish(
     workdir: Path, job_status: str | None, artifact: str | None, spec: str, service: str
 ) -> str:
     summary = RunSummary.load(workdir) or RunSummary(spec=spec, service=service)
+    if summary.cost is not None and summary.cost.started_at and not summary.cost.stopped_at:
+        summary.cost.stopped_at = time.time()
     failed = job_status not in (None, "success") or overall(summary, job_status) != "PASS"
     text = render(
         summary,

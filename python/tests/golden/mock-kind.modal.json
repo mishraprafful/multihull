@@ -1,5 +1,5 @@
 {
-  "app_name": "multihull-live-mock",
+  "app_name": "multihull-live-mock-modal",
   "environment": "main",
   "region": null,
   "tags": {
@@ -11,7 +11,8 @@
       "usernameEnv": "GHCR_USERNAME",
       "passwordEnv": "GHCR_TOKEN"
     },
-    "builder_version": "2025.06"
+    "builder_version": "2025.06",
+    "setup_dockerfile_commands": []
   },
   "gpu": null,
   "memory_mib": 512,
@@ -23,7 +24,7 @@
   "web_server": {
     "port": 8000,
     "startup_timeout": 60,
-    "label": "multihull-live-mock"
+    "label": "multihull-live-mock-modal"
   },
   "command": [
     "/app/.venv/bin/python",

@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from datetime import timedelta
+from typing import Any
 
 import pytest
 
@@ -44,16 +45,16 @@ def test_golden_app_spec(target_for) -> None:
 
 def test_app_spec_fields(target_for) -> None:
     spec = render_app_spec(target_for("modal-main"))
-    assert spec["app_name"] == "multihull-llama-8b"
+    assert spec["app_name"] == "multihull-llama-8b-modal-main"
     assert spec["gpu"] == "L4"
     assert spec["min_containers"] == 1 and spec["max_containers"] == 8
     assert spec["max_inputs"] == 32
     assert spec["web_server"] == {
         "port": 8000,
         "startup_timeout": 120,
-        "label": "multihull-llama-8b",
+        "label": "multihull-llama-8b-modal-main",
     }
-    assert spec["secret"] == {"name": "multihull-llama-8b", "keys": ["hf-token"]}
+    assert spec["secret"] == {"name": "multihull-llama-8b-modal-main", "keys": ["hf-token"]}
     assert spec["environment"] == "main" and spec["region"] == "eu"
 
 
@@ -69,7 +70,11 @@ def test_gpu_mapping(llama_spec: ServiceSpec) -> None:
 def test_apply_dry_run_returns_ref(target_for) -> None:
     provider = ModalProvider()
     ref = provider.apply(target_for("modal-main"), None)
-    assert ref.ids == {"app": "multihull-llama-8b", "environment": "main", "region": "eu"}
+    assert ref.ids == {
+        "app": "multihull-llama-8b-modal-main",
+        "environment": "main",
+        "region": "eu",
+    }
     assert provider.status(ref).phase == "Unknown"
 
 
@@ -236,10 +241,45 @@ def test_deploy_pulls_private_image_with_serialized_server(
     assert fake_modal.web_server_kwargs == {
         "port": 8000,
         "startup_timeout": 60,
-        "label": "multihull-live-mock",
+        "label": "multihull-live-mock-modal",
     }
-    assert fake_modal.deployed == [("multihull-live-mock", "main")]
-    assert url == "https://ws--multihull-live-mock.modal.run"
+    assert fake_modal.deployed == [("multihull-live-mock-modal", "main")]
+    assert url == "https://ws--multihull-live-mock-modal.modal.run"
+
+
+def test_two_modal_targets_in_one_service_get_distinct_apps(llama_raw: dict[str, Any]) -> None:
+    llama_raw["targets"].append(
+        {"provider": "modal-us", "type": "modal", "priority": 4, "modal": {"region": "us-east"}}
+    )
+    spec = ServiceSpec.model_validate(llama_raw)
+    names = {
+        render_app_spec(Target(spec, spec.target(name)))["app_name"]
+        for name in ("modal-main", "modal-us")
+    }
+    assert names == {"multihull-llama-8b-modal-main", "multihull-llama-8b-modal-us"}
+
+
+def test_setup_dockerfile_commands_reach_from_registry(
+    mock_kind_modal_spec: ServiceSpec, fake_modal: FakeModal, registry_env: dict[str, str]
+) -> None:
+    raw = mock_kind_modal_spec.model_dump(by_alias=True, exclude_none=True)
+    shim = "RUN ln -s /usr/bin/python3 /usr/local/bin/python"
+    raw["targets"][1]["modal"]["setupDockerfileCommands"] = [shim]
+    rendered = render_app_spec(mock_modal_target(ServiceSpec.model_validate(raw)))
+    assert rendered["image"]["setup_dockerfile_commands"] == [shim]
+    deploy_with_sdk(rendered)
+    assert fake_modal.images[0].setup_dockerfile_commands == [shim]
+    plain = render_app_spec(mock_modal_target(mock_kind_modal_spec))
+    assert plain["image"]["setup_dockerfile_commands"] == []
+    deploy_with_sdk(plain)
+    assert fake_modal.images[1].setup_dockerfile_commands == []
+
+
+def test_rediscover_looks_up_the_per_target_app(fake_modal: FakeModal) -> None:
+    ref = ModalProvider(dry_run=False, provider_name="modal-us").rediscover("llama-8b")
+    assert ref is not None
+    assert (ref.provider, ref.ids["app"]) == ("modal-us", "multihull-llama-8b-modal-us")
+    assert ("multihull-llama-8b-modal-us", None) in fake_modal.lookups
 
 
 def test_deploy_pins_image_builder_version_only_while_deploying(

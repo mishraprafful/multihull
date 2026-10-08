@@ -53,7 +53,8 @@ def test_write_plan_dir(llama_spec: ServiceSpec, tmp_path: Path) -> None:
         "Service",
         "HorizontalPodAutoscaler",
     ]
-    assert json.loads((out / "modal-main.json").read_text())["app_name"] == "multihull-llama-8b"
+    rendered = json.loads((out / "modal-main.json").read_text())
+    assert rendered["app_name"] == "multihull-llama-8b-modal-main"
 
 
 def test_apply_dry_run_writes_nothing(llama_spec: ServiceSpec, tmp_path: Path) -> None:

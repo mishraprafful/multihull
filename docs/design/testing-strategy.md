@@ -75,7 +75,7 @@ A second job, `in-cluster`, builds the controller and router images from their D
 
 ## Layer 6: live GPU
 
-Monthly and before a release. One small model (Qwen2.5-0.5B-Instruct on vLLM, L4 class) on two providers, the router in front, the failover matrix's first two rows only. Budget cap of one GPU hour per run.
+`live-gpu.yml`, manual only, triggered by the owner. Spec `gpu-modal.yaml`: Qwen2.5-1.5B-Instruct on the public vLLM image, two Modal L4 targets, the router in front with a route API key. Streaming and plain completions, `hull logs`, the primary stopped with `modal app stop` and the secondary asserted to serve with zero client errors, then destroy. A `max_minutes` budget (default 20) bounds every wait; the job summary carries a cost line against the 5 USD cap. Operating notes: `docs/runbooks/live-gpu.md`.
 
 ## Layer 7: load
 

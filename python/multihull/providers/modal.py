@@ -167,6 +167,10 @@ def modal_block(desired: Target) -> ModalBlock:
     return desired.target.modal or ModalBlock()
 
 
+def app_name(desired: Target) -> str:
+    return f"{desired.resource_name}-{desired.provider}"
+
+
 def modal_gpu(desired: Target) -> str | None:
     if not desired.gpus:
         return None
@@ -179,8 +183,9 @@ def render_app_spec(desired: Target) -> dict[str, Any]:
     block = modal_block(desired)
     container = desired.service.container
     replicas = desired.replicas
+    name = app_name(desired)
     spec: dict[str, Any] = {
-        "app_name": desired.resource_name,
+        "app_name": name,
         "environment": block.environment,
         "region": block.region,
         "tags": {SERVICE_LABEL: desired.name},
@@ -188,6 +193,7 @@ def render_app_spec(desired: Target) -> dict[str, Any]:
             "ref": desired.image_ref,
             "secret": registry_secret_names(block.registrySecret),
             "builder_version": image_builder_version(),
+            "setup_dockerfile_commands": list(block.setupDockerfileCommands),
         },
         "gpu": modal_gpu(desired),
         "memory_mib": memory_to_mib(desired.service.resources.memory),
@@ -201,13 +207,11 @@ def render_app_spec(desired: Target) -> dict[str, Any]:
             "startup_timeout": max(
                 container.health.initialDelaySeconds, MIN_STARTUP_TIMEOUT_SECONDS
             ),
-            "label": desired.resource_name,
+            "label": name,
         },
         "command": list(container.command or []),
         "env": dict(sorted(container.env.items())),
-        "secret": {"name": desired.resource_name, "keys": list(container.secrets)}
-        if container.secrets
-        else None,
+        "secret": {"name": name, "keys": list(container.secrets)} if container.secrets else None,
     }
     return spec
 
@@ -246,7 +250,7 @@ def memory_to_mib(memory: str | None) -> int | None:
 
 def ref_for(desired: Target, web_url: str | None = None) -> Ref:
     block = modal_block(desired)
-    ids = {"app": desired.resource_name, "environment": block.environment}
+    ids = {"app": app_name(desired), "environment": block.environment}
     if block.region:
         ids["region"] = block.region
     if web_url:
@@ -284,9 +288,12 @@ def stop_app(app_name: str, environment: str) -> None:
 class ModalProvider:
     type: ClassVar = "modal"
 
-    def __init__(self, dry_run: bool = True, workspace: str | None = None) -> None:
+    def __init__(
+        self, dry_run: bool = True, workspace: str | None = None, provider_name: str = "modal"
+    ) -> None:
         self.dry_run = dry_run
         self.workspace = workspace or os.environ.get("MODAL_WORKSPACE", "workspace")
+        self.provider_name = provider_name
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         return Plan(
@@ -360,12 +367,12 @@ class ModalProvider:
             import modal
         except ImportError:
             return None
-        app_name = f"multihull-{service}"
+        name = f"multihull-{service}-{self.provider_name}"
         try:
-            modal.App.lookup(app_name)
+            modal.App.lookup(name)
         except Exception:
             return None
-        return Ref(provider="modal", type="modal", service=service, ids={"app": app_name})
+        return Ref(provider=self.provider_name, type="modal", service=service, ids={"app": name})
 
 
 def fetch_logs_with_sdk(app_name: str, environment: str | None, since: timedelta) -> Iterator[str]:
@@ -389,6 +396,7 @@ def deploy_with_sdk(spec: dict[str, Any]) -> str:
         secret=modal.Secret.from_dict(registry_credentials(registry_secret))
         if registry_secret
         else None,
+        setup_dockerfile_commands=spec["image"]["setup_dockerfile_commands"],
     )
     if spec["env"]:
         image = image.env(spec["env"])
