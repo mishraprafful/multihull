@@ -965,7 +965,7 @@ dependencies = [
 
 [[package]]
 name = "multihull"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1519,7 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "router-testkit"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "http-body-util",

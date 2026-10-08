@@ -2,8 +2,8 @@ apiVersion: v2
 name: multihull
 description: Multihull router and optional controller
 type: application
-version: 0.0.1
-appVersion: "0.0.1"
+version: 0.1.0
+appVersion: "0.1.0"
 home: https://multihull.pages.dev
 sources:
   - https://github.com/mishraprafful/multihull
