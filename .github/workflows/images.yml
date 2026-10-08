@@ -7,12 +7,14 @@ on:
     paths:
       - 'router/**'
       - 'proto/**'
+      - 'python/**'
       - 'testing/mock-server/**'
       - '.github/workflows/images.yml'
   pull_request:
     paths:
       - 'router/**'
       - 'proto/**'
+      - 'python/**'
       - 'testing/mock-server/**'
       - '.github/workflows/images.yml'
   workflow_dispatch:
@@ -41,6 +43,9 @@ jobs:
           - name: router
             context: .
             file: router/Dockerfile
+          - name: controller
+            context: python
+            file: python/Dockerfile
     env:
       PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     steps:
