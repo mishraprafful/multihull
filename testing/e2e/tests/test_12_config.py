@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from e2e.client import RouterClient, failures, load, providers_of
-from e2e.harness import Router
+from e2e.harness import Router, endpoint_id
 
 TUNING = {
     "timeouts": {"connect": 1.5, "first_byte": 3, "idle": 45, "total": 120},
@@ -29,6 +29,7 @@ TUNING = {
         "ttft_degrade_factor": 3.0,
         "ttft_window": 20,
         "ttft_baseline_smoothing": 0.3,
+        "ttft_rebaseline_after": 900,
     },
     "probe": {
         "enabled": True,
@@ -53,7 +54,7 @@ def test_debug_config_reflects_every_tuning_table(router: Router, client: Router
     outcomes = load(client, 5, stream=False, concurrency=1)
     assert failures(outcomes) == []
     assert providers_of(outcomes) == {"primary": 5}
-    assert router.metrics().gauge("router_circuit_state", endpoint="e2e-three/primary") == 0
+    assert router.metrics().gauge("router_circuit_state", endpoint=endpoint_id("primary")) == 0
 
 
 def test_invalid_tuning_is_rejected_on_startup(router_binary, router_source, tmp_path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -257,13 +258,14 @@ def load_for(
     concurrency: int = 4,
     idempotency_key: KeySource = None,
     max_tokens: int = 8,
+    stop: threading.Event | None = None,
 ) -> list[Outcome]:
     deadline = time.monotonic() + seconds
     results: list[Outcome] = []
     counter = iter(range(1_000_000))
 
     def worker() -> None:
-        while time.monotonic() < deadline:
+        while time.monotonic() < deadline and not (stop is not None and stop.is_set()):
             index = next(counter)
             results.append(
                 client.send(index, stream, resolve_key(idempotency_key, index), None, max_tokens)

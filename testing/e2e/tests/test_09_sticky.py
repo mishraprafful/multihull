@@ -6,7 +6,7 @@ from collections.abc import Iterator
 import pytest
 
 from e2e.client import RouterClient, failures, fresh_keys, load, providers_of
-from e2e.harness import Controller, Deployment, Router
+from e2e.harness import Controller, Deployment, Router, endpoint_id
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -39,8 +39,8 @@ def test_session_sticks_then_rehomes_when_the_owner_stops(
     assert moved.ok, moved.describe()
     assert moved.provider != owner
     assert moved.rehomed is not None, moved.headers
-    assert moved.rehomed.startswith(f"e2e-three/{owner}->")
-    assert moved.rehomed.endswith(f"e2e-three/{moved.provider}")
+    assert moved.rehomed.startswith(f"{endpoint_id(owner)}->")
+    assert moved.rehomed.endswith(endpoint_id(moved.provider))
 
     settled = load(
         client, 10, stream=stream, concurrency=1, headers=session, idempotency_key=fresh_keys()
@@ -54,5 +54,5 @@ def test_session_sticks_then_rehomes_when_the_owner_stops(
     assert metrics.sticky("hit") >= 29
     assert metrics.sticky("failed") == 0
     sessions = router.sessions()["sessions"]
-    assert any(entry["owner"] == f"e2e-three/{moved.provider}" for entry in sessions)
+    assert any(entry["owner"] == endpoint_id(moved.provider) for entry in sessions)
     assert all(session["X-Session-Id"] not in entry["key_hash"] for entry in sessions)

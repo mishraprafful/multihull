@@ -41,6 +41,8 @@ jobs:
           cluster_name: ${{ env.KIND_CLUSTER }}
           config: testing/live/kind-config.yaml
       - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
       - name: Chart applies against the kind API server
         run: |
           helm template multihull charts/multihull --namespace default \
