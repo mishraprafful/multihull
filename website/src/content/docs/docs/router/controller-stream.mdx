@@ -80,6 +80,43 @@ router:
 
 The render fails when the controller has no TLS and no opt-in, when TLS has neither a client CA nor a token, and when a grpc or http source would be plaintext without `router.snapshot.insecure`.
 
+## Controller in the cluster
+
+`controller.enabled=true` runs `ghcr.io/mishraprafful/multihull-controller:<appVersion>`, published with every release next to the router image. It runs `hull` as uid 10001 and ships the Kubernetes and Modal clients. The chart mounts the spec from `controller.specConfigMap` (key `multihull.yaml`) and sets `MULTIHULL_STATE_BACKEND` from `controller.stateBackend.existingSecret`.
+
+```sh
+kubectl create configmap multihull-spec --from-file=multihull.yaml
+kubectl create secret generic multihull-state \
+  --from-literal=url=sqlite:///var/lib/multihull/state/state.db
+```
+
+```yaml title="values.yaml"
+controller:
+  enabled: true
+  specConfigMap: multihull-spec
+  stateBackend:
+    existingSecret: multihull-state
+    key: url
+    volume:
+      persistentVolumeClaim:
+        claimName: multihull-state # mounted at /var/lib/multihull/state
+  envFrom:
+    - secretRef:
+        name: modal-credentials # MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+```
+
+| Value | Effect |
+|---|---|
+| `controller.image.repository`, `.tag` | Default `ghcr.io/mishraprafful/multihull-controller`, tag `appVersion` |
+| `controller.stateBackend.existingSecret`, `.key` | Exposed as `MULTIHULL_STATE_BACKEND` |
+| `controller.stateBackend.volume` | Any volume source, mounted at `/var/lib/multihull/state`; the pod sets `fsGroup: 10001` |
+| `controller.envFrom` | Container `envFrom`, for provider credentials |
+
+- Every `hull` command that opens state takes `--state`, defaulting to `MULTIHULL_STATE_BACKEND`, then `.multihull/state.db`. SQLite is the only backend today: a path, `sqlite:///absolute/path.db` or `sqlite:relative/path.db`. `s3://`, `gs://` and `postgres://` fail as not implemented yet; other schemes fail as unsupported. Neither error repeats the URL.
+- Without `controller.stateBackend.volume` the database lives in the container, and a restart loses the refs and raised floors. `hull status` rediscovers refs from labels.
+- Kubernetes targets without `context` use the pod's service account when no kubeconfig exists. The chart creates no RBAC: bind its ServiceAccount to a role that can `get`, `list` and `patch` Deployments, `get` and `list` Services and Nodes, and `get` and `patch` HorizontalPodAutoscalers. The chart cannot mount a kubeconfig for targets in other clusters yet.
+- The controller exits cleanly on SIGTERM.
+
 ## Local development
 
 ```sh

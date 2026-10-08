@@ -4,8 +4,8 @@
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `images.yml` | push to `main`, PRs touching `router/`, `proto/`, `testing/mock-server/`, manual | Builds `ghcr.io/mishraprafful/multihull-mock-server` and `ghcr.io/mishraprafful/multihull-router`. Pushes `sha-<short>` and `main` only from `main`; PRs build without pushing. Packages are private because the repo is. |
-| `kind.yml` | PRs and `main` pushes touching `python/`, `router/`, `proto/`, `testing/`, `charts/` | kind cluster, mock image loaded with `kind load`, release router, `testing/live` with spec `kind-docker` (kind primary, docker secondary), chart `kubectl apply --dry-run=server`. Free. |
+| `images.yml` | push to `main` or a `v*` tag, PRs touching `router/`, `proto/`, `python/`, `testing/mock-server/`, manual | Builds `ghcr.io/mishraprafful/multihull-mock-server`, `multihull-router` and `multihull-controller`. Pushes `sha-<short>` and `main` from `main` and the version from `v*` tags; PRs build without pushing. Packages are private because the repo is. |
+| `kind.yml` | PRs and `main` pushes touching `python/`, `router/`, `proto/`, `testing/`, `charts/` | Job `kind`: kind cluster, mock image loaded with `kind load`, release router, `testing/live` with spec `kind-docker` (kind primary, docker secondary), chart `kubectl apply --dry-run=server`. Job `in-cluster`: controller and router images built from their Dockerfiles, chart installed with the controller enabled, `testing/live/in_cluster`. Free. |
 | `live-smoke.yml` | manual, or a PR labelled `live-smoke` (on label and on each push) | Same kind setup with spec `kind-modal`: Modal secondary runs the GHCR mock image on CPU, `min_containers: 1`, app `multihull-live-<run id>`. Skips when `MODAL_TOKEN_ID` or `MODAL_TOKEN_SECRET` is missing. One run at a time. |
 | `live-smoke.yml` (schedule) | daily 03:17 UTC | Stops every `multihull-live-` Modal app older than two hours. |
 
