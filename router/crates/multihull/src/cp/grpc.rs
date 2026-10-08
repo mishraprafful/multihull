@@ -183,11 +183,15 @@ pub fn handle(
             })),
         }));
     }
-    let converted: Snapshot = snapshot.into();
-    tx.send(Arc::new(converted))
+    let (applied, refusal) = crate::cp::guard::apply(&tx.borrow(), snapshot.into());
+    tx.send(Arc::new(applied))
         .map_err(|_| SnapshotError::ReceiverDropped)?;
+    let reply = match refusal {
+        Some(reason) => router_message::Message::Nack(Nack { version, reason }),
+        None => router_message::Message::Ack(Ack { version }),
+    };
     Ok(Some(RouterMessage {
-        message: Some(router_message::Message::Ack(Ack { version })),
+        message: Some(reply),
     }))
 }
 
@@ -297,6 +301,230 @@ mod tests {
             error_chain(&outer),
             "io error reading /ca.pem: certificate unknown"
         );
+    }
+
+    fn routed(version: u64, routes: &[(&str, &[&str])]) -> proto::Snapshot {
+        proto::Snapshot {
+            version,
+            routes: routes
+                .iter()
+                .map(|(id, endpoints)| proto::Route {
+                    id: (*id).to_string(),
+                    endpoints: endpoints
+                        .iter()
+                        .map(|endpoint| proto::Endpoint {
+                            id: (*endpoint).to_string(),
+                            url: "http://127.0.0.1:1".into(),
+                            ..Default::default()
+                        })
+                        .collect(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn sent(snapshot: proto::Snapshot) -> ControlMessage {
+        ControlMessage {
+            message: Some(control_message::Message::Snapshot(snapshot)),
+        }
+    }
+
+    fn holding(
+        snapshot: proto::Snapshot,
+    ) -> (watch::Sender<Arc<Snapshot>>, watch::Receiver<Arc<Snapshot>>) {
+        watch::channel(Arc::new(snapshot.into()))
+    }
+
+    fn endpoint_ids(snapshot: &Snapshot) -> Vec<(String, Vec<String>)> {
+        snapshot
+            .routes
+            .iter()
+            .map(|route| {
+                let ids = route.endpoints.iter().map(|e| e.id.clone()).collect();
+                (route.id.clone(), ids)
+            })
+            .collect()
+    }
+
+    fn owned(routes: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
+        routes
+            .iter()
+            .map(|(id, endpoints)| {
+                let ids = endpoints.iter().map(|e| (*e).to_string()).collect();
+                ((*id).to_string(), ids)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_route_sent_without_endpoints_keeps_the_endpoints_the_router_holds() {
+        let (tx, _rx) = holding(routed(5, &[("llama", &["a", "b"]), ("other", &["c"])]));
+        let next = routed(6, &[("llama", &[]), ("other", &["d"])]);
+        let reply = handle(sent(next), &tx).unwrap().unwrap();
+        match reply.message {
+            Some(router_message::Message::Nack(nack)) => {
+                assert_eq!(nack.version, 6);
+                assert!(nack.reason.contains("route llama"), "{}", nack.reason);
+                assert!(nack.reason.contains("remove the route"), "{}", nack.reason);
+            }
+            other => panic!("expected a nack, got {other:?}"),
+        }
+        let held = tx.borrow();
+        assert_eq!(held.version, 6);
+        assert_eq!(
+            endpoint_ids(&held),
+            owned(&[("llama", &["a", "b"]), ("other", &["d"])])
+        );
+    }
+
+    #[test]
+    fn removing_a_route_from_the_snapshot_drops_it() {
+        let (tx, _rx) = holding(routed(5, &[("llama", &["a"]), ("other", &["c"])]));
+        let reply = handle(sent(routed(6, &[("other", &["c"])])), &tx)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            reply.message,
+            Some(router_message::Message::Ack(Ack { version: 6 }))
+        ));
+        assert_eq!(endpoint_ids(&tx.borrow()), owned(&[("other", &["c"])]));
+    }
+
+    #[test]
+    fn a_route_that_had_no_endpoints_may_stay_empty() {
+        let (tx, _rx) = holding(routed(5, &[("llama", &["a"]), ("fresh", &[])]));
+        let next = routed(6, &[("llama", &["a"]), ("fresh", &[]), ("new", &[])]);
+        let reply = handle(sent(next), &tx).unwrap().unwrap();
+        assert!(matches!(
+            reply.message,
+            Some(router_message::Message::Ack(Ack { version: 6 }))
+        ));
+        assert_eq!(
+            endpoint_ids(&tx.borrow()),
+            owned(&[("llama", &["a"]), ("fresh", &[]), ("new", &[])])
+        );
+    }
+
+    #[derive(Default)]
+    struct Seen {
+        hellos: Vec<u64>,
+        replies: Vec<router_message::Message>,
+    }
+
+    struct Incarnation {
+        script: std::sync::Mutex<Vec<proto::Snapshot>>,
+        seen: Arc<std::sync::Mutex<Seen>>,
+    }
+
+    type ControlStream =
+        std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<ControlMessage, Status>> + Send>>;
+
+    #[tonic::async_trait]
+    impl proto::discovery_server::Discovery for Incarnation {
+        type StreamStream = ControlStream;
+
+        async fn stream(
+            &self,
+            request: Request<tonic::Streaming<RouterMessage>>,
+        ) -> Result<tonic::Response<ControlStream>, Status> {
+            let script = std::mem::take(&mut *self.script.lock().unwrap());
+            let seen = self.seen.clone();
+            let mut inbound = request.into_inner();
+            let (tx, rx) = mpsc::channel(1);
+            tokio::spawn(async move {
+                let Ok(Some(first)) = inbound.message().await else {
+                    return;
+                };
+                if let Some(router_message::Message::Hello(hello)) = first.message {
+                    seen.lock().unwrap().hellos.push(hello.last_version);
+                }
+                for snapshot in script {
+                    if tx.send(Ok(sent(snapshot))).await.is_err() {
+                        return;
+                    }
+                    let Ok(Some(reply)) = inbound.message().await else {
+                        return;
+                    };
+                    seen.lock().unwrap().replies.extend(reply.message);
+                }
+            });
+            Ok(tonic::Response::new(Box::pin(ReceiverStream::new(rx))))
+        }
+    }
+
+    async fn controller_incarnation(
+        script: Vec<proto::Snapshot>,
+    ) -> (String, Arc<std::sync::Mutex<Seen>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(Seen::default()));
+        let service = proto::discovery_server::DiscoveryServer::new(Incarnation {
+            script: std::sync::Mutex::new(script),
+            seen: seen.clone(),
+        });
+        tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_service(service)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+        );
+        (format!("http://{address}"), seen)
+    }
+
+    async fn stream_until_the_controller_ends(url: &str, tx: &watch::Sender<Arc<Snapshot>>) {
+        let auth = SourceAuth::anonymous().unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            stream_once(url, "router-1", tx, &mut None, &auth),
+        )
+        .await
+        .expect("the controller ends the stream")
+        .expect("the stream ends cleanly");
+    }
+
+    #[tokio::test]
+    async fn after_a_controller_restart_the_router_reports_its_version_and_refuses_stale_or_empty_updates(
+    ) {
+        let (tx, _rx) = watch::channel(Arc::new(Snapshot::default()));
+        let (before, first) = controller_incarnation(vec![routed(5, &[("llama", &["a"])])]).await;
+        stream_until_the_controller_ends(&before, &tx).await;
+        assert_eq!(tx.borrow().version, 5);
+
+        let (after, second) = controller_incarnation(vec![
+            routed(1, &[("llama", &["b"])]),
+            routed(6, &[("llama", &[])]),
+            routed(7, &[("llama", &["c"])]),
+        ])
+        .await;
+        stream_until_the_controller_ends(&after, &tx).await;
+
+        assert_eq!(first.lock().unwrap().hellos, vec![0]);
+        let second = second.lock().unwrap();
+        assert_eq!(second.hellos, vec![5]);
+        let replies: Vec<(u64, Option<String>)> = second
+            .replies
+            .iter()
+            .map(|reply| match reply {
+                router_message::Message::Ack(ack) => (ack.version, None),
+                router_message::Message::Nack(nack) => (nack.version, Some(nack.reason.clone())),
+                other => panic!("unexpected reply {other:?}"),
+            })
+            .collect();
+        assert_eq!(replies.len(), 3, "{replies:?}");
+        assert_eq!(
+            replies[0],
+            (1, Some("stale: router holds version 5".to_string()))
+        );
+        assert_eq!(replies[1].0, 6);
+        assert!(replies[1]
+            .1
+            .as_deref()
+            .is_some_and(|reason| reason.contains("route llama")));
+        assert_eq!(replies[2], (7, None));
+        let held = tx.borrow();
+        assert_eq!(held.version, 7);
+        assert_eq!(endpoint_ids(&held), owned(&[("llama", &["c"])]));
     }
 
     #[test]
