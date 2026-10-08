@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -199,6 +203,43 @@ def copy_docker_fixture(tmp_path: Path) -> Path:
     dest = tmp_path / "multihull.yaml"
     shutil.copy(FIXTURES / "mock-three-docker.yaml", dest)
     return dest
+
+
+def test_controller_stops_cleanly_on_sigterm(tmp_path: Path) -> None:
+    spec = copy_docker_fixture(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    log = tmp_path / "controller.log"
+    command = [
+        sys.executable,
+        "-m",
+        "multihull.cli",
+        "controller",
+        str(spec),
+        "--insecure",
+        "--grpc-listen",
+        "127.0.0.1:0",
+        "--snapshot-out",
+        str(snapshot),
+        "--state",
+        str(tmp_path / "state.db"),
+    ]
+    env = {**os.environ, "DOCKER_HOST": f"unix://{tmp_path / 'no-docker.sock'}"}
+    with log.open("w") as output:
+        process = subprocess.Popen(
+            command, cwd=tmp_path, env=env, stdout=output, stderr=subprocess.STDOUT
+        )
+        try:
+            deadline = time.monotonic() + 30
+            while not snapshot.exists() and process.poll() is None:
+                assert time.monotonic() < deadline, log.read_text()
+                time.sleep(0.1)
+            assert process.poll() is None, log.read_text()
+            process.send_signal(signal.SIGTERM)
+            assert process.wait(timeout=15) == 0, log.read_text()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
 
 def test_plan_docker_fixture(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import signal
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated
@@ -516,9 +517,16 @@ def controller(
         degraded_cooldown=duration_or_exit(degraded_cooldown, "--degraded-cooldown"),
     )
     try:
-        asyncio.run(daemon.run(security, grpc_listen))
-    except KeyboardInterrupt:
+        asyncio.run(run_until_terminated(daemon, security, grpc_listen))
+    except (KeyboardInterrupt, asyncio.CancelledError):
         return
+
+
+async def run_until_terminated(daemon: Controller, security: StreamSecurity, listen: str) -> None:
+    task = asyncio.current_task()
+    if task is not None:
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+    await daemon.run(security, listen)
 
 
 @app.command()
