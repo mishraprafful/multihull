@@ -10,6 +10,7 @@ description = "Stateless request router for multi-provider GPU inference with au
 readme = "README.md"
 keywords = ["gpu", "inference", "proxy", "failover", "router"]
 categories = ["network-programming", "web-programming::http-server"]
+include = ["/build.rs", "/proto/discovery.proto", "/src/**/*.rs", "/tests/**/*.rs", "/README.md", "/LICENSE"]
 
 [[bin]]
 name = "multihull"
