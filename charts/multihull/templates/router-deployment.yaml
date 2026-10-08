@@ -34,6 +34,14 @@ spec:
           args:
             - "--config"
             - "/etc/multihull/router.toml"
+          {{- with include "multihull.snapshotTokenSecret" . }}
+          env:
+            - name: {{ include "multihull.tokenEnv" $ }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.router.snapshot.token.key }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.router.listen }}
@@ -65,6 +73,11 @@ spec:
             - name: snapshot
               mountPath: /var/lib/multihull
             {{- end }}
+            {{- if include "multihull.snapshotTlsSecret" . }}
+            - name: discovery-tls
+              mountPath: /etc/multihull/discovery
+              readOnly: true
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -77,6 +90,11 @@ spec:
         {{- if eq .Values.router.snapshot.type "file" }}
         - name: snapshot
           emptyDir: {}
+        {{- end }}
+        {{- with include "multihull.snapshotTlsSecret" . }}
+        - name: discovery-tls
+          secret:
+            secretName: {{ . }}
         {{- end }}
       {{- with .Values.router.nodeSelector }}
       nodeSelector:
