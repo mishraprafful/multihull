@@ -16,13 +16,6 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/mishraprafful/multihull' },
       ],
-      head: [
-        {
-          tag: 'script',
-          content:
-            "try{if(!localStorage.getItem('starlight-theme'))localStorage.setItem('starlight-theme','dark')}catch(e){}",
-        },
-      ],
       sidebar: [
         { label: 'Quickstart', slug: 'docs/quickstart' },
         {
