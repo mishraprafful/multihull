@@ -120,6 +120,9 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`), paths to the module layout af
 
 ## Session log
 
+### 2026-10-08 (issue 116 docs)
+- Branch `docs/kubernetes-no-ingress`: the Kubernetes provider page and the architecture plan now list only Deployment, Service, HPA and Secret as rendered kinds, name the `status.loadBalancer.ingress` Service field explicitly, and mark Ingress and Gateway HTTPRoute as planned (issue 116). No code change.
+
 ### 2026-10-08 (issue 49)
 - Branch `feat/live-gpu-run`: GPU live run prepared, not executed (5 USD Modal budget, the owner triggers it). `hull plan` renders both targets: `multihull-live-gpu-modal-a` and `-b`, L4, 16 GiB, `max_inputs` 4, `startup_timeout` 600, image `vllm/vllm-openai@sha256:014a95f2...` (index digest of tag `v0.11.0`; the amd64 manifest is `sha256:d8d39b59...`).
 - Found while preparing: `Target.resource_name` is per service, so two Modal targets shared one app name; fixed in the translator (`app_name`, label and secret carry the provider, `rediscover` gets `provider_name` from the engine). The live smoke app is now `multihull-live-<run id>-modal`.
