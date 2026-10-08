@@ -3,7 +3,7 @@ title: Kubernetes
 description: Any GPU cluster, built-in kinds only, via the Kubernetes API.
 ---
 
-Uses the `kubernetes` Python client with server-side apply (field manager `multihull`). Built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and `concurrency` is set), optional Gateway API HTTPRoute or Ingress. No CRDs, no operator.
+Uses the `kubernetes` Python client with server-side apply (field manager `multihull`). Built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and `concurrency` is set) and Secret. No CRDs, no operator. It renders no Ingress and no Gateway API HTTPRoute today; both are planned, see [#116](https://github.com/mishraprafful/multihull/issues/116).
 
 ```yaml
 - provider: gke-prod
@@ -23,7 +23,7 @@ Credentials: the kubeconfig context named in the target. Without `context`, `hul
 | `nodePort` | unset | fixed node port, for `NodePort` or `LoadBalancer` |
 | `endpoint` | unset | URL the router uses, stored as the Service annotation `multihull.dev/endpoint` |
 
-Without `endpoint`, the URL is the load balancer ingress, then the first node's external or internal IP plus the node port, then the in-cluster DNS name. A kind cluster reached from the host uses `NodePort` with a kind `extraPortMappings` entry and an explicit `endpoint`:
+Without `endpoint`, the URL is the address a `LoadBalancer` Service reports in `status.loadBalancer.ingress` (a Service status field, not an Ingress resource), then the first node's external or internal IP plus the node port, then the in-cluster DNS name. A kind cluster reached from the host uses `NodePort` with a kind `extraPortMappings` entry and an explicit `endpoint`:
 
 ```yaml
 kubernetes:
@@ -47,6 +47,6 @@ An empty `resources.gpu` runs the pod on CPU: no `nvidia.com/gpu` limit, tolerat
 | `scaling.concurrency` | KEDA trigger target |
 | `container.health` | readiness and liveness probes |
 | `container.secrets` | `Secret` + `envFrom` |
-| endpoint | `kubernetes.endpoint`, LoadBalancer ingress, NodePort or cluster DNS |
+| endpoint | `kubernetes.endpoint`, LoadBalancer Service address, NodePort or cluster DNS |
 
 Ref stored in state: namespace plus resource names. Every resource carries the label `multihull.dev/service=<name>` for `rediscover`.

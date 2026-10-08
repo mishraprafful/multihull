@@ -121,10 +121,12 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`), paths to the module layout af
 
 ## Session log
 
+### 2026-10-08 (issue 116 docs)
+- Branch `docs/kubernetes-no-ingress`: the Kubernetes provider page and the architecture plan now list only Deployment, Service, HPA and Secret as rendered kinds, name the `status.loadBalancer.ingress` Service field explicitly, and mark Ingress and Gateway HTTPRoute as planned (issue 116). No code change.
 ### 2026-10-08 (release docs, issue 112)
 - Branch `docs/release-0.1.0`: `CHANGELOG.md`, `docs/releases/0.1.0.md`, `docs/runbooks/release.md` (linked from `CONTRIBUTING.md`), website page Reference > Release notes generated at build time from the release notes file. No code changes.
 - README: status line, provider table (Kubernetes, Modal and Docker working; RunPod, Baseten, Replicate render-only), stale "v0.1 scaffold" line removed. README and quickstart dropped `hull failover test` (not built), the `runpod-eu` status row, "vLLM or TGI" detection in `hull init` and "GPU availability" in `hull doctor` (it checks credentials only). Landing page lead text qualified; illustrations unchanged.
-- Facts checked while writing: the router has no WebSocket passthrough, OTel export or snapshot-age metric; the Kubernetes translator renders no HTTPRoute or Ingress (`docs/providers/kubernetes.mdx` still says it does, left for a follow-up).
+- Facts checked while writing: the router has no WebSocket passthrough, OTel export or snapshot-age metric; the Kubernetes translator renders no HTTPRoute or Ingress (fixed in PR 118, planned in issue 116).
 
 ### 2026-10-08 (issue 49)
 - Branch `feat/live-gpu-run`: GPU live run prepared, not executed (5 USD Modal budget, the owner triggers it). `hull plan` renders both targets: `multihull-live-gpu-modal-a` and `-b`, L4, 16 GiB, `max_inputs` 4, `startup_timeout` 600, image `vllm/vllm-openai@sha256:014a95f2...` (index digest of tag `v0.11.0`; the amd64 manifest is `sha256:d8d39b59...`).
