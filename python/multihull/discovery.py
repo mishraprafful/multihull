@@ -182,6 +182,10 @@ def file_snapshot(
     return snapshot
 
 
+def routes_without_endpoints(snapshot: dict[str, Any]) -> list[str]:
+    return [route["id"] for route in snapshot["routes"] if not route["endpoints"]]
+
+
 def write_snapshot(snapshot: dict[str, Any], path: str | Path) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

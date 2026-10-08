@@ -244,7 +244,7 @@ def test_controller_stops_cleanly_on_sigterm(tmp_path: Path) -> None:
         )
         try:
             deadline = time.monotonic() + 30
-            while not snapshot.exists() and process.poll() is None:
+            while "discovery stream listening" not in log.read_text() and process.poll() is None:
                 assert time.monotonic() < deadline, log.read_text()
                 time.sleep(0.1)
             assert process.poll() is None, log.read_text()

@@ -125,6 +125,13 @@ class Controller:
 
     def reconcile_sync(self) -> bool:
         candidate = self.observe()
+        empty = discovery.routes_without_endpoints(candidate)
+        if empty and self.rediscover_sync():
+            candidate = self.observe()
+            empty = discovery.routes_without_endpoints(candidate)
+        if empty:
+            self.hold(empty)
+            return False
         with self.publishing:
             if not discovery.snapshot_changed(self.snapshot, candidate):
                 return False
@@ -137,6 +144,34 @@ class Controller:
         self.observed = {r.provider: r.observed for r in results}
         return discovery.build_snapshot(
             self.spec, self.state, self.providers, observed=self.observed, version=self.version
+        )
+
+    def rediscover_sync(self) -> list[str]:
+        found: list[str] = []
+        for result in engine.rediscover(self.spec, self.state, self.providers):
+            if result.ref is None:
+                log.warning("rediscover %s: %s", result.provider, result.message)
+                continue
+            log.warning(
+                "rediscovered %s for %s: the state backend had no record of it",
+                result.provider,
+                self.spec.name,
+            )
+            found.append(result.provider)
+        return found
+
+    def hold(self, routes: list[str]) -> None:
+        kept = (
+            f"routers keep snapshot version {self.snapshot[discovery.SNAPSHOT_VERSION_FIELD]}"
+            if self.snapshot is not None
+            else "routers keep the snapshot they hold"
+        )
+        log.error(
+            "not publishing: route %s has no endpoints although the spec declares targets %s "
+            "and rediscover found none; %s",
+            ", ".join(routes),
+            ", ".join(target.provider for target in self.spec.targets),
+            kept,
         )
 
     def next_version(self) -> int:
