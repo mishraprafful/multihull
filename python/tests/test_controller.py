@@ -15,6 +15,7 @@ from typing import Any
 import grpc
 import pytest
 
+from multihull import discovery
 from multihull._proto import discovery_pb2 as pb
 from multihull._proto import discovery_pb2_grpc as pb_grpc
 from multihull.apikeys import ApiKeyError
@@ -610,3 +611,92 @@ def test_reconcile_loop_keeps_the_last_snapshot_and_logs_when_keys_run_out(
     assert errors, "the controller must surface why it stopped publishing"
     assert all(r.exc_info is None for r in errors)
     assert f"snapshot not published: {no_keys_message(f'file:{keys}')}" in errors[0].getMessage()
+
+
+def restarted(controller: Controller) -> Controller:
+    return Controller(
+        controller.spec,
+        controller.state,
+        controller.providers,
+        snapshot_out=controller.snapshot_out,
+        interval=controller.interval,
+        degraded_cooldown=controller.degraded_cooldown,
+        clock=controller.clock,
+    )
+
+
+def test_a_restarted_controller_continues_versions_from_the_state_backend(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    providers = {t.provider: FakeProvider(phases=["Pending", "Ready"]) for t in llama_spec.targets}
+    first, _ = make_controller(llama_spec, tmp_path, providers)
+    asyncio.run(first.reconcile_once())
+    asyncio.run(first.reconcile_once())
+    assert first.version == 2
+    (tmp_path / "snapshot.json").unlink()
+
+    second = restarted(first)
+    assert asyncio.run(second.reconcile_once()) is True
+    assert second.version == 3
+    assert json.loads((tmp_path / "snapshot.json").read_text())["version"] == 3
+
+    third = restarted(second)
+    assert asyncio.run(third.reconcile_once()) is True
+    assert third.version == 4
+
+
+def test_a_controller_with_fresh_state_continues_after_the_snapshot_file_it_finds(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    controller, state = make_controller(llama_spec, tmp_path, providers)
+    earlier = discovery.build_snapshot(llama_spec, state, providers, version=41)
+    discovery.write_snapshot(earlier, tmp_path / "snapshot.json")
+
+    assert asyncio.run(restarted(controller).reconcile_once()) is True
+    assert json.loads((tmp_path / "snapshot.json").read_text())["version"] == 42
+
+
+def test_a_router_holding_a_higher_version_gets_the_same_routes_above_it(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    controller, _ = make_controller(llama_spec, tmp_path, providers)
+
+    async def scenario() -> None:
+        server, port = await controller.serve("127.0.0.1:0", StreamSecurity(insecure=True))
+        await controller.reconcile_once()
+        assert controller.version == 1
+        outgoing: asyncio.Queue[pb.RouterMessage | None] = asyncio.Queue()
+
+        async def requests() -> AsyncIterator[pb.RouterMessage]:
+            while (message := await outgoing.get()) is not None:
+                yield message
+
+        try:
+            async with grpc.aio.insecure_channel(f"127.0.0.1:{port}") as channel:
+                call = pb_grpc.DiscoveryStub(channel).Stream(requests())
+                await outgoing.put(pb.RouterMessage(hello=pb.Hello(node_id="r1", last_version=9)))
+                try:
+                    first = await asyncio.wait_for(call.read(), timeout=5)
+                    assert first.snapshot.version == 10
+                    assert [e.provider for e in first.snapshot.routes[0].endpoints] == [
+                        "gke-prod",
+                        "modal-main",
+                        "runpod-eu",
+                    ]
+                    written = json.loads((tmp_path / "snapshot.json").read_text())
+                    assert written["version"] == 10
+
+                    providers["modal-main"].phases = ["Degraded"]
+                    assert await controller.reconcile_once() is True
+                    second = await asyncio.wait_for(call.read(), timeout=5)
+                    assert second.snapshot.version == 11
+                finally:
+                    call.cancel()
+        finally:
+            await server.stop(None)
+
+    asyncio.run(scenario())
+    assert asyncio.run(restarted(controller).reconcile_once()) is True
+    assert json.loads((tmp_path / "snapshot.json").read_text())["version"] == 12

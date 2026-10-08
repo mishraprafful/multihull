@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -147,6 +148,38 @@ def build_snapshot(
         "at": now.isoformat().replace("+00:00", "Z"),
         "routes": [route],
     }
+
+
+def snapshot_file_version(path: str | Path | None) -> int:
+    if path is None:
+        return 0
+    try:
+        return int(json.loads(Path(path).read_text())[SNAPSHOT_VERSION_FIELD])
+    except (OSError, ValueError, TypeError, KeyError):
+        return 0
+
+
+def next_file_version(
+    state: StateBackend,
+    service: str,
+    out: str | Path | None,
+    clock: Callable[[], float] = time.time,
+) -> int:
+    return state.advance_snapshot_version(
+        service, max(int(clock()), snapshot_file_version(out) + 1)
+    )
+
+
+def file_snapshot(
+    spec: ServiceSpec,
+    state: StateBackend,
+    providers: Mapping[str, Provider],
+    out: str | Path | None,
+    observed: Mapping[str, Observed] | None = None,
+) -> dict[str, Any]:
+    snapshot = build_snapshot(spec, state, providers, observed=observed)
+    snapshot[SNAPSHOT_VERSION_FIELD] = next_file_version(state, spec.name, out)
+    return snapshot
 
 
 def write_snapshot(snapshot: dict[str, Any], path: str | Path) -> Path:

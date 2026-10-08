@@ -149,6 +149,20 @@ def test_snapshot_command(tmp_path: Path, monkeypatch) -> None:
     assert snapshot["routes"][0]["endpoints"][0]["provider"] == "modal-main"
 
 
+def test_snapshot_command_never_writes_a_lower_version(tmp_path: Path) -> None:
+    path = copy_fixture(tmp_path)
+    out = tmp_path / "snapshot.json"
+    ahead = 10**12
+    out.write_text(json.dumps({"version": ahead, "routes": []}))
+    args = ["snapshot", str(path), "--out", str(out), "--state", str(tmp_path / "state.db")]
+
+    assert runner.invoke(app, args).exit_code == 0
+    first = json.loads(out.read_text())["version"]
+    assert first > ahead
+    assert runner.invoke(app, args).exit_code == 0
+    assert json.loads(out.read_text())["version"] > first
+
+
 def test_snapshot_command_rejects_a_malformed_route_key(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LLAMA_API_KEYS", "hull_fixture_one,hull_bad-id_leakedsecretvalue")
     out = tmp_path / "snapshot.json"

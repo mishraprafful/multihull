@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 from datetime import timedelta
@@ -10,6 +11,7 @@ from typer.testing import CliRunner
 from multihull import deploy as deploymod
 from multihull import engine
 from multihull.cli import app
+from multihull.controller import Controller
 from multihull.providers.base import Ref
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
@@ -213,3 +215,20 @@ def test_destroy_cli(tmp_path: Path, fake_registry: dict[str, FakeProvider]) -> 
             app, ["destroy", str(path), "--state", str(tmp_path / "empty.db"), "--yes"]
         ).output
     )
+
+
+def test_a_controller_continues_above_the_version_hull_deploy_wrote(
+    llama_spec: ServiceSpec, tmp_path: Path, fake_registry: dict[str, FakeProvider]
+) -> None:
+    path = spec_copy(tmp_path)
+    state_path = tmp_path / "state.db"
+    deploy_out = tmp_path / "snapshot.json"
+    args = ["deploy", str(path), "--apply", "--state", str(state_path), "--snapshot-out"]
+    assert runner.invoke(app, [*args, str(deploy_out)]).exit_code == 0
+    deployed = json.loads(deploy_out.read_text())["version"]
+
+    controller_out = tmp_path / "controller" / "snapshot.json"
+    providers = providers_by_name(llama_spec, fake_registry)
+    controller = Controller(llama_spec, LocalState(state_path), providers, controller_out)
+    assert asyncio.run(controller.reconcile_once()) is True
+    assert json.loads(controller_out.read_text())["version"] > deployed

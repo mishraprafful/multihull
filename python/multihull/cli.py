@@ -411,7 +411,7 @@ def destroy(
             result.message,
         )
     console.print(table)
-    document = discovery.build_snapshot(service, state, providers)
+    document = discovery.file_snapshot(service, state, providers, snapshot_out)
     console.print(f"wrote {discovery.write_snapshot(document, snapshot_out)}")
     if not all(r.ok for r in results):
         raise typer.Exit(1)
@@ -539,7 +539,7 @@ def snapshot(
     route_keys_or_exit(service)
     state = state_or_exit(state_url)
     providers = providers_for(service, live=False)
-    document = discovery.build_snapshot(service, state, providers)
+    document = discovery.file_snapshot(service, state, providers, out)
     discovery.write_snapshot(document, out)
     endpoints = sum(len(route["endpoints"]) for route in document["routes"])
     console.print(f"wrote {out}: {len(document['routes'])} routes, {endpoints} endpoints")

@@ -93,7 +93,9 @@ class Controller:
         self.health_interval = health_interval
         self.degraded_cooldown = degraded_cooldown
         self.clock = clock
-        self.version = 0
+        self.version = self.seed_version()
+        self.router_floor = 0
+        self.publishing = threading.Lock()
         self.snapshot: dict[str, Any] | None = None
         self.observed: dict[str, Observed] = {}
         self.min_replicas: dict[str, int] = {
@@ -108,24 +110,79 @@ class Controller:
         self.owed_raises: dict[str, str] = {}
         self.restore_floors()
         self.subscribers: set[asyncio.Queue[pb.Snapshot | None]] = set()
+        self.greeted: set[asyncio.Queue[pb.Snapshot | None]] = set()
         self.acked_versions: dict[str, int] = {}
         self.scale_actions: list[ScaleAction] = []
         self.scale_back_actions: list[ScaleAction] = []
 
+    def seed_version(self) -> int:
+        persisted = self.state.snapshot_version(self.spec.name)
+        written = discovery.snapshot_file_version(self.snapshot_out)
+        seed = max(persisted, written)
+        if seed:
+            log.info("snapshot versions continue after %d", seed)
+        return seed
+
     def reconcile_sync(self) -> bool:
+        candidate = self.observe()
+        with self.publishing:
+            if not discovery.snapshot_changed(self.snapshot, candidate):
+                return False
+            candidate[discovery.SNAPSHOT_VERSION_FIELD] = self.next_version()
+            self.adopt(candidate)
+        return True
+
+    def observe(self) -> dict[str, Any]:
         results = engine.refresh(self.spec.name, self.state, self.providers)
         self.observed = {r.provider: r.observed for r in results}
-        candidate = discovery.build_snapshot(
-            self.spec, self.state, self.providers, observed=self.observed, version=self.version + 1
+        return discovery.build_snapshot(
+            self.spec, self.state, self.providers, observed=self.observed, version=self.version
         )
-        if not discovery.snapshot_changed(self.snapshot, candidate):
-            return False
-        self.version += 1
-        self.snapshot = candidate
+
+    def next_version(self) -> int:
+        at_least = max(self.version, self.router_floor) + 1
+        try:
+            self.version = self.state.advance_snapshot_version(self.spec.name, at_least)
+        except Exception as exc:
+            log.error("saving snapshot version %d to the state backend failed: %s", at_least, exc)
+            self.version = at_least
+        return self.version
+
+    def adopt(self, snapshot: dict[str, Any]) -> None:
+        self.snapshot = snapshot
         if self.snapshot_out is not None:
-            discovery.write_snapshot(candidate, self.snapshot_out)
+            discovery.write_snapshot(snapshot, self.snapshot_out)
         log.info("snapshot version %d: %s", self.version, self.describe_endpoints())
+
+    def greet_sync(self, node: str, last_version: int) -> bool:
+        with self.publishing:
+            self.router_floor = max(self.router_floor, last_version)
+            if self.snapshot is None:
+                return False
+            current = self.snapshot[discovery.SNAPSHOT_VERSION_FIELD]
+            if last_version <= current:
+                return False
+            log.warning(
+                "router %s holds version %d, above this controller's %d; "
+                "republishing the same routes above it",
+                node,
+                last_version,
+                current,
+            )
+            self.adopt({**self.snapshot, discovery.SNAPSHOT_VERSION_FIELD: self.next_version()})
         return True
+
+    async def greet(
+        self, node: str, last_version: int, queue: asyncio.Queue[pb.Snapshot | None]
+    ) -> None:
+        republished = await asyncio.to_thread(self.greet_sync, node, last_version)
+        self.greeted.add(queue)
+        if republished:
+            self.publish()
+        elif (snapshot := self.current_proto()) is not None:
+            queue.put_nowait(snapshot)
+        else:
+            await self.reconcile_once()
 
     def describe_endpoints(self) -> str:
         if self.snapshot is None:
@@ -150,7 +207,7 @@ class Controller:
         message = self.current_proto()
         if message is None:
             return
-        for queue in list(self.subscribers):
+        for queue in list(self.greeted):
             queue.put_nowait(message)
 
     def subscribe(self) -> asyncio.Queue[pb.Snapshot | None]:
@@ -160,6 +217,7 @@ class Controller:
 
     def unsubscribe(self, queue: asyncio.Queue[pb.Snapshot | None]) -> None:
         self.subscribers.discard(queue)
+        self.greeted.discard(queue)
 
     def record_ack(self, node_id: str, version: int) -> None:
         self.acked_versions[node_id] = version
@@ -533,11 +591,7 @@ class DiscoveryServicer(pb_grpc.DiscoveryServicer):
         if kind == "hello":
             node["id"] = message.hello.node_id or node["id"]
             log.info("hello from %s (last version %d)", node["id"], message.hello.last_version)
-            snapshot = self.controller.current_proto()
-            if snapshot is None:
-                await self.controller.reconcile_once()
-                return
-            queue.put_nowait(snapshot)
+            await self.controller.greet(node["id"], message.hello.last_version, queue)
         elif kind == "ack":
             self.controller.record_ack(node["id"], message.ack.version)
         elif kind == "nack":

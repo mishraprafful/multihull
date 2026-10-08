@@ -177,6 +177,6 @@ def deploy(
             )
         )
 
-    snapshot = discovery.build_snapshot(spec, state, providers, observed=observations)
+    snapshot = discovery.file_snapshot(spec, state, providers, snapshot_out, observed=observations)
     snapshot_path = discovery.write_snapshot(snapshot, snapshot_out) if snapshot_out else None
     return DeployReport(spec.name, False, outcomes, snapshot, snapshot_path)
