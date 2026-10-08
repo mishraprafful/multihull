@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from e2e.client import RouterClient, failures, load, providers_of
-from e2e.harness import Deployment, Router
+from e2e.harness import Deployment, Router, endpoint_id
 
 FIRST_BYTE_TIMEOUT = 3.0
 
@@ -28,7 +28,7 @@ def test_slow_first_token_fails_over_before_the_first_byte(
     assert all(len(outcome.headers.get("x-mock-instance", "")) > 0 for outcome in outcomes)
 
     metrics = router.metrics()
-    assert metrics.requests(endpoint="e2e-three/primary", outcome="capacity") >= 1
+    assert metrics.requests(endpoint=endpoint_id("primary"), outcome="capacity") >= 1
     assert metrics.failovers(**{"from": "primary", "reason": "capacity"}) >= 1
-    assert metrics.requests(endpoint="e2e-three/primary", outcome="success") == 0
+    assert metrics.requests(endpoint=endpoint_id("primary"), outcome="success") == 0
     assert router.endpoint("primary")["circuit"] == "closed"

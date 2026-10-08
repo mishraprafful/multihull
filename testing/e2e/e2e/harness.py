@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
+import secrets
 import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,7 +24,11 @@ from e2e.waiting import wait_until
 from multihull.providers.base import SERVICE_LABEL, Ref
 from multihull.state import LocalState
 
-SERVICE = "e2e-three"
+SERVICE_PREFIX = "e2e-three"
+SERVICE_NAME_MAX_LENGTH = 40
+RUN_ID_MAX_LENGTH = SERVICE_NAME_MAX_LENGTH - len(SERVICE_PREFIX) - 1
+RUN_ID_PATTERN = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
+HOST_PORT_BLOCKS = range(20000, 30000, 10)
 TARGETS = ("primary", "secondary", "tertiary")
 STATE_PATH = Path(".multihull") / "state.db"
 DEPLOY_SNAPSHOT_PATH = Path(".multihull") / "snapshot.json"
@@ -36,6 +43,24 @@ DEGRADED_COOLDOWN_SECONDS = 5.0
 DEFAULT_PROBE: dict[str, float] = {"interval": 5, "timeout": 2, "jitter_fraction": 0.2}
 
 
+def resolve_run_id(configured: str | None) -> str:
+    run_id = configured or secrets.token_hex(3)
+    if len(run_id) > RUN_ID_MAX_LENGTH or not RUN_ID_PATTERN.fullmatch(run_id):
+        raise ValueError(
+            "E2E_RUN_ID must be lowercase letters, digits and inner dashes, "
+            f"at most {RUN_ID_MAX_LENGTH} characters, got {run_id!r}"
+        )
+    return run_id
+
+
+RUN_ID = resolve_run_id(os.environ.get("E2E_RUN_ID"))
+SERVICE = f"{SERVICE_PREFIX}-{RUN_ID}"
+
+
+def endpoint_id(provider: str) -> str:
+    return f"{SERVICE}/{provider}"
+
+
 def probe_ejection_budget(probe: Mapping[str, float] = DEFAULT_PROBE) -> float:
     return 3 * probe["interval"] * (1 + probe["jitter_fraction"]) + probe["timeout"]
 
@@ -45,6 +70,28 @@ def free_port() -> int:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def port_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def host_ports(run_id: str, base_port: int | None = None, count: int = len(TARGETS)) -> list[int]:
+    if base_port is not None:
+        return [base_port + offset for offset in range(1, count + 1)]
+    blocks = len(HOST_PORT_BLOCKS)
+    start = int(hashlib.sha256(run_id.encode()).hexdigest(), 16) % blocks
+    for step in range(blocks):
+        block = HOST_PORT_BLOCKS[(start + step) % blocks]
+        ports = [block + offset for offset in range(1, count + 1)]
+        if all(port_free(port) for port in ports):
+            return ports
+    raise RuntimeError("no free block of host ports for the e2e targets")
 
 
 def hull(
@@ -379,7 +426,7 @@ def write_router_config(
             [
                 f'listen = "127.0.0.1:{listen_port}"',
                 f'admin_listen = "127.0.0.1:{admin_port}"',
-                f'node_id = "e2e-router-{listen_port}"',
+                f'node_id = "e2e-router-{RUN_ID}-{listen_port}"',
                 "",
                 toml_tables(tables),
             ]
@@ -469,10 +516,13 @@ class Router(Process):
         wait_until(self.all_ready, timeout, message="router with three ready endpoints")
 
 
-def rewrite_spec(source: Path, destination: Path, image: str, base_port: int) -> Path:
+def rewrite_spec(
+    source: Path, destination: Path, image: str, service: str, ports: Sequence[int]
+) -> Path:
     document = yaml.safe_load(source.read_text())
+    document["name"] = service
     document["container"]["image"] = image
-    for offset, target in enumerate(document["targets"], start=1):
-        target.setdefault("docker", {})["hostPort"] = base_port + offset
+    for target, port in zip(document["targets"], ports, strict=True):
+        target.setdefault("docker", {})["hostPort"] = port
     destination.write_text(yaml.safe_dump(document, sort_keys=False))
     return destination

@@ -5,13 +5,13 @@ import time
 import pytest
 
 from e2e.client import Outcome, RouterClient, failures, load, load_for, providers_of
-from e2e.harness import Controller, Deployment, Router, probe_ejection_budget
+from e2e.harness import Controller, Deployment, Router, endpoint_id, probe_ejection_budget
 from e2e.sampler import EndpointSampler
 from e2e.waiting import wait_until
 
 PROBE = {"interval": 2, "timeout": 1, "jitter_fraction": 0.2}
 CIRCUIT = {"base_backoff": 1, "max_backoff": 2, "jitter_fraction": 0.1, "half_open_ramp": 3}
-PRIMARY = "e2e-three/primary"
+PRIMARY = endpoint_id("primary")
 SUCCESSES_TO_CLOSE = 3
 LOAD_SECONDS = 3 * CIRCUIT["max_backoff"]
 
