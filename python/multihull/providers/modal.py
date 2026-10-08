@@ -12,6 +12,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar
 
+import httpx
+
 from multihull.providers.base import (
     SERVICE_LABEL,
     CredHealth,
@@ -54,6 +56,9 @@ CREDENTIALS_TIMEOUT_SECONDS = 10.0
 REDACTED = "<redacted>"
 IMAGE_BUILDER_VERSION = "2025.06"
 IMAGE_BUILDER_VERSION_ENV = "MODAL_IMAGE_BUILDER_VERSION"
+HEALTH_PATH_KEY = "health_path"
+DEFAULT_HEALTH_PATH = "/health"
+HEALTH_TIMEOUT_SECONDS = 5.0
 
 
 class CredentialStatus(StrEnum):
@@ -250,7 +255,11 @@ def memory_to_mib(memory: str | None) -> int | None:
 
 def ref_for(desired: Target, web_url: str | None = None) -> Ref:
     block = modal_block(desired)
-    ids = {"app": app_name(desired), "environment": block.environment}
+    ids = {
+        "app": app_name(desired),
+        "environment": block.environment,
+        HEALTH_PATH_KEY: desired.service.container.health.path,
+    }
     if block.region:
         ids["region"] = block.region
     if web_url:
@@ -261,6 +270,10 @@ def ref_for(desired: Target, web_url: str | None = None) -> Ref:
 def derive_web_url(app_name: str, workspace: str, environment: str) -> str:
     suffix = "" if environment == "main" else f"-{environment}"
     return f"https://{workspace}{suffix}--{app_name}.modal.run"
+
+
+def default_http_client() -> httpx.Client:
+    return httpx.Client(timeout=HEALTH_TIMEOUT_SECONDS)
 
 
 def server_instance(app_name: str, environment: str | None) -> Any:
@@ -289,11 +302,22 @@ class ModalProvider:
     type: ClassVar = "modal"
 
     def __init__(
-        self, dry_run: bool = True, workspace: str | None = None, provider_name: str = "modal"
+        self,
+        dry_run: bool = True,
+        workspace: str | None = None,
+        provider_name: str = "modal",
+        http_client: httpx.Client | None = None,
     ) -> None:
         self.dry_run = dry_run
         self.workspace = workspace or os.environ.get("MODAL_WORKSPACE", "workspace")
         self.provider_name = provider_name
+        self._http = http_client
+
+    @property
+    def http(self) -> httpx.Client:
+        if self._http is None:
+            self._http = default_http_client()
+        return self._http
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         return Plan(
@@ -328,8 +352,31 @@ class ModalProvider:
             stats = server.serve.get_current_stats()
         except Exception as exc:
             return Observed(phase="Unknown", message=str(exc))
-        ready = int(getattr(stats, "num_total_runners", 0))
-        return Observed(phase="Ready" if ready else "Pending", ready_replicas=ready)
+        running = int(getattr(stats, "num_total_runners", 0))
+        if not running:
+            return Observed(phase="Pending", message="no running container")
+        endpoint = self.endpoint(ref)
+        url = f"{endpoint.url}{ref.ids.get(HEALTH_PATH_KEY, DEFAULT_HEALTH_PATH)}"
+        try:
+            response = self.http.get(url, headers=endpoint.inject_headers)
+        except httpx.HTTPError as exc:
+            return Observed(
+                phase="Pending",
+                desired_replicas=running,
+                message=f"{running} container(s) running, health probe {exc.__class__.__name__}",
+            )
+        if response.is_success:
+            return Observed(
+                phase="Ready",
+                ready_replicas=running,
+                desired_replicas=running,
+                message=f"health {response.status_code}",
+            )
+        return Observed(
+            phase="Pending",
+            desired_replicas=running,
+            message=f"{running} container(s) running, health returned {response.status_code}",
+        )
 
     def scale(self, ref: Ref, min: int, max: int) -> None:
         if self.dry_run:

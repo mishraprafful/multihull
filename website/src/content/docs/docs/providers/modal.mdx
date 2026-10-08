@@ -48,7 +48,7 @@ Modal pulls the image once, during deploy, and caches it. A short-lived token, s
 | `resources.gpu` | `gpu="A10G"`, `gpu="L4"`, and so on; `None` when empty |
 | `scaling.replicas` | `min_containers`, `max_containers`, `buffer_containers` |
 | `scaling.concurrency` | `@modal.concurrent(max_inputs=)` |
-| `container.health` | `startup_timeout` (at least 60 s); the router probes `web_url + path` |
+| `container.health` | `startup_timeout` (at least 60 s); `hull deploy --wait` and `hull status` report Ready only once a container runs and `web_url + path` answers 2xx within 5 s; the router probes the same URL |
 | `container.secrets` | `modal.Secret.from_dict`, named `multihull-<svc>` |
 | endpoint | `get_web_url()` with label `multihull-<svc>`, plus proxy-auth headers injected by the router |
 
