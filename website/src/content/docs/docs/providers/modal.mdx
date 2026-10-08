@@ -15,7 +15,7 @@ Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a
 Credentials: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or `~/.modal.toml`.
 
 Requirements:
-- `container.command` must be set. Modal does not run the image `CMD`.
+- `container.command` must be set. Modal does not run the image `CMD`, and the translator resets the image `ENTRYPOINT` (`ENTRYPOINT []` is the first setup Dockerfile line), because Modal starts its own runtime process in the container; an entrypoint such as the public vLLM image's `python3 -m vllm.entrypoints.openai.api_server` would otherwise swallow Modal's arguments and crash on start.
 - The server must listen on `0.0.0.0`.
 - The Python running `hull deploy` must match the image's Python minor version, because the server class is serialized with cloudpickle.
 - An empty `resources.gpu` runs the container on CPU.
@@ -48,7 +48,7 @@ Modal pulls the image once, during deploy, and caches it. A short-lived token, s
 | `resources.gpu` | `gpu="A10G"`, `gpu="L4"`, and so on; `None` when empty |
 | `scaling.replicas` | `min_containers`, `max_containers`, `buffer_containers` |
 | `scaling.concurrency` | `@modal.concurrent(max_inputs=)` |
-| `container.health` | `startup_timeout` (at least 60 s); the router probes `web_url + path` |
+| `container.health` | `startup_timeout` (at least 60 s); `hull deploy --wait` and `hull status` report Ready only once a container runs and `web_url + path` answers 2xx within 5 s; the router probes the same URL |
 | `container.secrets` | `modal.Secret.from_dict`, named `multihull-<svc>` |
 | endpoint | `get_web_url()` with label `multihull-<svc>`, plus proxy-auth headers injected by the router |
 

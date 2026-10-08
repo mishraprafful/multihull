@@ -7,6 +7,7 @@ import sys
 from datetime import timedelta
 from typing import Any
 
+import httpx
 import pytest
 
 from multihull.providers import modal as modal_provider
@@ -73,6 +74,7 @@ def test_apply_dry_run_returns_ref(target_for) -> None:
     assert ref.ids == {
         "app": "multihull-llama-8b-modal-main",
         "environment": "main",
+        "health_path": "/health",
         "region": "eu",
     }
     assert provider.status(ref).phase == "Unknown"
@@ -266,13 +268,13 @@ def test_setup_dockerfile_commands_reach_from_registry(
     shim = "RUN ln -s /usr/bin/python3 /usr/local/bin/python"
     raw["targets"][1]["modal"]["setupDockerfileCommands"] = [shim]
     rendered = render_app_spec(mock_modal_target(ServiceSpec.model_validate(raw)))
-    assert rendered["image"]["setup_dockerfile_commands"] == [shim]
+    assert rendered["image"]["setup_dockerfile_commands"] == ["ENTRYPOINT []", shim]
     deploy_with_sdk(rendered)
-    assert fake_modal.images[0].setup_dockerfile_commands == [shim]
+    assert fake_modal.images[0].setup_dockerfile_commands == ["ENTRYPOINT []", shim]
     plain = render_app_spec(mock_modal_target(mock_kind_modal_spec))
-    assert plain["image"]["setup_dockerfile_commands"] == []
+    assert plain["image"]["setup_dockerfile_commands"] == ["ENTRYPOINT []"]
     deploy_with_sdk(plain)
-    assert fake_modal.images[1].setup_dockerfile_commands == []
+    assert fake_modal.images[1].setup_dockerfile_commands == ["ENTRYPOINT []"]
 
 
 def test_rediscover_looks_up_the_per_target_app(fake_modal: FakeModal) -> None:
@@ -313,8 +315,60 @@ def test_apply_error_keeps_image_build_hint_and_hides_secrets(
     assert registry_env["GHCR_TOKEN"] not in message and "<redacted>" in message
 
 
+class HealthAnswers:
+    def __init__(self) -> None:
+        self.response: httpx.Response | Exception = httpx.Response(200)
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if isinstance(self.response, Exception):
+            raise self.response
+        return self.response
+
+    def client(self) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(self))
+
+
+def test_status_is_ready_only_when_the_web_server_answers_health(fake_modal: FakeModal) -> None:
+    health = HealthAnswers()
+    provider = ModalProvider(dry_run=False, http_client=health.client())
+    ref = Ref(
+        "modal",
+        "modal",
+        "live-mock",
+        {
+            "app": "multihull-live-mock",
+            "environment": "main",
+            "web_url": "https://acme--multihull-live-mock.modal.run",
+            "health_path": "/healthz",
+        },
+    )
+
+    observed = provider.status(ref)
+    assert (observed.phase, observed.ready_replicas, observed.desired_replicas) == ("Ready", 1, 1)
+    assert str(health.requests[-1].url) == "https://acme--multihull-live-mock.modal.run/healthz"
+
+    health.response = httpx.ReadTimeout("modal holds the request until the port opens")
+    observed = provider.status(ref)
+    assert (observed.phase, observed.ready_replicas) == ("Pending", 0)
+    assert "ReadTimeout" in observed.message
+
+    health.response = httpx.Response(503)
+    observed = provider.status(ref)
+    assert (observed.phase, observed.ready_replicas) == ("Pending", 0)
+    assert "503" in observed.message
+
+    health.response = httpx.Response(200)
+    fake_modal.runners = 0
+    probes_before = len(health.requests)
+    observed = provider.status(ref)
+    assert observed.phase == "Pending"
+    assert len(health.requests) == probes_before
+
+
 def test_status_scale_and_logs_use_the_server_class(fake_modal: FakeModal) -> None:
-    provider = ModalProvider(dry_run=False)
+    provider = ModalProvider(dry_run=False, http_client=HealthAnswers().client())
     ref = Ref("modal", "modal", "live-mock", {"app": "multihull-live-mock", "environment": "main"})
     assert provider.status(ref).phase == "Ready"
     fake_modal.runners = 0

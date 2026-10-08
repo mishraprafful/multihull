@@ -83,7 +83,11 @@ def deployment(
         ready = int(budget.bounded(DEPLOY_READY_SECONDS))
         cost.started_at = time.time()
         recorder.save()
-        live.deploy(ready_timeout=f"{max(ready, 1)}s", timeout=budget.remaining() + 120)
+        try:
+            live.deploy(ready_timeout=f"{max(ready, 1)}s", timeout=budget.remaining() + 120)
+        except Exception:
+            live.capture_logs(live.providers_of_type("modal"))
+            raise
         capture_modal_apps(recorder.summary, live, AFTER_DEPLOY)
         recorder.save()
         yield live

@@ -98,11 +98,13 @@ def test_running_apps_lists_only_unstopped_apps_with_the_prefix() -> None:
     assert running_apps("multihull-live-9", "main", lambda env: RUNNING_APPS) == []
 
 
-def test_ejected_means_not_ready_probe_down_or_circuit_open() -> None:
+def test_ejected_mirrors_the_router_gates_not_just_the_health_label() -> None:
     assert not ejected({"health": "ready", "circuit": "closed", "probe": {"state": "up"}})
     assert ejected({"health": "ready", "circuit": "open", "probe": {"state": "up"}})
     assert ejected({"health": "ready", "circuit": "closed", "probe": {"state": "down"}})
-    assert ejected({"health": "draining", "circuit": None, "probe": None})
+    assert ejected({"health": "down", "circuit": None, "probe": None})
+    for routable in ("unspecified", "degraded", "draining"):
+        assert not ejected({"health": routable, "circuit": "closed", "probe": {"state": "up"}})
 
 
 def gpu_summary() -> RunSummary:
