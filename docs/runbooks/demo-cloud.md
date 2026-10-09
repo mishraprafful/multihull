@@ -167,4 +167,37 @@ Modal prices from https://modal.com/pricing (read 2026-10-08, `docs/runbooks/liv
 
 ## What a run looks like
 
-Local run of the orchestration on 2026-10-09 with the docker provider standing in for Modal (same spec shape, kind primary, `multihull-mock-server:demo` loaded into kind), `--duration 120 --scripted --check --no-top`: first traffic 8 s after start, kind scaled to zero at 28 s, the router opened its circuit about 12 s later, kind scaled back at 58 s, `half_open` at 79 s, `closed` at 89 s, traffic back on kind; 332 requests, 0 client errors, 151 served by the secondary, nothing left in kind, in Docker or in processes. The Modal leg of the same script was not run from this branch; the live smoke proves the kind plus Modal deploy, failover and destroy with the same harness code.
+Run on 2026-10-10 from an Apple Silicon laptop, `make demo-cloud DEMO_CLOUD_ARGS="--duration 180 --scripted --check --no-top"`, kind primary, Modal secondary. Host port 30081 stood in for 30080 (taken by another kind cluster), everything else as in `examples/demo-cloud/multihull.yaml`. Key lines, with the workspace replaced by `<workspace>`:
+
+```
+multihull cloud demo live-demo-305a64
+[  0.2s] kind load docker-image ghcr.io/mishraprafful/multihull-mock-server:main
+│ kind     │ kubernetes │ OK          │ kubeconfig context kind-multihull-live │
+│ modal    │ modal      │ OK          │ Modal accepted ~/.modal.toml           │
+[  4.5s] hull deploy --apply --wait --timeout 302s (live-demo-305a64)
+│ kind     │ kubernetes │ new    │ Ready  │ 1/1      │ http://127.0.0.1:30081                                          │ applied    │
+│ modal    │ modal      │ new    │ Ready  │ 1/1      │ https://<workspace>--multihull-live-demo-305a64-modal.modal.run │ health 200 │
+[ 18.8s] hull controller on grpcs://127.0.0.1:61026 (mTLS, bootstrap token)
+[ 19.2s] router serving http://127.0.0.1:61035 (admin http://127.0.0.1:61036)
+[ 20.2s] first traffic through the router: requests=4 errors=0 failovers=0 kind=4
+[ 35.7s] requests=50 errors=0 failovers=0 kind=50 | kind:ready/closed/up modal:ready/closed/up
+[ 40.3s] $ kubectl --context kind-multihull-live --namespace multihull-demo scale deployment/live-demo-305a64 --replicas=0
+[ 52.3s] requests=70 errors=0 failovers=6 kind=64 modal=6 | kind:ready/open/up modal:ready/closed/up
+[ 57.5s] requests=84 errors=0 failovers=20 kind=64 modal=20 | kind:ready/open/down modal:ready/closed/up
+[ 70.2s] $ kubectl --context kind-multihull-live --namespace multihull-demo scale deployment/live-demo-305a64 --replicas=1
+[ 93.7s] requests=192 errors=0 failovers=127 kind=65 modal=127 | kind:ready/half_open/up modal:ready/closed/up
+[ 98.9s] requests=208 errors=0 failovers=139 kind=69 modal=139 | kind:ready/closed/up modal:ready/closed/up
+[200.3s] load stopped
+[200.3s] router stopped
+[200.5s] controller stopped
+[202.0s] hull destroy exit 0
+[202.2s] sweeping Modal apps prefixed multihull-live-demo-305a64
+0 app(s) matched multihull-live-demo-305a64, 0 failed
+[202.8s] teardown done
+summary: requests=511 errors=0 failovers=139 kind=372 modal=139 first-traffic=20.1s
+cleanup verified: nothing left in kind, on Modal, in docker or in processes
+```
+
+Deploy to both Ready in 14 s (Modal image cached). The kill at 40 s opened the kind circuit 12 s later, the probe marked it down 5 s after that, and every request in between went to Modal with no client error. The restore at 70 s reached `half_open` at 94 s and `closed` at 99 s, then traffic returned to kind. `modal billing report --for today --show-resources` afterwards: 0.0012 USD for the app (CPU plus memory), 0.0015 USD with an aborted first attempt. `modal app list --env main` showed the app `stopped`, and `kind delete cluster --name multihull-live` left no cluster.
+
+On Apple Silicon the GHCR mock-server image is `linux/amd64` only (`images.yml`), so the kind node cannot pull it (`no match for platform in manifest`). Build it locally under the same tag first, `docker build -t ghcr.io/mishraprafful/multihull-mock-server:main testing/mock-server`; the demo sees the local image, loads it into kind, and Modal still pulls the amd64 image from GHCR by the same reference. Remove the local tag afterwards (`docker rmi ghcr.io/mishraprafful/multihull-mock-server:main`).
