@@ -1,0 +1,38 @@
+apiVersion: multihull/v1
+name: demo
+
+container:
+  image: multihull-mock-server:demo
+  port: 8000
+  health: {path: /health, initialDelaySeconds: 1}
+  env: {MOCK_MODEL: mock-llm}
+
+resources:
+  gpu: []
+
+scaling:
+  concurrency: 32
+  replicas: {min: 1, max: 1}
+
+reliability:
+  minWarmProviders: 3
+
+targets:
+  - provider: primary
+    type: docker
+    priority: 1
+    docker: {pull: false}
+  - provider: secondary
+    type: docker
+    priority: 2
+    docker: {pull: false}
+  - provider: tertiary
+    type: docker
+    priority: 3
+    docker: {pull: false}
+
+route:
+  hostname: demo.local
+  protocol: openai
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}
+  auth: {apiKeys: {from: env:MULTIHULL_DEMO_API_KEYS}}

@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 modal = ["modal>=1.6"]
+demo = ["openai>=1.50"]
 
 [project.scripts]
 hull = "multihull.cli:app"
