@@ -1,11 +1,18 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import starlightVersions from 'starlight-versions';
 
 export default defineConfig({
   site: process.env.SITE_URL ?? 'https://multihull.pages.dev',
   integrations: [
     starlight({
       title: 'Multihull',
+      plugins: [
+        starlightVersions({
+          current: { label: 'latest' },
+          versions: [{ slug: '0.1.0' }],
+        }),
+      ],
       description: 'Deploy hot GPU containers to many providers. One URL. Automatic failover.',
       logo: { src: './src/assets/mark.svg', alt: 'Multihull' },
       favicon: '/favicon.svg',

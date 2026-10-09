@@ -669,3 +669,8 @@ site-search button[data-open-modal]:hover {
   --sl-color-asides-text-accent: var(--mh-down);
   --sl-color-asides-border: var(--mh-coral);
 }
+
+starlight-version-select select[autocomplete] {
+  width: auto;
+  min-width: 6.5em;
+}
