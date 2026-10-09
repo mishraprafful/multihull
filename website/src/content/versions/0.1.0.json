@@ -1,0 +1,102 @@
+{
+  "sidebar": [
+    {
+      "label": "Quickstart",
+      "slug": "docs/quickstart"
+    },
+    {
+      "label": "Concepts",
+      "items": [
+        {
+          "label": "The spec",
+          "slug": "docs/concepts/spec"
+        },
+        {
+          "label": "Targets and failover",
+          "slug": "docs/concepts/targets-and-failover"
+        },
+        {
+          "label": "Sticky routing",
+          "slug": "docs/concepts/sticky-routing"
+        },
+        {
+          "label": "Reliability principle",
+          "slug": "docs/concepts/reliability-principle"
+        }
+      ]
+    },
+    {
+      "label": "Providers",
+      "items": [
+        {
+          "label": "Kubernetes",
+          "slug": "docs/providers/kubernetes"
+        },
+        {
+          "label": "Modal",
+          "slug": "docs/providers/modal"
+        },
+        {
+          "label": "RunPod",
+          "slug": "docs/providers/runpod"
+        },
+        {
+          "label": "Baseten",
+          "slug": "docs/providers/baseten"
+        },
+        {
+          "label": "Replicate",
+          "slug": "docs/providers/replicate"
+        }
+      ]
+    },
+    {
+      "label": "Router",
+      "items": [
+        {
+          "label": "Overview",
+          "slug": "docs/router/overview"
+        },
+        {
+          "label": "Health and circuits",
+          "slug": "docs/router/health-and-circuits"
+        },
+        {
+          "label": "Controller stream",
+          "slug": "docs/router/controller-stream"
+        }
+      ]
+    },
+    {
+      "label": "Reference",
+      "items": [
+        {
+          "label": "CLI",
+          "slug": "docs/reference/cli"
+        },
+        {
+          "label": "Spec schema",
+          "slug": "docs/reference/spec-schema"
+        },
+        {
+          "label": "Security",
+          "slug": "docs/reference/security"
+        },
+        {
+          "label": "Release notes",
+          "slug": "docs/reference/release-notes"
+        }
+      ]
+    },
+    {
+      "label": "Design",
+      "items": [
+        {
+          "label": "Architecture plan",
+          "slug": "docs/design/architecture"
+        }
+      ]
+    }
+  ],
+  "excluded": []
+}

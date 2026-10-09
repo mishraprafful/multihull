@@ -1,0 +1,251 @@
+---
+title: CLI
+description: The hull command, rendered from its own --help output.
+tableOfContents:
+  maxHeadingLevel: 3
+slug: 0.1.0/docs/reference/cli
+---
+
+:::note
+Generated at build time from `hull --help`. Edit `python/multihull/cli.py`, not this page.
+:::
+
+Install with `uv tool install multihull`. Every command accepts `--help`.
+
+## hull
+
+```text
+ Usage: hull [OPTIONS] COMMAND [ARGS]...
+
+ Deploy always-warm GPU inference containers to many providers from one spec.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --install-completion          Install completion for the current shell.              │
+│ --show-completion             Show completion for the current shell, to copy it or   │
+│                               customize the installation.                            │
+│ --help                        Show this message and exit.                            │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────╮
+│ init                                                                                 │
+│ validate                                                                             │
+│ schema                                                                               │
+│ plan                                                                                 │
+│ status                                                                               │
+│ deploy                                                                               │
+│ destroy                                                                              │
+│ logs                                                                                 │
+│ controller                                                                           │
+│ snapshot                                                                             │
+│ doctor                                                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+## Commands
+
+### hull init
+
+```text
+ Usage: hull init [OPTIONS] [directory]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   directory      <path>  Project directory [default: .]                              │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --name                   <str>  Service name                                         │
+│ --force    --no-force           Overwrite an existing multihull.yaml                 │
+│                                 [default: no-force]                                  │
+│ --help                          Show this message and exit.                          │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull validate
+
+```text
+ Usage: hull validate [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull schema
+
+```text
+ Usage: hull schema [OPTIONS]
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --out         <path>  Write JSON Schema to this file                                 │
+│ --help                Show this message and exit.                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull plan
+
+```text
+ Usage: hull plan [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --out          <path>  Directory for rendered payloads [default: .multihull/plan]    │
+│ --state        <str>   State backend: a SQLite file path or                          │
+│                        sqlite:///absolute/path.db                                    │
+│                        [env var: MULTIHULL_STATE_BACKEND]                            │
+│                        [default: .multihull/state.db]                                │
+│ --help                 Show this message and exit.                                   │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull status
+
+```text
+ Usage: hull status [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --state        <str>  State backend: a SQLite file path or                           │
+│                       sqlite:///absolute/path.db                                     │
+│                       [env var: MULTIHULL_STATE_BACKEND]                             │
+│                       [default: .multihull/state.db]                                 │
+│ --help                Show this message and exit.                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull deploy
+
+```text
+ Usage: hull deploy [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --apply           --dry-run            Perform real provider calls                   │
+│                                        [default: dry-run]                            │
+│ --target                       <str>   Limit to this target (repeatable)             │
+│ --wait            --no-wait            Wait for every target to report Ready         │
+│                                        [default: wait]                               │
+│ --timeout                      <str>   Readiness timeout per target, e.g. 15m        │
+│ --snapshot-out                 <path>  Snapshot file to write                        │
+│                                        [default: .multihull/snapshot.json]           │
+│ --state                        <str>   State backend: a SQLite file path or          │
+│                                        sqlite:///absolute/path.db                    │
+│                                        [env var: MULTIHULL_STATE_BACKEND]            │
+│                                        [default: .multihull/state.db]                │
+│ --image-digest                 <str>   Pin the image to this digest                  │
+│ --help                                 Show this message and exit.                   │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull destroy
+
+```text
+ Usage: hull destroy [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --target                <str>   Limit to this target (repeatable)                    │
+│ --yes           -y              Skip confirmation                                    │
+│ --snapshot-out          <path>  Snapshot file to write                               │
+│                                 [default: .multihull/snapshot.json]                  │
+│ --state                 <str>   State backend: a SQLite file path or                 │
+│                                 sqlite:///absolute/path.db                           │
+│                                 [env var: MULTIHULL_STATE_BACKEND]                   │
+│                                 [default: .multihull/state.db]                       │
+│ --help                          Show this message and exit.                          │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull logs
+
+```text
+ Usage: hull logs [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --provider  -p      <str>  Target provider name                                      │
+│ --since             <str>  How far back to read, e.g. 10m [default: 10m]             │
+│ --follow    -f             Keep streaming                                            │
+│ --state             <str>  State backend: a SQLite file path or                      │
+│                            sqlite:///absolute/path.db                                │
+│                            [env var: MULTIHULL_STATE_BACKEND]                        │
+│                            [default: .multihull/state.db]                            │
+│ --help                     Show this message and exit.                               │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull controller
+
+```text
+ Usage: hull controller [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --interval                 <str>   Reconcile interval, e.g. 30s [default: 30s]       │
+│ --grpc-listen              <str>   host:port for the discovery stream                │
+│                                    [default: 0.0.0.0:7700]                           │
+│ --snapshot-out             <path>  Snapshot file to write                            │
+│                                    [default: .multihull/snapshot.json]               │
+│ --state                    <str>   State backend: a SQLite file path or              │
+│                                    sqlite:///absolute/path.db                        │
+│                                    [env var: MULTIHULL_STATE_BACKEND]                │
+│                                    [default: .multihull/state.db]                    │
+│ --degraded-cooldown        <str>   Quiet time after the last Degraded signal before  │
+│                                    one scale-back step, e.g. 10m                     │
+│                                    [default: 10m]                                    │
+│ --log-level                <str>   Python log level [default: INFO]                  │
+│ --tls-cert                 <path>  PEM certificate chain the discovery stream serves │
+│ --tls-key                  <path>  PEM private key for --tls-cert                    │
+│ --client-ca                <path>  PEM CA bundle; routers must present a client      │
+│                                    certificate it signed (mTLS)                      │
+│ --token-env                <str>   Env var holding the bootstrap token routers send  │
+│                                    as 'authorization: Bearer'                        │
+│                                    [default: MULTIHULL_DISCOVERY_TOKEN]              │
+│ --insecure                         Serve the discovery stream in plaintext; local    │
+│                                    development only                                  │
+│ --help                             Show this message and exit.                       │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull snapshot
+
+```text
+ Usage: hull snapshot [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --out          <path>  Snapshot file [default: snapshot.json]                        │
+│ --state        <str>   State backend: a SQLite file path or                          │
+│                        sqlite:///absolute/path.db                                    │
+│                        [env var: MULTIHULL_STATE_BACKEND]                            │
+│                        [default: .multihull/state.db]                                │
+│ --help                 Show this message and exit.                                   │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### hull doctor
+
+```text
+ Usage: hull doctor [OPTIONS] [path]
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮
+│   path      <path>  Path to multihull.yaml [default: multihull.yaml]                 │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+```

@@ -1,0 +1,34 @@
+---
+title: The spec
+description: multihull.yaml is the only description of a deployment.
+slug: 0.1.0/docs/concepts/spec
+---
+
+One `multihull.yaml` per service. A pydantic v2 model validates it; `hull schema` exports JSON Schema for editor completion.
+
+## Sections
+
+| Section | Purpose |
+|---|---|
+| `container` | Image or `build`, command, port, health probe, env, secret names |
+| `resources` | GPU classes (any-of, in preference order), GPU count, memory |
+| `scaling` | Concurrency per replica, min and max replicas |
+| `reliability` | Redundancy floor: `minWarmProviders`, `overprovision`, `fallbackScaleToZero`, `spot` |
+| `targets` | One entry per provider deployment with priority and provider-specific block |
+| `route` | Hostname, protocol, failover policy, auth, optional sticky routing |
+
+## GPU classes
+
+A normalised enum: `L4, A10G, A100-40, A100-80, H100, H200, B200`. Each translator maps classes to provider SKUs and reports which it can supply through `gpu_inventory`, which feeds `hull doctor`.
+
+## Credentials
+
+Never in the file. Each provider block resolves credentials from its native location by default and accepts `credentials: env:NAME` or `credentials: file:PATH` as overrides. Service secrets are listed by name only and mirrored into each provider's native secret store.
+
+## Route API keys
+
+`route.auth.apiKeys.from` names where keys live: `env:NAME` holds a comma-separated list, `file:PATH` one key per line (`#` starts a comment line; a relative path resolves against the working directory). Each key is `hull_<id>_<secret>`: the id is ASCII letters and digits, the secret printable ASCII without spaces. `hull` rejects any other shape, and a source that yields no keys, before it deploys or publishes a snapshot, and only `blake3("<id>_<secret>")` reaches the router. See [Router overview](/0.1.0/docs/router/overview/#auth).
+
+## Full example
+
+See `examples/llama-8b/multihull.yaml` in the repository or the [architecture plan](/0.1.0/docs/design/architecture/#deployment-description-layer-multihullyaml).

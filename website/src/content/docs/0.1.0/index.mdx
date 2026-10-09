@@ -1,0 +1,96 @@
+---
+title: Multihull
+description: Deploy hot GPU containers to many providers. One URL. Automatic failover.
+template: splash
+hero:
+  tagline: Deploy hot GPU containers to many providers. One URL. Automatic failover.
+  actions:
+    - text: Quickstart
+      link: /0.1.0/docs/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: Read the design
+      link: /0.1.0/docs/design/architecture/
+      variant: secondary
+slug: 0.1.0
+---
+
+import Horizon from '../../../components/Horizon.astro';
+import StatusPill from '../../../components/StatusPill.astro';
+import SpecToProviders from '../../../components/SpecToProviders.astro';
+
+<section class="mh-section mh-value-props not-content">
+  <div>
+    <h3>One spec</h3>
+    <p>Image, GPU class, scaling and targets in one <code>multihull.yaml</code>. Each provider gets its native payload.</p>
+  </div>
+
+  <div>
+    <h3>Always warm</h3>
+    <p>Two providers stay hot by default. Fallbacks never scale to zero. Health beats price.</p>
+  </div>
+
+  <div>
+    <h3>Per-request failover</h3>
+    <p>A stateless Rust router retries across providers before the first byte. Callers see one URL.</p>
+  </div>
+</section>
+
+<Horizon />
+
+<section class="mh-section mh-spec">
+  <div class="mh-split-text">
+    ## A minimal spec
+
+    <p class="mh-lead">Two targets, one hostname. The control plane turns this into a Kubernetes Deployment and a Modal app. In 0.1.0 these two providers deploy and fail over; RunPod, Baseten and Replicate render plans only.</p>
+  </div>
+
+  <div class="mh-split-visual">
+    ```yaml title="multihull.yaml"
+    apiVersion: multihull/v1
+    name: llama-8b
+
+    container:
+      image: ghcr.io/acme/vllm-llama:1.4.0
+      port: 8000
+      health: {path: /health}
+
+    resources:
+      gpu: [L4, A10G]
+
+    targets:
+      - provider: gke-prod
+        type: kubernetes
+        priority: 1
+      - provider: modal-main
+        type: modal
+        priority: 2
+
+    route:
+      hostname: llama.api.acme.com
+      protocol: openai
+    ```
+  </div>
+
+  <SpecToProviders />
+</section>
+
+<section class="mh-section mh-split">
+  <div class="mh-split-text">
+    ## What `hull status` shows
+
+    <p class="mh-lead">The router owns liveness. The CLI prints what it sees. Three targets shown for the three states; 0.1.0 deploys Kubernetes and Modal.</p>
+  </div>
+
+  <div class="mh-split-visual mh-status">
+    | Target | State | Replicas | GPU |
+    |---|---|---|---|
+    | gke-prod | <StatusPill state="healthy" /> | 2/2 | L4 |
+    | modal-main | <StatusPill state="degraded" /> | 1/1 | A10G |
+    | runpod-eu | <StatusPill state="failover" label="Serving failover" /> | 1/1 | L4 |
+  </div>
+</section>
+
+<div class="mh-section mh-closing">
+  [Start with the Quickstart](/0.1.0/docs/quickstart/), read how [targets and failover](/0.1.0/docs/concepts/targets-and-failover/) work, or see [what 0.1.0 proves](/0.1.0/docs/reference/release-notes/#what-is-proven-and-what-is-not).
+</div>
