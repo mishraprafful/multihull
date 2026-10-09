@@ -405,6 +405,15 @@ impl Runtime {
         .increment(1);
     }
 
+    pub fn count_response(&self, route_id: &str, status: u16) {
+        metrics::counter!(
+            crate::obs::metrics::RESPONSES_TOTAL,
+            crate::obs::metrics::labels::ROUTE => route_id.to_string(),
+            crate::obs::metrics::labels::STATUS => status.to_string()
+        )
+        .increment(1);
+    }
+
     pub fn record_probe(&self, endpoint: &Endpoint, outcome: ProbeOutcome, status: Option<u16>) {
         let runtime = self.endpoint(endpoint);
         let now = self.now();
