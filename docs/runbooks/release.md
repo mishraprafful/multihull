@@ -40,7 +40,7 @@ gh release view v0.1.0
 ```
 
 - The GitHub release lists `multihull-linux-amd64`, `multihull-linux-arm64`, `multihull-darwin-arm64` and the wheel and sdist.
-- GHCR packages `multihull-router`, `multihull-controller`, `multihull-mock-server` and `charts/multihull` carry the version tag, are linked to the repository and stay private until launch.
+- GHCR packages `multihull-router`, `multihull-controller`, `multihull-mock-server` and `charts/multihull` carry the version tag, are linked to the repository and stay private until the owner switches them to public.
 - `helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` prints the chart's values.
 
 ## After
@@ -52,5 +52,15 @@ gh release view v0.1.0
 ## When a publish job fails
 
 Fix forward. PyPI and crates.io never reuse a version, so a failed `v0.1.0` becomes `v0.1.1`: bump the three version files, land the fix, tag again. A failed `publish-chart` alone can be re-run from the Actions UI once the images exist.
+
+### If `publish-pypi` fails with `invalid-pending-publisher`
+
+Seen on 0.1.0 (run 37895991523): PyPI answered `valid token, but project already exists` although the token claims matched the project publisher. The build artifacts and the other publish jobs stay valid, so rerun only the failed job first; the 0.1.0 rerun passed about 25 minutes later and the cause was not identified.
+
+```sh
+gh run rerun <run id> --failed
+```
+
+If it fails again, check two PyPI pages as the owner: the project's publishing settings (`https://pypi.org/manage/project/multihull/settings/publishing/`) and the account's pending publishers (`https://pypi.org/manage/account/publishing/`). PyPI checks pending publishers before project publishers, so a pending entry for `multihull` blocks uploads to the existing project; remove it and keep only the project publisher.
 
 Never delete or move a published tag.
