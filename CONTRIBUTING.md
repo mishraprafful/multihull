@@ -4,6 +4,8 @@ Thanks for helping. Multihull deploys always-warm GPU inference containers to ma
 
 One principle decides what gets merged: **reliability over cost**. Defaults keep at least two providers warm, never scale fallbacks to zero and prefer on-demand over spot. Cost features are welcome as opt-in and may never lower the configured redundancy floor. In the router, health beats price.
 
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 Coding agents: read [AGENTS.md](AGENTS.md) instead; it covers the same rules in agent form.
 
 ## Ways to contribute
