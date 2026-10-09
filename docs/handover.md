@@ -131,11 +131,6 @@ Line numbers refer to `main` at PR 29 (`08a3b2f`), paths to the module layout af
 
 ## Session log
 
-### 2026-10-09 (make demo, issue 41)
-- Branch `feat/make-demo`: `python/multihull/demo.py`, `python/multihull/localrun.py` (run ids, host port blocks, `Process`, `wait_until`, router config and spec rewriting, now imported by the e2e harness), `examples/demo/multihull.yaml` and README, `make demo`, CI job `demo` (60 s scripted run, asserts zero client errors, at least one failover and no leftovers), quickstart link. Python tests 328 passed, 1 skipped.
-- Local scripted run on macOS with Docker Desktop: first traffic 6.7 s after start (image and router reused), 182 requests, 0 client errors, 97 served by `secondary` after `docker stop` of the primary; the primary went `ready/half_open` about 15 s after `docker start` and `closed` about 5 s later, traffic then returned to it. Without an `Idempotency-Key` the first run saw two 502s at the stop (the router never retries a keyless POST), so the load sends one per request.
-- `hull top` (issue 40) had not landed; the demo falls back to `/debug/endpoints` summaries when `multihull.cli.app` has no `top` command and needs no change once it does.
-
 ### 2026-10-09 (secret scanning)
 - Branch `ci/gitleaks`: `.gitleaks.toml` extends the default ruleset with two allowlists, one on the exact path `proto/testdata/api-key-hash.json` for the `generic-api-key` rule only, one on lines holding a Postgres URL with the fake host `db.internal`. `secrets.yml` runs `gitleaks/gitleaks-action@v3.0.0` (Node 24, the v2 line needs Node 20) with `GITLEAKS_VERSION` 8.30.1, `fetch-depth: 0` so a PR's commit range resolves, PR comments off, `contents: read` and `pull-requests: read`. A separate workflow because `ci.yml` is path-filtered and a secret scan must run on every change.
 - Verified with gitleaks 8.30.1 (release tarball, checksum checked): full history without the config reports 2 findings, both the API key fixture across two commits; with the config 0; a throwaway commit with two fake GitHub tokens, one in a new file and one inside the fixture file, reports 2 findings, so the path allowlist does not hide other rules. The throwaway branch was deleted, never pushed. actionlint clean.
