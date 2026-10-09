@@ -1,0 +1,6 @@
+# 2026-10-09 CodeQL alerts (PR 132)
+
+- Branch `fix/codeql-alerts`: website `inline()` picks a backtick fence longer than any run in the value instead of backslash-escaping (alert 1); the mock server answers invalid JSON bodies with `body is not valid JSON` and logs the decoder error (alert 3); `live/preflight.py` builds the `gh secret set` commands from `result.shapes` for both the summary and the annotation, with a test that `main()` output and the step summary never carry the values (alert 5); three tests compare URLs and the default image exactly (alerts 6, 7, 8).
+- CodeQL's path for alert 5 started at the env variable name constants in `providers/modal.py`, not at a value; the table never held one. A helper named `secret_commands` became a new source by name alone, so it is `store_commands`.
+- Alerts 2 and 4 are false positives for the owner to dismiss: `cell()` escapes `|` for GFM table cells, where backslashes are literal inside code spans (escaping them would render the `^https?://\S+$` pattern as `\\S`); the replicate golden stores the spec's `secrets` list of env variable names, never values.
+- Test counts: Python 308 passed, 1 skipped; mock server 40; live unit tests 30; e2e 36 rows.

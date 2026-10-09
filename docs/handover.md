@@ -33,6 +33,7 @@ Rules for entries
 - Artifact Hub (issue 61, branch `feat/artifact-hub-listing`): `Chart.yaml` carries `artifacthub.io/license`, `links`, `images` and `changes`; `charts/package.sh` rewrites the image tags in `artifacthub.io/images` to the release version and checks them in the packaged chart. `charts/artifacthub-repo.yml` keeps `repositoryID: ARTIFACTHUB_REPOSITORY_ID` as a placeholder and `owners` with the GitHub handle only; `charts/artifacthub-metadata.sh <uuid> <dir>` renders and shape-checks it with `yq` (the CI chart job runs it with a zero UUID). `publish-chart` pushes the rendered file with `oras` to `ghcr.io/mishraprafful/charts/multihull:artifacthub.io` only when the repository variable `ARTIFACTHUB_REPOSITORY_ID` is set, else logs a notice. Nothing is registered on Artifact Hub yet.
 - Logo explorations (PR 28) closed unmerged; the original three-hull mark stays.
 - GitHub repo `mishraprafful/multihull` is public since 2026-10-08 (made public to restore GitHub Actions after the account's spending limit stopped jobs). GHCR packages and the chart stay private until the owner switches them; Install from OCI still documents the `read:packages` token. `multihull.dev` is not owned; all URLs use `multihull.pages.dev`.
+- PR 132 (branch `fix/codeql-alerts`) clears CodeQL alerts 1, 3, 5, 6, 7 and 8. Alerts 2 (`cell()` in `website/scripts/generate-reference.mjs`) and 4 (`assert_golden` writing the replicate payload's `secrets` name list) are false positives awaiting dismissal by the owner.
 
 ## Decisions log
 
@@ -92,9 +93,10 @@ Rules for entries
 2. Owner, Artifact Hub listing (issue 61), in order: make the four GHCR packages public; sign in to https://artifacthub.io and add a Helm repository with URL `oci://ghcr.io/mishraprafful/charts/multihull`; copy the ID from the repository card into the repository variable `ARTIFACTHUB_REPOSITORY_ID`; tag the next release, whose `publish-chart` job pushes `artifacthub-repo.yml` to the `artifacthub.io` tag and earns the verified publisher flag on the following index. Add an `email` to the owner entry in `charts/artifacthub-repo.yml` only if an ownership claim is ever needed (it must match the Artifact Hub sign-in email).
 3. Plan 0.2.0: open the milestone, start a new `## [Unreleased]` section in `CHANGELOG.md` and `docs/releases/0.2.0.md`. Candidates: `hull --version` (issue 124), RunPod, Baseten and Replicate `apply` implementations (currently render-only) with the translator conformance suite from the plan, a Kubernetes GPU run on a real cluster (kind has no GPUs).
 4. If `publish-pypi` fails again with `invalid-pending-publisher` on 0.1.1, find the cause before rerunning: compare the project's publishing settings with the account's pending publishers on PyPI (`docs/runbooks/release.md`).
-5. Work through the TODO list below.
-6. Owner, optional: `modal workspace settings set image-builder-version 2025.06` so other Modal projects in the workspace get the new builder.
-7. Chart: optional controller RBAC, and a kubeconfig mount for targets in other clusters.
+5. Owner: dismiss CodeQL alerts 2 and 4 as false positives once PR 132 is merged (reasons in the 2026-10-09 CodeQL log entry).
+6. Work through the TODO list below.
+7. Owner, optional: `modal workspace settings set image-builder-version 2025.06` so other Modal projects in the workspace get the new builder.
+8. Chart: optional controller RBAC, and a kubeconfig mount for targets in other clusters.
 
 ## TODO from the PR 29 review
 

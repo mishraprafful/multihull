@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import random
 import socket
@@ -24,6 +25,8 @@ TRANSPORT_KEY = "mock.transport"
 DROPPED_KEY = "mock.dropped"
 INSTANCE_HEADER = "X-Mock-Instance"
 IDEMPOTENCY_HEADER = "Idempotency-Key"
+INVALID_JSON_DETAIL = "body is not valid JSON"
+logger = logging.getLogger(__name__)
 
 
 class ConnectionDropped(Exception):
@@ -59,6 +62,13 @@ def internal_error_response() -> JSONResponse:
 
 def invalid_request_response(detail: Any) -> JSONResponse:
     return JSONResponse({"error": {"type": "invalid_request", "detail": detail}}, status_code=400)
+
+
+def invalid_json_response(request: Request, exc: json.JSONDecodeError) -> JSONResponse:
+    logger.warning(
+        "rejected %s %s: invalid JSON body", request.method, request.url.path, exc_info=exc
+    )
+    return invalid_request_response(INVALID_JSON_DETAIL)
 
 
 def tokens_for(text: str, count: int) -> list[str]:
@@ -217,7 +227,7 @@ def build_api(state: MockState) -> FastAPI:
         try:
             payload = await request.json()
         except json.JSONDecodeError as exc:
-            return invalid_request_response(str(exc))
+            return invalid_json_response(request, exc)
         if not isinstance(payload, dict):
             return invalid_request_response("body must be a JSON object")
         headers = echo_headers(request)
@@ -267,7 +277,7 @@ def build_api(state: MockState) -> FastAPI:
         try:
             updates = await request.json()
         except json.JSONDecodeError as exc:
-            return invalid_request_response(str(exc))
+            return invalid_json_response(request, exc)
         if not isinstance(updates, dict):
             return invalid_request_response("body must be a JSON object")
         try:

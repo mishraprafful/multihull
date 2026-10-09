@@ -66,7 +66,7 @@ def test_endpoints_from_refs() -> None:
     runpod = RunpodProvider().endpoint(Ref("r", "runpod", "svc", {"endpoint": "abc"}))
     assert runpod.url == "https://api.runpod.ai/v2/abc/"
     baseten = BasetenProvider().endpoint(Ref("b", "baseten", "svc", {"model": "m1"}))
-    assert baseten.url.startswith("https://model-m1.api.baseten.co")
+    assert baseten.url == "https://model-m1.api.baseten.co/production/predict"
     replicate = ReplicateProvider().endpoint(Ref("x", "replicate", "svc", {"owner": "acme"}))
     assert replicate.url.endswith("/deployments/acme/multihull-svc/predictions")
 

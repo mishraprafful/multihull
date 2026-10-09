@@ -99,6 +99,11 @@ async def test_control_rejects_invalid_value(client: httpx.AsyncClient) -> None:
     assert response.status_code == 400
     response = await client.post("/__control", json=[1, 2])
     assert response.status_code == 400
+    response = await client.post(
+        "/__control", content=b"{", headers={"content-type": "application/json"}
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["detail"] == "body is not valid JSON"
 
 
 async def test_stats_count_requests_statuses_and_streams(client: httpx.AsyncClient) -> None:

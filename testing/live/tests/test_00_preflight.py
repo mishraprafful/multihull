@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from live.preflight import annotation, render, run
+from pathlib import Path
+
+import pytest
+
+from live import preflight
+from live.preflight import STATUS_URL, annotation, render, run
 from multihull.providers.modal import CredentialCheck, CredentialStatus
 
 FAKE_ID = "ak-fakeFAKEfake0123456789"
@@ -83,5 +88,27 @@ def test_unreachable_does_not_ask_for_a_new_token() -> None:
     unreachable = CredentialCheck(CredentialStatus.UNREACHABLE, "no answer from Modal within 10 s")
     result = run(env(), lambda: unreachable)
     report = render(result)
-    assert "**Credentials unreachable.**" in report and "status.modal.com" in report
+    assert "**Credentials unreachable.**" in report and STATUS_URL in report
     assert "### Fix" not in report
+
+
+def test_printed_output_never_carries_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    summary = tmp_path / "summary.md"
+    output = tmp_path / "output.txt"
+    for name, value in env(token_id=FAKE_SECRET + " ", secret=FAKE_ID + "\n").items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/multihull")
+    monkeypatch.setattr(preflight, "run", lambda env: run(env, lambda: REJECTED))
+
+    assert preflight.main() == 1
+
+    printed = capsys.readouterr().out
+    written = summary.read_text() + output.read_text()
+    assert "::error::Modal credentials rejected:" in printed
+    assert "gh secret set MODAL_TOKEN_ID --repo acme/multihull" in written
+    assert "credentials=rejected" in written
+    assert_no_values(printed + written)
