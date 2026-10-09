@@ -1,0 +1,31 @@
+---
+title: RunPod
+description: RunPod Serverless load-balancing endpoints via SDK and REST.
+slug: 0.1.0/docs/providers/runpod
+---
+
+Uses the `runpod` SDK where it covers the call and REST otherwise. Creates a template (image, env, ports) and then a load-balancing endpoint.
+
+```yaml
+- provider: runpod-eu
+  type: runpod
+  priority: 3
+  runpod: {dataCenters: [EU-RO-1, EU-SE-1]}
+```
+
+Credentials: `RUNPOD_API_KEY`.
+
+## Translation
+
+| Spec field | RunPod |
+|---|---|
+| `container.image` | template `imageName` |
+| `container.command`, `port` | template `dockerStartCmd`, LB endpoint port |
+| `resources.gpu` | `gpuIds` list |
+| `scaling.replicas` | `workersMin`, `workersMax` |
+| `scaling.concurrency` | LB endpoint, `scalerType: REQUEST_COUNT` |
+| `container.health` | `/ping` semantics on `PORT_HEALTH`: 204 warming, 200 ready |
+| `container.secrets` | template `env` |
+| endpoint | `https://api.runpod.ai/v2/<id>/` |
+
+The router treats a 204 probe response as warming, not down. Ref stored in state: template id plus endpoint id. Fallbacks stay warm because `fallbackScaleToZero` defaults to `false`, so `workersMin` is never 0 unless you opt in.

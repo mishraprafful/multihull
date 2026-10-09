@@ -15,7 +15,8 @@ A `v<semver>` tag on `main` drives everything. `release.yml` builds the Python w
 
 1. Merge every PR in the milestone. Confirm `main` is green: CI, `kind.yml` (both jobs) and the latest `live-smoke.yml` run.
 2. Date the changelog: rename `## [Unreleased]` to `## [<version>] - <YYYY-MM-DD>` and move the compare link. Merge that PR.
-3. Tag from a clean `main`:
+3. Snapshot the docs for the version dropdown, in the same PR or the next one, so the tag carries it: add `{ slug: '<version>' }` at the front of `versions` in `website/astro.config.mjs`, run `npm run build` in `website/`, commit `website/src/content/docs/<version>/` and `website/src/content/versions/<version>.json` (see `website/README.md`, "Docs versions"). Merging it deploys the new version to the site.
+4. Tag from a clean `main`:
 
    ```sh
    git fetch origin && git checkout main && git pull --ff-only

@@ -1,0 +1,53 @@
+---
+title: Kubernetes
+description: Any GPU cluster, built-in kinds only, via the Kubernetes API.
+slug: 0.1.0/docs/providers/kubernetes
+---
+
+Uses the `kubernetes` Python client with server-side apply (field manager `multihull`). Built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and `concurrency` is set) and Secret. No CRDs, no operator. It renders no Ingress and no Gateway API HTTPRoute today; both are planned, see [#116](https://github.com/mishraprafful/multihull/issues/116).
+
+```yaml
+- provider: gke-prod
+  type: kubernetes
+  priority: 1
+  replicas: {min: 2}
+  kubernetes: {context: gke_acme_europe-west4_prod, namespace: inference}
+```
+
+Credentials: the kubeconfig context named in the target. Without `context`, `hull` running in a pod with no kubeconfig uses the pod's service account, as the [in-cluster controller](/0.1.0/docs/router/controller-stream/#controller-in-the-cluster) does.
+
+## Reaching the Service
+
+| Option | Default | Effect |
+|---|---|---|
+| `serviceType` | `LoadBalancer` | `LoadBalancer`, `NodePort` or `ClusterIP` |
+| `nodePort` | unset | fixed node port, for `NodePort` or `LoadBalancer` |
+| `endpoint` | unset | URL the router uses, stored as the Service annotation `multihull.dev/endpoint` |
+
+Without `endpoint`, the URL is the address a `LoadBalancer` Service reports in `status.loadBalancer.ingress` (a Service status field, not an Ingress resource), then the first node's external or internal IP plus the node port, then the in-cluster DNS name. A kind cluster reached from the host uses `NodePort` with a kind `extraPortMappings` entry and an explicit `endpoint`:
+
+```yaml
+kubernetes:
+  context: kind-multihull-live
+  namespace: multihull-live
+  serviceType: NodePort
+  nodePort: 30080
+  endpoint: http://127.0.0.1:30080
+```
+
+An empty `resources.gpu` runs the pod on CPU: no `nvidia.com/gpu` limit, toleration or GPU node selector.
+
+## Translation
+
+| Spec field | Kubernetes |
+|---|---|
+| `container.image` | `Deployment.spec.template.spec.containers[0].image` |
+| `container.command`, `port` | container `command`, `containerPort` |
+| `resources.gpu` | `nodeSelector` + `nvidia.com/gpu` limit + tolerations |
+| `scaling.replicas` | Deployment `replicas` + HPA min/max (KEDA when concurrency set) |
+| `scaling.concurrency` | KEDA trigger target |
+| `container.health` | readiness and liveness probes |
+| `container.secrets` | `Secret` + `envFrom` |
+| endpoint | `kubernetes.endpoint`, LoadBalancer Service address, NodePort or cluster DNS |
+
+Ref stored in state: namespace plus resource names. Every resource carries the label `multihull.dev/service=<name>` for `rediscover`.

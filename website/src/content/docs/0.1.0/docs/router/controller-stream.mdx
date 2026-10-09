@@ -1,0 +1,149 @@
+---
+title: Controller stream
+description: Serve the hull controller's discovery stream over TLS with client
+  certificates and a bootstrap token.
+slug: 0.1.0/docs/router/controller-stream
+---
+
+`hull controller` reconciles the targets and streams endpoint snapshots to routers over gRPC; routers send `Degraded` signals back. Snapshots can carry provider credentials such as Modal proxy tokens, so the stream is encrypted and authenticated unless you opt out.
+
+## Controller
+
+```sh
+# MULTIHULL_DISCOVERY_TOKEN set from your secret manager
+hull controller multihull.yaml \
+  --grpc-listen 0.0.0.0:7700 \
+  --tls-cert /etc/multihull/discovery/controller.crt \
+  --tls-key /etc/multihull/discovery/controller.key \
+  --client-ca /etc/multihull/discovery/ca.crt
+```
+
+| Flag | Effect |
+|---|---|
+| `--tls-cert`, `--tls-key` | PEM certificate chain and key the stream serves |
+| `--client-ca` | Require router client certificates signed by this CA (mTLS) |
+| `--token-env` | Env var holding the bootstrap token, default `MULTIHULL_DISCOVERY_TOKEN` |
+| `--insecure` | Plaintext, local development only; logs a warning |
+
+* Without `--tls-cert` and `--tls-key`, and without `--insecure`, the controller refuses to start.
+* TLS needs client certificates, the token or both. Both is the recommended setup.
+* With the token set, every stream must send `authorization: Bearer <token>`. A missing or wrong token gets `UNAUTHENTICATED` and a log line naming the peer, never the token.
+* Certificates load at startup. Restart the controller to rotate them.
+
+## Router
+
+```toml title="router.toml"
+[snapshot]
+source = "grpcs://multihull-controller:7700"
+ca = "/etc/multihull/discovery/ca.crt"
+client_cert = "/etc/multihull/discovery/router.crt"
+client_key = "/etc/multihull/discovery/router.key"
+token_env = "MULTIHULL_DISCOVERY_TOKEN"
+```
+
+* `ca` replaces the public webpki roots for this source. Leave it out only when the controller's certificate comes from a public CA.
+* `client_cert` and `client_key` go together. The router certificate needs the `clientAuth` extended key usage; the controller certificate needs a SAN matching the host in `source`.
+* `token_env` names the variable; the router reads it at startup and fails to start if it is unset or empty.
+* An `https://` snapshot URL takes the same keys and sends the same bearer token.
+* A snapshot file needs none of them, but keep it at mode `0600` when it carries credentials.
+
+## Versions and empty routes
+
+A router nacks a streamed snapshot older than the one it holds (`stale: router holds version N`), so versions never go backwards:
+
+* `hull controller` stores the last version it published in the state backend and continues from it after a restart. It also starts above the version in its `--snapshot-out` file.
+* Every router `Hello` carries the version it holds. The controller never publishes below the highest one reported; a controller that lost its state republishes the same routes above it. A stream gets snapshots only after its `Hello`.
+* `hull deploy`, `hull destroy` and `hull snapshot` write the largest of the stored version plus one, the existing file's version plus one, and the Unix time in seconds, and store it, so the controller continues above them.
+
+Empty endpoint sets never stop serving:
+
+* The controller never publishes a route with no endpoints while the spec declares targets. It rediscovers missing targets by label first; if it still finds none, it keeps its last snapshot (after a restart, publishes nothing) and logs an error on every reconcile.
+* The router keeps the endpoints it holds for a route that arrives with none, applies the rest of the snapshot, logs a warning and nacks with the route's name. File and URL sources apply the same rule.
+* To stop serving a route on purpose, remove it from the snapshot. `hull destroy` does that once no target of the service is left.
+* File and URL sources have no stale check, so restoring an older file rolls the router back.
+
+## Helm chart
+
+The chart mounts cert-manager style Secrets (`tls.crt`, `tls.key`, `ca.crt`) and refuses to render a plaintext stream unless you opt in.
+
+```yaml title="values.yaml"
+controller:
+  enabled: true
+  tls:
+    secretName: multihull-controller-tls   # tls.crt, tls.key; SAN <release>-multihull-controller
+    clientCaSecret: multihull-discovery-ca # ca.crt; require router client certificates
+  token:
+    existingSecret: multihull-discovery-token
+    key: token
+router:
+  snapshot:
+    type: grpc
+    tls:
+      secretName: multihull-router-discovery # ca.crt, plus tls.crt and tls.key for mTLS
+      clientCertificate: true
+    token:
+      existingSecret: multihull-discovery-token
+      key: token
+```
+
+| Value | Effect |
+|---|---|
+| `controller.tls.secretName` | Required unless `controller.insecure`; passed as `--tls-cert` and `--tls-key` |
+| `controller.tls.clientCaSecret` | Passed as `--client-ca` (mTLS) |
+| `controller.token.existingSecret`, `.key` | Exposed as `MULTIHULL_DISCOVERY_TOKEN` |
+| `router.snapshot.tls.secretName` | Renders `grpcs://`, `ca` and, with `clientCertificate`, `client_cert` and `client_key` |
+| `router.snapshot.token.existingSecret`, `.key` | Exposed as `MULTIHULL_DISCOVERY_TOKEN` and rendered as `token_env` |
+| `controller.insecure`, `router.snapshot.insecure` | Plaintext opt-in for local clusters only |
+
+The render fails when the controller has no TLS and no opt-in, when TLS has neither a client CA nor a token, and when a grpc or http source would be plaintext without `router.snapshot.insecure`.
+
+## Controller in the cluster
+
+`controller.enabled=true` runs `ghcr.io/mishraprafful/multihull-controller:<appVersion>`, published with every release next to the router image. It runs `hull` as uid 10001 and ships the Kubernetes and Modal clients. The chart mounts the spec from `controller.specConfigMap` (key `multihull.yaml`) and sets `MULTIHULL_STATE_BACKEND` from `controller.stateBackend.existingSecret`.
+
+```sh
+kubectl create configmap multihull-spec --from-file=multihull.yaml
+kubectl create secret generic multihull-state \
+  --from-literal=url=sqlite:///var/lib/multihull/state/state.db
+```
+
+```yaml title="values.yaml"
+controller:
+  enabled: true
+  specConfigMap: multihull-spec
+  stateBackend:
+    existingSecret: multihull-state
+    key: url
+    volume:
+      persistentVolumeClaim:
+        claimName: multihull-state # mounted at /var/lib/multihull/state
+  envFrom:
+    - secretRef:
+        name: modal-credentials # MODAL_TOKEN_ID, MODAL_TOKEN_SECRET
+```
+
+| Value | Effect |
+|---|---|
+| `controller.image.repository`, `.tag` | Default `ghcr.io/mishraprafful/multihull-controller`, tag `appVersion` |
+| `controller.stateBackend.existingSecret`, `.key` | Exposed as `MULTIHULL_STATE_BACKEND` |
+| `controller.stateBackend.volume` | Any volume source, mounted at `/var/lib/multihull/state`; the pod sets `fsGroup: 10001` |
+| `controller.envFrom` | Container `envFrom`, for provider credentials |
+
+* Every `hull` command that opens state takes `--state`, defaulting to `MULTIHULL_STATE_BACKEND`, then `.multihull/state.db`. SQLite is the only backend today: a path, `sqlite:///absolute/path.db` or `sqlite:relative/path.db`. `s3://`, `gs://` and `postgres://` fail as not implemented yet; other schemes fail as unsupported. Neither error repeats the URL.
+* Without `controller.stateBackend.volume` the database lives in the container, and a restart loses the refs, raised floors and snapshot version. The controller then rediscovers refs from labels before it publishes and continues above the versions routers report, so routers keep serving meanwhile.
+* Kubernetes targets without `context` use the pod's service account when no kubeconfig exists. The chart creates no RBAC: bind its ServiceAccount to a role that can `get`, `list` and `patch` Deployments, `get` and `list` Services and Nodes, and `get` and `patch` HorizontalPodAutoscalers. The chart cannot mount a kubeconfig for targets in other clusters yet.
+* On SIGTERM the controller ends every router stream, stops and exits 0; routers reconnect with backoff and keep their last snapshot meanwhile.
+
+## Local development
+
+```sh
+hull controller multihull.yaml --grpc-listen 127.0.0.1:7700 --insecure
+```
+
+```toml title="router.toml"
+[snapshot]
+source = "grpc://127.0.0.1:7700"
+insecure = true
+```
+
+Plaintext `grpc://` and `http://` sources start only with `insecure = true`. It never turns off certificate checks on a TLS source.

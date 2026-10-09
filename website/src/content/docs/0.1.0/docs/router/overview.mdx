@@ -1,0 +1,81 @@
+---
+title: Router overview
+description: A stateless Rust data plane that consumes endpoint snapshots.
+slug: 0.1.0/docs/router/overview
+---
+
+The router is stateless. It reads a static `router.toml` and a dynamic endpoint snapshot, then routes each request by priority, weight or latency with per-request failover.
+
+## Request path
+
+1. Route match on host, path tree and headers. With `protocol: openai`, the body is buffered (up to 1 MiB) to read the `model` key.
+2. Score endpoints with one function: `priority_spillover` (default), `weighted`, `ewma_latency`, `locality`, optional sticky affinity.
+3. Attempt engine: phase timeouts (connect 2 s, first byte 30 s, idle 60 s, total 10 m), retry before the first committed byte, retry budget, hedging in v0.2.
+4. Auth: client `Authorization` stripped, provider header injected from the snapshot.
+
+## Snapshot sources
+
+| Source | When |
+|---|---|
+| `grpcs://` stream from `hull controller` | Teams; carries `Degraded` signals back |
+| `snapshot.json` written by `hull deploy` | Solo dev, CI |
+| HTTPS or object-store URL polled | Multi-region routers without controller reachability |
+
+The gRPC stream and HTTPS URLs take a CA bundle, a client certificate and a bearer token under `[snapshot]`; plaintext `grpc://` and `http://` need `insecure = true`. See [Controller stream](/0.1.0/docs/router/controller-stream/).
+
+The router nacks a streamed snapshot older than the one it holds. From any source, a route that arrives with no endpoints keeps the endpoints the router holds; removing the route from the snapshot stops serving it. See [Versions and empty routes](/0.1.0/docs/router/controller-stream/#versions-and-empty-routes).
+
+The last snapshot is persisted to disk and served indefinitely on control-plane loss, with an alert after 1 h.
+
+## Configuration
+
+```toml title="router.toml"
+listen = "0.0.0.0:8080"
+admin_listen = "0.0.0.0:9090"
+
+[snapshot]
+source = "file:///var/lib/multihull/snapshot.json"
+
+[probe]
+interval = 5
+timeout = 2
+```
+
+`[timeouts]`, `[circuit]`, `[admission]`, `[pressure]`, `[probe]` and `[retry]` tune the data plane; `router/router.example.toml` lists every key with its default. Everything else is dynamic. SIGHUP reloads TLS; SIGTERM drains for up to 10 m.
+
+## Observability
+
+OTel spans `router.request` and `upstream.attempt{provider, endpoint, n, outcome}`. Prometheus: `router_requests_total`, `router_failovers_total{from,to,reason}`, `router_circuit_state`, `router_probe_total{endpoint,outcome}`, `router_upstream_ttft_seconds`, `router_queue_wait_seconds`, `router_concurrency_limit`, `router_retry_budget_remaining`, `router_output_tokens_total`. JSON access log with `attempts[]`. `/debug/endpoints`, `/debug/sessions` and `/debug/config` on the admin listener.
+
+## Auth
+
+Set `route.auth.apiKeys.from` in the spec to `env:NAME` (comma-separated keys) or `file:PATH` (one key per line, lines starting with `#` are comments, a relative path resolves against the working directory of `hull`). Clients send `Authorization: Bearer hull_<id>_<secret>`.
+
+* `<id>` is ASCII letters and digits. `<secret>` is printable ASCII without spaces and may contain underscores. Generate one with `echo "hull_$(openssl rand -hex 4)_$(openssl rand -hex 32)"`.
+* Hashing contract: lowercase hex `blake3("<id>_<secret>")`, the key without its `hull_` prefix. The control plane publishes only these hashes in the snapshot's `auth.api_key_hashes`; the router hashes the presented key the same way and compares it with every hash in constant time. `proto/testdata/api-key-hash.json` is a test vector both sides assert.
+* `hull deploy`, `destroy`, `snapshot` and `controller` reject a malformed key before acting. The error names the source and entry, never the key.
+* A missing, malformed or unknown key gets `401` with error type `unauthorized`.
+* A route with `auth.apiKeys` never runs open. If its source is unset, missing, empty or only comments, `hull deploy`, `destroy`, `snapshot` and `controller` stop with an error naming the route and the source, and a running controller keeps its last snapshot and logs the error.
+* The snapshot marks such a route `required`. On a `required` route with no key hashes the router answers every request with `401` and logs a warning naming the route. Snapshots without the flag, from older control planes, keep an empty hash list open.
+* A route without `auth.apiKeys` accepts every request.
+* Per-key rate limits and provider or service allowlists are planned, not enforced yet.
+
+## Deploying
+
+The Helm chart in `charts/multihull` runs the router as a Deployment with a Service, ConfigMap for `router.toml`, and an optional PodDisruptionBudget and controller. A grpc snapshot source needs TLS values or an explicit plaintext opt-in; see [Controller stream](/0.1.0/docs/router/controller-stream/#helm-chart).
+
+### Install from OCI
+
+Each `v*` release pushes the chart to `oci://ghcr.io/mishraprafful/charts/multihull`. The chart `version` and `appVersion` are the release version without the `v`. The router image defaults to `ghcr.io/mishraprafful/multihull-router:<appVersion>` and the controller image to `ghcr.io/mishraprafful/multihull-controller:<appVersion>`; the same release publishes both. See [Controller in the cluster](/0.1.0/docs/router/controller-stream/#controller-in-the-cluster) for the controller's values.
+
+The chart and images stay private until the public launch. Keep a GitHub token with `read:packages` in an environment variable such as `GHCR_TOKEN`, log in, give the cluster a pull secret for the images, then install:
+
+```sh
+printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username <github-user> --password-stdin
+kubectl create secret docker-registry ghcr --docker-server=ghcr.io \
+  --docker-username=<github-user> --docker-password="$GHCR_TOKEN"
+helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0 \
+  --set 'imagePullSecrets[0].name=ghcr'
+```
+
+`helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` lists every value.
