@@ -2,9 +2,9 @@
 
 Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-10-09
 
-First release. The `v0.1.0` tag dates this section. Human-facing notes: [docs/releases/0.1.0.md](docs/releases/0.1.0.md).
+First release. Human-facing notes: [docs/releases/0.1.0.md](docs/releases/0.1.0.md).
 
 ### Added
 
@@ -63,4 +63,4 @@ First release. The `v0.1.0` tag dates this section. Human-facing notes: [docs/re
 - No GPU run yet: `live-gpu.yml` exists but has not been executed (#49). `hull failover test`, hedging, cost-aware placement and per-key rate limits are planned, not built.
 - Images and the chart are private until the public launch.
 
-[Unreleased]: https://github.com/mishraprafful/multihull/commits/main
+[0.1.0]: https://github.com/mishraprafful/multihull/releases/tag/v0.1.0
