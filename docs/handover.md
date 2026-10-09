@@ -61,7 +61,7 @@ State, decisions, next steps, verification commands and lessons for sessions wor
 
 ## Next steps
 
-0.2.0, the stable launch (milestone "0.2.0- Stable launch"): launch checklist (issue 141), fresh-user quickstart walkthrough (issue 140), Docker Hub pull limits in CI (issue 139), fail over on provider edge 404s (issue 122). Create `docs/releases/0.2.0.md` and point `website/scripts/sync-design-docs.mjs` at it before tagging.
+0.2.0, the stable launch (milestone "0.2.0- Stable launch"): launch checklist (issue 141), fresh-user quickstart walkthrough (issue 140, docs fixed; left open by the product defects it found), arm64 images (issue 147), missing-namespace error in `hull deploy` (issue 148), Docker Hub pull limits in CI (issue 139), fail over on provider edge 404s (issue 122). Smaller: doctor hint markup (issue 149), snapshot file mode (issue 150). Create `docs/releases/0.2.0.md` and point `website/scripts/sync-design-docs.mjs` at it before tagging.
 
 0.3.0, more providers: RunPod, Baseten and Replicate `apply` (issues 63, 64, 65) with the translator conformance suite (issue 66), credential overrides (issue 67), Kubernetes GPU run on a real cluster (issue 68).
 
@@ -99,6 +99,7 @@ If `cargo` is missing, add `$HOME/.cargo/bin` or `$(brew --prefix rustup)/bin` t
 - A stopped app answers `404 invalid function call` for about 14 s until three probes fail, and 4xx is not retried, so those requests reach the client (PR 120, issue 122).
 
 **Kubernetes and kind**
+- The GHCR images are `linux/amd64` only; on Apple Silicon build `testing/mock-server` locally and `kind load docker-image` it, with `docker: {pull: false}` for docker targets (issue 147). `hull deploy` does not create the namespace (issue 148).
 - Give kind its own `--kubeconfig` so a local run never changes the current context (PR 111).
 - `kubectl create secret --from-literal` writes the value into `kubectl.log` through `run_logged`; use `--from-file` (PR 101).
 - `hull` as PID 1 ignored SIGTERM, so every rollout waited 30 s; the in-cluster restart check (under 30 s) catches it (PR 101).
