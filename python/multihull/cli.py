@@ -18,6 +18,7 @@ from multihull import deploy as deploymod
 from multihull import discovery, engine
 from multihull import logs as logsmod
 from multihull import spec as specmod
+from multihull import top as topmod
 from multihull.apikeys import ApiKeyError
 from multihull.controller import (
     DEFAULT_DEGRADED_COOLDOWN,
@@ -543,6 +544,18 @@ def snapshot(
     discovery.write_snapshot(document, out)
     endpoints = sum(len(route["endpoints"]) for route in document["routes"])
     console.print(f"wrote {out}: {len(document['routes'])} routes, {endpoints} endpoints")
+
+
+@app.command(help="Live view of router endpoints, circuits and traffic.")
+def top(
+    admin: Annotated[
+        str, typer.Option("--admin", help="Router admin listener URL (/metrics, /debug/endpoints)")
+    ] = topmod.DEFAULT_ADMIN,
+    interval: Annotated[
+        float, typer.Option("--interval", min=0.1, help="Seconds between polls")
+    ] = topmod.DEFAULT_INTERVAL,
+) -> None:
+    topmod.run_top(admin, interval, console)
 
 
 @app.command()

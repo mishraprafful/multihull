@@ -1,0 +1,69 @@
+# HELP router_requests_total Requests handled by the router
+# TYPE router_requests_total counter
+router_requests_total{route="e2e-three-top-capture",endpoint="e2e-three-top-capture/primary",outcome="success"} 144
+router_requests_total{route="e2e-three-top-capture",endpoint="e2e-three-top-capture/secondary",outcome="success"} 92
+router_requests_total{route="e2e-three-top-capture",endpoint="e2e-three-top-capture/primary",outcome="transient"} 6
+
+# HELP router_responses_total Responses returned to clients by route and HTTP status
+# TYPE router_responses_total counter
+router_responses_total{route="e2e-three-top-capture",status="200"} 236
+
+# HELP router_probe_total Active health probes by endpoint and outcome
+# TYPE router_probe_total counter
+router_probe_total{endpoint="e2e-three-top-capture/primary",outcome="failure"} 1
+router_probe_total{endpoint="e2e-three-top-capture/secondary",outcome="success"} 1
+router_probe_total{endpoint="e2e-three-top-capture/tertiary",outcome="success"} 1
+
+# HELP router_failovers_total Retries that moved a request to another provider
+# TYPE router_failovers_total counter
+router_failovers_total{from="primary",reason="transient"} 6
+
+# HELP router_circuit_state Circuit state per endpoint: 0 closed, 1 half-open, 2 open
+# TYPE router_circuit_state gauge
+router_circuit_state{endpoint="e2e-three-top-capture/primary",provider="primary"} 2
+router_circuit_state{endpoint="e2e-three-top-capture/tertiary",provider="tertiary"} 0
+router_circuit_state{endpoint="e2e-three-top-capture/secondary",provider="secondary"} 0
+
+# HELP router_sticky_sessions_active Pinned sticky sessions held in memory
+# TYPE router_sticky_sessions_active gauge
+router_sticky_sessions_active 0
+
+# HELP router_concurrency_limit Adaptive concurrency limit per endpoint
+# TYPE router_concurrency_limit gauge
+router_concurrency_limit{endpoint="e2e-three-top-capture/secondary"} 8
+router_concurrency_limit{endpoint="e2e-three-top-capture/primary"} 8
+router_concurrency_limit{endpoint="e2e-three-top-capture/tertiary"} 8
+
+# HELP router_queue_wait_seconds Time spent in the admission queue
+# TYPE router_queue_wait_seconds summary
+router_queue_wait_seconds{route="e2e-three-top-capture",quantile="0"} 0.000008084
+router_queue_wait_seconds{route="e2e-three-top-capture",quantile="0.5"} 0.00001370842374313095
+router_queue_wait_seconds{route="e2e-three-top-capture",quantile="0.9"} 0.000017458218577834775
+router_queue_wait_seconds{route="e2e-three-top-capture",quantile="0.95"} 0.000025249605142423508
+router_queue_wait_seconds{route="e2e-three-top-capture",quantile="0.99"} 0.000034876404744828456
+router_queue_wait_seconds{route="e2e-three-top-capture",quantile="0.999"} 0.000037293181896961025
+router_queue_wait_seconds{route="e2e-three-top-capture",quantile="1"} 0.000041084
+router_queue_wait_seconds_sum{route="e2e-three-top-capture"} 0.0034917129999999983
+router_queue_wait_seconds_count{route="e2e-three-top-capture"} 240
+
+# HELP router_upstream_ttft_seconds Upstream time to first byte
+# TYPE router_upstream_ttft_seconds summary
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/primary",provider="primary",quantile="0"} 0.0886605
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/primary",provider="primary",quantile="0.5"} 0.09393990469788276
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/primary",provider="primary",quantile="0.9"} 0.09709163916745366
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/primary",provider="primary",quantile="0.95"} 0.09810666118394903
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/primary",provider="primary",quantile="0.99"} 0.1000485197990863
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/primary",provider="primary",quantile="0.999"} 0.10087229050823551
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/primary",provider="primary",quantile="1"} 0.101553542
+router_upstream_ttft_seconds_sum{endpoint="e2e-three-top-capture/primary",provider="primary"} 13.522582873000003
+router_upstream_ttft_seconds_count{endpoint="e2e-three-top-capture/primary",provider="primary"} 144
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/secondary",provider="secondary",quantile="0"} 0.090710167
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/secondary",provider="secondary",quantile="0.5"} 0.09458087287390123
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/secondary",provider="secondary",quantile="0.9"} 0.09703340165675937
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/secondary",provider="secondary",quantile="0.95"} 0.09748078349521716
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/secondary",provider="secondary",quantile="0.99"} 0.09816554284358708
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/secondary",provider="secondary",quantile="0.999"} 0.09816554284358708
+router_upstream_ttft_seconds{endpoint="e2e-three-top-capture/secondary",provider="secondary",quantile="1"} 0.0982085
+router_upstream_ttft_seconds_sum{endpoint="e2e-three-top-capture/secondary",provider="secondary"} 8.598193884000004
+router_upstream_ttft_seconds_count{endpoint="e2e-three-top-capture/secondary",provider="secondary"} 92
+

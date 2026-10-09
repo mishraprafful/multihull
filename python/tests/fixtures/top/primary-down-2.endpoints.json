@@ -1,0 +1,83 @@
+{
+  "snapshot_version": 1791553503,
+  "endpoints": [
+    {
+      "route": "e2e-three-top-capture",
+      "id": "e2e-three-top-capture/primary",
+      "provider": "primary",
+      "url": "http://127.0.0.1:21181",
+      "region": "",
+      "priority": 1,
+      "weight": 1,
+      "health": "down",
+      "ready_replicas": 0,
+      "max_concurrency": 32,
+      "circuit": "open",
+      "provider_circuit_open": true,
+      "outstanding": 0,
+      "concurrency_limit": 8,
+      "ewma_ttft_seconds": 0.09423036755250462,
+      "health_path": "/health",
+      "probe": {
+        "state": "unknown",
+        "consecutive_failures": 1,
+        "consecutive_successes": 0,
+        "last_outcome": "failure",
+        "last_status": null,
+        "probes": 1
+      }
+    },
+    {
+      "route": "e2e-three-top-capture",
+      "id": "e2e-three-top-capture/secondary",
+      "provider": "secondary",
+      "url": "http://127.0.0.1:21182",
+      "region": "",
+      "priority": 2,
+      "weight": 1,
+      "health": "ready",
+      "ready_replicas": 1,
+      "max_concurrency": 32,
+      "circuit": "closed",
+      "provider_circuit_open": false,
+      "outstanding": 4,
+      "concurrency_limit": 8,
+      "ewma_ttft_seconds": 0.0965714047538399,
+      "health_path": "/health",
+      "probe": {
+        "state": "unknown",
+        "consecutive_failures": 0,
+        "consecutive_successes": 1,
+        "last_outcome": "success",
+        "last_status": 200,
+        "probes": 1
+      }
+    },
+    {
+      "route": "e2e-three-top-capture",
+      "id": "e2e-three-top-capture/tertiary",
+      "provider": "tertiary",
+      "url": "http://127.0.0.1:21183",
+      "region": "",
+      "priority": 3,
+      "weight": 1,
+      "health": "ready",
+      "ready_replicas": 1,
+      "max_concurrency": 32,
+      "circuit": "closed",
+      "provider_circuit_open": false,
+      "outstanding": 0,
+      "concurrency_limit": 8,
+      "ewma_ttft_seconds": null,
+      "health_path": "/health",
+      "probe": {
+        "state": "unknown",
+        "consecutive_failures": 0,
+        "consecutive_successes": 1,
+        "last_outcome": "success",
+        "last_status": 200,
+        "probes": 1
+      }
+    }
+  ]
+}
