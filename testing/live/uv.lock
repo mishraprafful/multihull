@@ -651,13 +651,14 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "kubernetes", specifier = ">=29" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=1.6" },
+    { name = "openai", marker = "extra == 'demo'", specifier = ">=1.50" },
     { name = "protobuf", specifier = ">=5.26" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "rich", specifier = ">=13" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["modal"]
+provides-extras = ["modal", "demo"]
 
 [package.metadata.requires-dev]
 dev = [
