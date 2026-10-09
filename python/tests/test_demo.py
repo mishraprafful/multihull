@@ -272,3 +272,26 @@ def test_watch_loop_runs_events_in_order_and_stops_at_the_deadline() -> None:
     assert ran == ["stop", "start"]
     assert 0.35 <= time.monotonic() - started < 1.0
     assert len(summaries) >= 3
+
+
+def test_watch_loop_reopens_top_around_each_event() -> None:
+    tops: list[subprocess.Popen[bytes]] = []
+
+    def open_top() -> subprocess.Popen[bytes]:
+        top = subprocess.Popen(["sleep", "30"])
+        tops.append(top)
+        return top
+
+    ran: list[str] = []
+    demomod.watch_loop(
+        [(0.05, "stop"), (0.15, "start")],
+        0.3,
+        0.1,
+        lambda command: ran.append(f"{command} after {sum(t.poll() is not None for t in tops)}"),
+        lambda: None,
+        open_top(),
+        reopen_top=open_top,
+    )
+    assert ran == ["stop after 1", "start after 2"]
+    assert len(tops) == 3
+    assert all(top.poll() is not None for top in tops)

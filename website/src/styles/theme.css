@@ -227,8 +227,39 @@ h1#_top:not([data-page-title]),
 
 .sl-markdown-content .mh-section + .mh-section,
 .sl-markdown-content .mh-horizon + .mh-section,
-.sl-markdown-content .mh-section + .mh-horizon {
+.sl-markdown-content .mh-section + .mh-horizon,
+.sl-markdown-content .mh-demo + .mh-section {
   margin-top: var(--mh-section-gap);
+}
+
+.sl-markdown-content .mh-demo {
+  max-width: 68rem;
+  margin: 0 auto;
+}
+
+.sl-markdown-content .mh-demo img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: var(--mh-border-strong) solid var(--mh-strong);
+  border-radius: var(--mh-frame-radius);
+  box-shadow: var(--mh-offset) var(--mh-offset) 0 var(--mh-shadow);
+}
+
+.sl-markdown-content .mh-demo figcaption {
+  margin: 0.75rem auto 0;
+  max-width: 60ch;
+  text-align: center;
+  font-size: var(--sl-text-sm);
+  line-height: 1.6;
+  color: var(--sl-color-gray-3);
+  text-wrap: pretty;
+}
+
+.sl-markdown-content .mh-demo figcaption code {
+  font-size: 0.9em;
+  color: var(--mh-ink);
 }
 
 [data-has-hero] .sl-markdown-content h2 {

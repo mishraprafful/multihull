@@ -5,14 +5,21 @@ IN_CLUSTER ?= multihull-in-cluster
 LIVE_ARGS ?= -q -x
 DEMO_ARGS ?=
 DEMO_CLOUD_ARGS ?=
+DEMO_TAPE ?= examples/demo/demo.tape
+DEMO_GIF ?= website/public/demo/demo.gif
 
-.PHONY: demo demo-cloud e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster router-release mock-image
+.PHONY: demo demo-cloud demo-record e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster router-release mock-image
 
 demo:
 	cd python && uv run --extra demo python -m multihull.demo $(DEMO_ARGS)
 
 demo-cloud:
 	PYTHONPATH=testing/live:testing/e2e uv run --project testing/live python -m live.demo $(DEMO_CLOUD_ARGS)
+
+demo-record:
+	vhs $(DEMO_TAPE)
+	gifsicle --batch --optimize=3 --lossy=30 --colors 128 $(DEMO_GIF)
+	@ls -l website/public/demo/
 
 router-release:
 	cd router && cargo build --release -p multihull

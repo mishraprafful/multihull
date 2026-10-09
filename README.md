@@ -6,6 +6,10 @@ Deploy always-warm GPU inference containers to many providers from one `multihul
 
 A Python control plane translates the spec into each provider's native resources. A stateless Rust router scores endpoints, retries across providers and keeps sessions sticky.
 
+![Terminal recording of make demo: the spec with three docker targets, hull deploy, streaming completions through one URL, hull top live, the primary stopped while traffic moves to the secondary with errors at 0, the primary restored and traffic returning to it](website/public/demo/demo.gif)
+
+*`make demo` in five beats: one spec and `hull deploy`; streaming completions through one URL; `hull top` live; the primary stopped, traffic moves, errors stay at 0; the primary restored, traffic returns. Free, local, no GPUs: [examples/demo](examples/demo/README.md).*
+
 **Status (0.1.0):** Kubernetes and Modal deploy from one spec and fail over per request, proven with the mock model server on CPU and with a real model (Qwen2.5-1.5B-Instruct on vLLM) on two Modal L4 targets. RunPod, Baseten and Replicate render plans only. No Kubernetes GPU run yet. See [what is proven and what is not](docs/releases/0.1.0.md#what-is-proven-and-what-is-not).
 
 ## Providers

@@ -550,6 +550,7 @@ class Demo:
             self.run_command,
             lambda: self.say(f"{self.stats.line()} | {self.endpoint_summary()}"),
             top,
+            reopen_top=lambda: spawn_top(self.admin_url, self.args.interval),
         )
 
     def spawn_top(self) -> subprocess.Popen[bytes]:
@@ -694,6 +695,7 @@ def watch_loop(
     run_command: Callable[[T], None],
     summary: Callable[[], None],
     top: subprocess.Popen[bytes] | None,
+    reopen_top: Callable[[], subprocess.Popen[bytes]] | None = None,
 ) -> None:
     pending = list(events)
     deadline = duration if duration > 0 else None
@@ -703,7 +705,11 @@ def watch_loop(
         while True:
             now = time.monotonic() - started
             while pending and now >= pending[0][0]:
+                if top is not None and reopen_top is not None:
+                    stop_top(top)
                 run_command(pending.pop(0)[1])
+                if top is not None and reopen_top is not None:
+                    top = reopen_top()
             if deadline is not None and now >= deadline:
                 return
             if top is not None:
