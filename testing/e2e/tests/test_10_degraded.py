@@ -53,8 +53,27 @@ def targets(pattern: re.Pattern[str], lines: list[str]) -> set[str]:
     return {match.group(1) for match in map(pattern.search, lines) if match}
 
 
+def attempts_covering(pattern: re.Pattern[str], lines: list[str], providers: set[str]) -> list[str]:
+    attempts = [line for line in lines if pattern.search(line)]
+    return attempts if providers <= targets(pattern, attempts) else []
+
+
+def scale_ups_covering(controller: Controller, since: int, providers: set[str]) -> list[str]:
+    return attempts_covering(SCALE_UP, controller.log_lines("scale ")[since:], providers)
+
+
+def scale_backs_covering(controller: Controller, since: int, providers: set[str]) -> list[str]:
+    return attempts_covering(SCALE_BACK, controller.log_lines("scale back ")[since:], providers)
+
+
 def scale_back_lines(controller: Controller) -> list[str]:
     return [line for line in controller.log_lines("scale back ") if SCALE_BACK.search(line)]
+
+
+def requested_min(pattern: re.Pattern[str], line: str) -> int:
+    match = pattern.search(line)
+    assert match is not None, line
+    return int(match.group(2))
 
 
 def primary_ttft_degraded(controller: Controller) -> list[str]:
@@ -117,39 +136,26 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded_and_scales_
     )
     assert any("QUEUE_DEPTH" in line for line in degraded), degraded
 
+    raised = set(TARGETS)
     scale_ups = wait_until(
-        lambda: [
-            m for m in map(SCALE_UP.search, controller.log_lines("scale ")[scale_before:]) if m
-        ],
+        lambda: scale_ups_covering(controller, scale_before, raised),
         10,
-        message="controller attempts to scale up",
+        message="controller attempts to raise every target's floor",
     )
-    assert {match.group(1) for match in scale_ups} <= set(TARGETS)
-    assert all(int(match.group(2)) == 2 for match in scale_ups)
-    assert any(
-        "exactly one container" in line
-        for line in controller.log_lines("scale ")[scale_before:]
-        if SCALE_UP.search(line)
-    )
+    assert targets(SCALE_UP, scale_ups) == raised
+    assert all(requested_min(SCALE_UP, line) == 2 for line in scale_ups)
+    assert all("exactly one container" in line for line in scale_ups)
 
     for name in TARGETS:
         deployment.mock(name).control(max_inflight=0, ttft_ms=50)
 
-    def scale_backs() -> list[str]:
-        return [
-            line
-            for line in controller.log_lines("scale back ")[scale_back_before:]
-            if SCALE_BACK.search(line)
-        ]
-
     attempts = wait_until(
-        scale_backs,
+        lambda: scale_backs_covering(controller, scale_back_before, raised),
         2 * DEGRADED_COOLDOWN_SECONDS + 2,
-        message="controller attempts to scale back within two cooldowns",
+        message="controller attempts to scale back every raised floor within two cooldowns",
     )
-    scaled_back = {SCALE_BACK.search(line).group(1) for line in attempts}  # type: ignore[union-attr]
-    assert scaled_back == {match.group(1) for match in scale_ups}
-    assert all(int(SCALE_BACK.search(line).group(2)) == 1 for line in attempts)  # type: ignore[union-attr]
+    assert targets(SCALE_BACK, attempts) == raised
+    assert all(requested_min(SCALE_BACK, line) == 1 for line in attempts)
     assert all("exactly one container" in line for line in attempts)
 
     first_scale_back = min(logged_at(line) for line in attempts)
@@ -204,12 +210,10 @@ def test_sustained_ttft_slowdown_keeps_raised_floors_until_it_ends(
             raised = targets(SCALE_UP, controller.log_lines("scale ")[scale_before:])
             assert raised == {"secondary", "tertiary"}, raised
 
-            def every_floor_scaled_back() -> list[str]:
-                lines = scale_back_lines(controller)[scale_back_before:]
-                return lines if raised <= targets(SCALE_BACK, lines) else []
-
             attempts = wait_until(
-                every_floor_scaled_back,
+                lambda: attempts_covering(
+                    SCALE_BACK, scale_back_lines(controller)[scale_back_before:], raised
+                ),
                 RECOVERY_SECONDS + DEGRADED_COOLDOWN_SECONDS,
                 message="controller scales back every raised floor once TTFT recovers",
             )
