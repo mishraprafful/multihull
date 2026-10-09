@@ -8,7 +8,7 @@ DEMO_CLOUD_ARGS ?=
 DEMO_TAPE ?= examples/demo/demo.tape
 DEMO_GIF ?= website/public/demo/demo.gif
 
-.PHONY: demo demo-cloud demo-record e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster router-release mock-image
+.PHONY: demo demo-cloud demo-record e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster-up kind-in-cluster-down kind-in-cluster router-release mock-image
 
 demo:
 	cd python && uv run --extra demo python -m multihull.demo $(DEMO_ARGS)
@@ -45,6 +45,12 @@ kind-down:
 
 e2e-kind: router-release
 	cd testing/live && LIVE_KIND_CLUSTER=$(KIND_CLUSTER) LIVE_ROUTER_BIN=$(abspath $(ROUTER_BIN)) uv run pytest $(LIVE_ARGS)
+
+kind-in-cluster-up:
+	kind create cluster --name $(IN_CLUSTER) --config testing/live/kind-in-cluster-config.yaml
+
+kind-in-cluster-down:
+	kind delete cluster --name $(IN_CLUSTER)
 
 kind-in-cluster:
 	cd testing/live && LIVE_KIND_CLUSTER=$(IN_CLUSTER) uv run pytest $(LIVE_ARGS) in_cluster
