@@ -109,4 +109,7 @@ async def test_invalid_json_body_is_400(client: httpx.AsyncClient) -> None:
         "/v1/chat/completions", content=b"{", headers={"content-type": "application/json"}
     )
     assert response.status_code == 400
-    assert response.json()["error"]["type"] == "invalid_request"
+    assert response.json()["error"] == {
+        "type": "invalid_request",
+        "detail": "body is not valid JSON",
+    }
