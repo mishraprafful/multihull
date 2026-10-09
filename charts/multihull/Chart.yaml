@@ -12,3 +12,29 @@ keywords:
   - inference
   - router
   - failover
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://multihull.pages.dev
+    - name: Source
+      url: https://github.com/mishraprafful/multihull
+    - name: support
+      url: https://github.com/mishraprafful/multihull/issues
+  artifacthub.io/images: |
+    - name: router
+      image: ghcr.io/mishraprafful/multihull-router:0.1.0
+      platforms:
+        - linux/amd64
+    - name: controller
+      image: ghcr.io/mishraprafful/multihull-controller:0.1.0
+      platforms:
+        - linux/amd64
+  artifacthub.io/changes: |
+    - kind: added
+      description: First release of the chart with the router Deployment, Service, ConfigMap, PodDisruptionBudget and optional controller
+      links:
+        - name: Release notes
+          url: https://github.com/mishraprafful/multihull/blob/main/docs/releases/0.1.0.md
+        - name: Changelog
+          url: https://github.com/mishraprafful/multihull/blob/main/CHANGELOG.md
