@@ -11,6 +11,20 @@ Run: `npm install && npm run dev` (http://localhost:4321). Build: `npm run build
 
 The reference pages need `uv` on `PATH`; the build fails with a clear message if it is missing.
 
+## Docs versions
+
+The header has a version dropdown: `latest` (whatever `main` holds) plus every released version. The `starlight-versions` plugin serves each release from a snapshot committed in the repo: `src/content/docs/<version>/` holds the pages (generated pages included, rewritten to `/<version>/...` links) and `src/content/versions/<version>.json` the sidebar at that release. Pages of an old version carry a notice linking to the same path on latest.
+
+To add a version, from a checkout whose docs match the release:
+
+```sh
+# astro.config.mjs: add { slug: '<version>' } at the front of starlightVersions versions
+cd website && npm run build
+git add astro.config.mjs src/content/docs/<version> src/content/versions/<version>.json
+```
+
+The build snapshots `src/content/docs/` into the new directory the first time it sees a slug without one, and leaves existing snapshots alone. Snapshots are plain content, so every build (production, PR previews, CI) renders all versions; one version adds about 20 pages.
+
 ## Deploy
 
 `.github/workflows/docs.yml` builds the site in GitHub Actions and deploys `dist/` to the Cloudflare Pages project `multihull` with Wrangler, creating the project on first run. Pushes to `main` deploy to production (`https://multihull.pages.dev`). Pull requests get a preview deployment and a sticky comment with its URL. Without the secrets below, the workflow builds and skips the deploy.
