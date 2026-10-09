@@ -10,6 +10,8 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Router metric `router_responses_total{route,status}` counting responses returned to clients (#40).
 - `make demo-cloud`: the five-beat failover demo on kind and Modal, specs in `examples/demo-cloud/` (CPU mock server, and two Modal L4 targets serving a real model), runbook `docs/runbooks/demo-cloud.md` (#43).
 - `hull --version` prints the installed package version (#124).
+- README badges for PyPI, crates.io, CI and the licence (#141).
+- `CODE_OF_CONDUCT.md`, the Contributor Covenant 2.1, linked from `CONTRIBUTING.md` (#141).
 
 ## [0.1.0] - 2026-10-09
 

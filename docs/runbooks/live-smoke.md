@@ -68,7 +68,7 @@ kind clusters live only on the runner and disappear with it.
 
 ## Running the kind suite locally
 
-Needs Docker, `kind`, `kubectl`, `uv` and a Rust toolchain. Host port 30080 and 18201 must be free.
+Needs Docker, `kind` v0.33.0 or newer (the node image pinned in `testing/live/kind-config.yaml` is built for that release), `kubectl`, `uv` and a Rust toolchain. Host port 30080 and 18201 must be free.
 
 ```sh
 make kind-up        # kind create cluster --name multihull-live --config testing/live/kind-config.yaml

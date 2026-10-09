@@ -4,6 +4,8 @@ Thanks for helping. Multihull deploys always-warm GPU inference containers to ma
 
 One principle decides what gets merged: **reliability over cost**. Defaults keep at least two providers warm, never scale fallbacks to zero and prefer on-demand over spot. Cost features are welcome as opt-in and may never lower the configured redundancy floor. In the router, health beats price.
 
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 Coding agents: read [AGENTS.md](AGENTS.md) instead; it covers the same rules in agent form.
 
 ## Ways to contribute
@@ -85,10 +87,14 @@ HULL="uv run --project $PWD/python hull" charts/multihull/tests/render.sh
 To run the chart's controller and router in kind with images built from your tree (needs `helm` on `PATH` or in `HELM`):
 
 ```sh
-kind create cluster --name multihull-in-cluster
+make kind-in-cluster-up
 make kind-in-cluster
-kind delete cluster --name multihull-in-cluster
+make kind-in-cluster-down
 ```
+
+### Base images
+
+The Dockerfiles (`python/Dockerfile`, `router/Dockerfile`, `testing/mock-server/Dockerfile`) pull the Docker official images from `public.ecr.aws/docker/library/`, and the kind configs under `testing/live/` pull `kindest/node` from `mirror.gcr.io`, each pinned by digest. Docker Hub's anonymous quota (100 pulls per 6 hours per IPv4 address) is shared by every GitHub-hosted runner and failed CI with `429 Too Many Requests` (issue 139). The mirrors need no login and serve the same manifests, so a digest is valid on either side. When you bump a base image, take the tag's digest from the mirror (`docker buildx imagetools inspect public.ecr.aws/docker/library/python:<tag>`) and keep the `kindest/node` digest in step with the kind release `helm/kind-action` installs (v0.33.0). Local `kind` must be that version or newer: an older kind writes a kubeadm config the node image refuses.
 
 ### Secret scanning
 
