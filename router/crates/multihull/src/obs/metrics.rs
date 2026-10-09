@@ -1,4 +1,5 @@
 pub const REQUESTS_TOTAL: &str = "router_requests_total";
+pub const RESPONSES_TOTAL: &str = "router_responses_total";
 pub const FAILOVERS_TOTAL: &str = "router_failovers_total";
 pub const CIRCUIT_STATE: &str = "router_circuit_state";
 pub const UPSTREAM_TTFT_SECONDS: &str = "router_upstream_ttft_seconds";
@@ -12,6 +13,7 @@ pub const PROBE_TOTAL: &str = "router_probe_total";
 
 pub const ALL: &[&str] = &[
     REQUESTS_TOTAL,
+    RESPONSES_TOTAL,
     FAILOVERS_TOTAL,
     CIRCUIT_STATE,
     UPSTREAM_TTFT_SECONDS,
@@ -42,6 +44,10 @@ pub mod spans {
 
 pub fn describe_all() {
     metrics::describe_counter!(REQUESTS_TOTAL, "Requests handled by the router");
+    metrics::describe_counter!(
+        RESPONSES_TOTAL,
+        "Responses returned to clients by route and HTTP status"
+    );
     metrics::describe_counter!(
         FAILOVERS_TOTAL,
         "Retries that moved a request to another provider"

@@ -1,0 +1,69 @@
+{
+  "snapshot_version": 1791553502,
+  "endpoints": [
+    {
+      "route": "e2e-three-top-capture",
+      "id": "e2e-three-top-capture/primary",
+      "provider": "primary",
+      "url": "http://127.0.0.1:21181",
+      "region": "",
+      "priority": 1,
+      "weight": 1,
+      "health": "ready",
+      "ready_replicas": 1,
+      "max_concurrency": 32,
+      "circuit": "closed",
+      "provider_circuit_open": false,
+      "outstanding": 0,
+      "concurrency_limit": 8,
+      "ewma_ttft_seconds": 0.09247498002654836,
+      "health_path": "/health",
+      "probe": {
+        "state": "unknown",
+        "consecutive_failures": 0,
+        "consecutive_successes": 0,
+        "last_outcome": null,
+        "last_status": null,
+        "probes": 0
+      }
+    },
+    {
+      "route": "e2e-three-top-capture",
+      "id": "e2e-three-top-capture/secondary",
+      "provider": "secondary",
+      "url": "http://127.0.0.1:21182",
+      "region": "",
+      "priority": 2,
+      "weight": 1,
+      "health": "ready",
+      "ready_replicas": 1,
+      "max_concurrency": 32,
+      "circuit": null,
+      "provider_circuit_open": null,
+      "outstanding": null,
+      "concurrency_limit": null,
+      "ewma_ttft_seconds": null,
+      "health_path": "/health",
+      "probe": null
+    },
+    {
+      "route": "e2e-three-top-capture",
+      "id": "e2e-three-top-capture/tertiary",
+      "provider": "tertiary",
+      "url": "http://127.0.0.1:21183",
+      "region": "",
+      "priority": 3,
+      "weight": 1,
+      "health": "ready",
+      "ready_replicas": 1,
+      "max_concurrency": 32,
+      "circuit": null,
+      "provider_circuit_open": null,
+      "outstanding": null,
+      "concurrency_limit": null,
+      "ewma_ttft_seconds": null,
+      "health_path": "/health",
+      "probe": null
+    }
+  ]
+}

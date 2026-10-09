@@ -44,9 +44,7 @@ async fn proxy(
     peer: SocketAddr,
 ) -> Result<Response<ProxyBody>, (ProxyError, u32)> {
     let started = Instant::now();
-    let deadline = started + state.config.timeouts.total;
     let (parts, body) = request.into_parts();
-    let error_trailers = accepts_error_trailers(parts.version, &parts.headers);
     let host = parts
         .headers
         .get(header::HOST)
@@ -57,6 +55,25 @@ async fn proxy(
         .table()
         .matches(host, path)
         .ok_or((ProxyError::NoRoute, 0))?;
+    let result = proxy_route(state.clone(), route.clone(), parts, body, peer, started).await;
+    let status = match &result {
+        Ok(response) => response.status(),
+        Err((error, _)) => error.status(),
+    };
+    state.runtime.count_response(&route.id, status.as_u16());
+    result
+}
+
+async fn proxy_route(
+    state: Arc<ProxyState>,
+    route: Arc<Route>,
+    parts: http::request::Parts,
+    body: Incoming,
+    peer: SocketAddr,
+    started: Instant,
+) -> Result<Response<ProxyBody>, (ProxyError, u32)> {
+    let deadline = started + state.config.timeouts.total;
+    let error_trailers = accepts_error_trailers(parts.version, &parts.headers);
     authorize(&route, &parts.headers)?;
 
     let limit = state.config.max_buffered_body_bytes;

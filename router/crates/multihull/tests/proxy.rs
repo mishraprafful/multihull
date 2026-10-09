@@ -7,7 +7,7 @@ use http_body_util::{BodyExt, Empty, Full};
 use hyper::Request;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
-use multihull::core::snapshot::{Route, Snapshot};
+use multihull::core::snapshot::{Endpoint, Route, Snapshot};
 use multihull::proxy::{ProxyConfig, ProxyState};
 use router_testkit::{MockUpstream, MockUpstreamConfig};
 use std::sync::Arc;
@@ -390,4 +390,67 @@ async fn api_key_is_required_when_route_has_hashes() {
         .unwrap();
     assert_eq!(allowed.status(), 200);
     assert_eq!(upstream.request_count(), 1);
+}
+
+fn responses_total(route: &str, status: u16) -> Option<u64> {
+    static HANDLE: std::sync::OnceLock<multihull::obs::PrometheusHandle> =
+        std::sync::OnceLock::new();
+    let handle = HANDLE.get_or_init(|| multihull::obs::install_prometheus().expect("recorder"));
+    let needle = format!("router_responses_total{{route=\"{route}\",status=\"{status}\"}} ");
+    handle
+        .render()
+        .lines()
+        .find_map(|line| line.strip_prefix(&needle))
+        .map(|value| value.trim().parse().unwrap())
+}
+
+fn route_named(id: &str, endpoints: Vec<Endpoint>) -> Snapshot {
+    Snapshot {
+        version: 1,
+        at: None,
+        routes: vec![Route {
+            id: id.into(),
+            endpoints,
+            ..Default::default()
+        }],
+    }
+}
+
+#[tokio::test]
+async fn responses_are_counted_per_route_and_status() {
+    assert_eq!(responses_total("counted-ok", 200), None);
+    let upstream = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let served = start_proxy_with(route_named(
+        "counted-ok",
+        vec![endpoint("a", "p1", upstream.url(), 1)],
+    ))
+    .await;
+    let empty = start_proxy_with(route_named("counted-empty", vec![])).await;
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+    for _ in 0..2 {
+        let response = client
+            .request(
+                Request::get(format!("http://{}/v1/x", served.addr))
+                    .body(Empty::new())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+    }
+    let response = client
+        .request(
+            Request::get(format!("http://{}/v1/x", empty.addr))
+                .body(Empty::new())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 503);
+
+    assert_eq!(responses_total("counted-ok", 200), Some(2));
+    assert_eq!(responses_total("counted-empty", 503), Some(1));
+    assert_eq!(responses_total("counted-empty", 200), None);
 }

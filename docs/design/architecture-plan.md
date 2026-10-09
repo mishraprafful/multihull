@@ -252,7 +252,7 @@ Client        Router                 Modal (P2)              RunPod (P3)
 
 **Auth**: keys `hull_<key_id>_<secret>`, blake3 hash in constant time, per-key token bucket, concurrency cap, provider and service allowlists. Client Authorization stripped; provider header injected from the snapshot.
 
-**Observability**: OTel spans `router.request`, `upstream.attempt{provider, endpoint, n, outcome}`; Prometheus `router_requests_total`, `router_failovers_total{from,to,reason}`, `router_circuit_state`, `router_upstream_ttft_seconds`, `router_queue_wait_seconds`, `router_concurrency_limit`, `router_retry_budget_remaining`, `router_output_tokens_total`; JSON access log with `attempts[]`; `/debug/endpoints`.
+**Observability**: OTel spans `router.request`, `upstream.attempt{provider, endpoint, n, outcome}`; Prometheus `router_requests_total`, `router_responses_total{route,status}`, `router_failovers_total{from,to,reason}`, `router_circuit_state`, `router_upstream_ttft_seconds`, `router_queue_wait_seconds`, `router_concurrency_limit`, `router_retry_budget_remaining`, `router_output_tokens_total`; JSON access log with `attempts[]`; `/debug/endpoints`.
 
 **HA**: stateless replicas, no shared state; local rate buckets sized limit/replicas with optional Redis; last snapshot persisted to disk and served indefinitely on control-plane loss, alert after 1 h.
 
@@ -273,6 +273,7 @@ $ hull status
   runpod-eu   Ready  1/1  L4    https://api.runpod.ai/v2/abc/
 $ hull failover test -p gke-prod   # drains primary 60s; reports traffic shift and error count
 $ hull logs -p modal-main
+$ hull top                         # live router view: endpoint state, circuits, rates, failovers
 $ hull controller                  # long-running reconcile + snapshot stream (container or systemd)
 ```
 
