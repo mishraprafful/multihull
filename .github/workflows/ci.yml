@@ -23,6 +23,7 @@ jobs:
       chart: ${{ steps.filter.outputs.chart }}
       mock_server: ${{ steps.filter.outputs.mock_server }}
       e2e: ${{ steps.filter.outputs.e2e }}
+      demo: ${{ steps.filter.outputs.demo }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -58,6 +59,14 @@ jobs:
               - 'router/**'
               - 'proto/**'
               - 'testing/**'
+              - '.github/workflows/ci.yml'
+            demo:
+              - 'python/**'
+              - 'router/**'
+              - 'proto/**'
+              - 'testing/mock-server/**'
+              - 'examples/demo/**'
+              - 'Makefile'
               - '.github/workflows/ci.yml'
 
   python:
@@ -224,3 +233,33 @@ jobs:
           name: e2e-results
           path: testing/e2e/e2e-results.xml
           if-no-files-found: ignore
+
+  demo:
+    needs: changes
+    if: needs.changes.outputs.demo == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build --release -p multihull
+        working-directory: router
+      - run: docker build -t multihull-mock-server:demo testing/mock-server
+      - run: uv sync --locked --extra demo --project python
+      - name: Run the demo for 60 seconds with a scripted kill and restore
+        run: make demo DEMO_ARGS="--duration 60 --scripted --check --no-top --interval 5"
+      - name: Assert nothing is left behind
+        if: always()
+        run: |
+          leftover="$(docker ps -a -q --filter label=multihull.dev/service)"
+          if [ -n "$leftover" ]; then docker ps -a --filter label=multihull.dev/service; exit 1; fi
+          if pgrep -fl "multihull.cli controller"; then exit 1; fi
+          if pgrep -fl "target/release/multihull --config"; then exit 1; fi
+          if ls -d /tmp/multihull-demo-* 2>/dev/null; then exit 1; fi
