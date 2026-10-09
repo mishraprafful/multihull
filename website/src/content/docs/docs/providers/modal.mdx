@@ -50,6 +50,6 @@ Modal pulls the image once, during deploy, and caches it. A short-lived token, s
 | `scaling.concurrency` | `@modal.concurrent(max_inputs=)` |
 | `container.health` | `startup_timeout` (at least 60 s); `hull deploy --wait` and `hull status` report Ready only once a container runs and `web_url + path` answers 2xx within 5 s; the router probes the same URL |
 | `container.secrets` | `modal.Secret.from_dict`, named `multihull-<svc>` |
-| endpoint | `get_web_url()` with label `multihull-<svc>`, plus proxy-auth headers injected by the router |
+| endpoint | `get_web_url()` with label `multihull-<svc>`, plus proxy-auth headers injected by the router, plus the edge error signature `404` with body prefix `modal-http:` (what a stopped app answers) so the router fails over instead of returning it |
 
 Ref stored in state: app name plus environment.

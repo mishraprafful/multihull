@@ -21,10 +21,10 @@ Prerequisites: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` repository secrets (see
 2. `hull doctor`, then `hull deploy --apply --wait --timeout <remaining budget>`. Modal builds the image once (the translator resets the image `ENTRYPOINT`, and the spec adds a `python` symlink because the vLLM image ships only `python3` and Modal expects `python` on `PATH`), pulls it on both targets, and vLLM loads the model. Startup window: `health.initialDelaySeconds: 600`, mapped to the web server's `startup_timeout`. A target is Ready once a container runs and `web_url/health` answers 200.
 3. One raw streaming `/v1/chat/completions` (asserts SSE chunks with text and a final `[DONE]`), 5 plain and 3 streamed requests through the SDK, one plain answer checked for content. All on `modal-a`, zero failovers.
 4. `hull logs -p` for both targets.
-5. `modal app stop` on the primary's app, wait for the router to take the endpoint out (probe down, circuit open or health down), then 10 plain and 3 streamed requests: all on `modal-b`, zero client errors, zero server errors.
+5. `modal app stop` on the primary's app, then 10 plain requests straight away (zero 404s, zero failures: the router fails over on the edge 404 before the probe ejects the endpoint), wait for the router to take the endpoint out (probe down, circuit open or health down), then 10 plain and 3 streamed requests: all on `modal-b`, zero client errors, zero server errors.
 6. `hull destroy`, then `modal app list` must show no running `multihull-live-<run id>` app.
 
-About 22 requests in total. It is a correctness run, not a load test.
+About 32 requests in total. It is a correctness run, not a load test.
 
 ## Cost
 
@@ -62,5 +62,5 @@ Or sweep everything from live runs: `cd testing/live && uv run python -m live.sw
 
 - Modal accepts the vLLM v0.11.0 image with the `python` symlink once the image `ENTRYPOINT` is reset; with the image's own entrypoint every container exited with `api_server.py: error: unrecognized arguments: ... -m modal._container_entrypoint` (run 37809376724).
 - First deploy with an image build: Ready after 306 s; with the image cached: 91 s. Inside the container, vLLM's API server listens about 75 s after start (model load 17 s).
-- A stopped app answers `404 modal-http: invalid function call` to the probe and to requests. The controller reports it `unknown`, which the router still routes; the router takes the endpoint out after three failed probes (about 14 s). Requests sent in that window get the 404 back (4xx is not retried).
+- A stopped app answers `404 modal-http: invalid function call` to the probe and to requests. The controller reports it `unknown`, which the router still routes; the router takes the endpoint out after three failed probes (about 14 s, runs 37821488815 and 37822124427). Until issue 122 was fixed the 404 was Fatal and reached the client in that window; now the Modal translator marks the endpoint with the `modal-http:` signature, the router treats a matching 404 as Transient and retries on `modal-b` even without an `Idempotency-Key`, and the failover test sends 10 requests right after `modal app stop`, before waiting for ejection, and asserts none of them is a 404.
 - Passing run 37813589815: 2 m 13 s, 23 requests, 0 client errors, 0.06 USD estimated.

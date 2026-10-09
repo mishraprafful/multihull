@@ -9,6 +9,11 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - `hull top`: a live terminal view of the router from its admin listener, with per-endpoint state, circuit, probe, request rate, in-flight count and TTFT quantiles, plus per-route rates, errors and failovers (#40).
 - Router metric `router_responses_total{route,status}` counting responses returned to clients (#40).
 - `make demo-cloud`: the five-beat failover demo on kind and Modal, specs in `examples/demo-cloud/` (CPU mock server, and two Modal L4 targets serving a real model), runbook `docs/runbooks/demo-cloud.md` (#43).
+- Snapshot field `Endpoint.edge_error` (statuses plus body prefix): the signature of a response from the provider's edge rather than the model. The Modal translator sets `404` and `modal-http:`, what a stopped app answers (#122).
+
+### Fixed
+
+- The router treats a response matching the endpoint's edge error signature as `Transient`, retries it on another provider even for a POST without an `Idempotency-Key`, and counts it against the endpoint circuit, so a stopped Modal app no longer returns `404 modal-http: invalid function call` to callers during the 14 s before the probe ejects it. A 404 without the signature is still the model's answer and is returned as before (#122).
 
 ## [0.1.0] - 2026-10-09
 
