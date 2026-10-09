@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-Multihull is pre-alpha (0.1.0). Fixes land on `main` first.
+Multihull is pre-1.0; the first release is 0.1.0. Fixes land on `main` first and ship in the next release.
 
 | Version | Receives security fixes |
 |---|---|
 | `main` | Yes |
-| Latest release | Yes, once releases exist |
+| Latest release | Yes |
 | Older releases | No, upgrade to the latest release |
 
 ## Reporting a vulnerability
