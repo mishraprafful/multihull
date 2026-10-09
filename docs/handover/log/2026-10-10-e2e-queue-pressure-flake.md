@@ -1,0 +1,5 @@
+# 2026-10-10 e2e queue-pressure flake (issue 145, PR 151)
+
+- Runs 37806417024 and 37997344416 failed `test_10` at `scaled_back == {scale_ups}` (line 151), not at the client-status check the issue named. The controller logged `scale back primary|secondary|tertiary ... failed` 1 to 2 ms apart (16:13:04,747 to ,750 and 22:10:15,648 to ,652); `wait_until` polls every 200 ms and returned on the first line, so the test compared `{primary}` or `{primary, secondary}` against all three. Router and controller behaved correctly: Degraded resent every 1 to 1.5 s under load, scale-back 5.3 to 5.8 s after the last Degraded.
+- Local loop (`E2E_RUN_ID=flake-<n>`, single test, Docker Desktop on macOS): 0 of 20 failures before the fix, 0 of 20 after; the window is a few milliseconds per 200 ms poll, so CI evidence and the timestamps carry the diagnosis.
+- Fix is test-only: both scale waits return only once every target has a logged attempt (`attempts_covering`), the same shape the TTFT row used already.

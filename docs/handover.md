@@ -122,6 +122,7 @@ If `cargo` is missing, add `$HOME/.cargo/bin` or `$(brew --prefix rustup)/bin` t
 
 **CI and GitHub**
 - `pytest -x` hides later failures behind the first (PR 35); `timeout` does not exist on macOS, use a pytest timeout.
+- `wait_until` on a log returns at the first matching line; a step that logs one line per target within milliseconds must be waited for as the full set, or a poll between the lines reads a partial one (issue 145, PR 151).
 - `dorny/paths-filter` needs `pull-requests: read` (2026-10-01); job-level `permissions` sets unlisted scopes to none, so `publish-crates` needed `contents: read` to check out (PR 99).
 - Path filters are not evaluated on tag pushes, so `images.yml` runs on every `v*` tag (PR 90).
 - Workflow expressions have no arithmetic (GPU step timeout fixed at 35 minutes, `max_minutes` capped at 30); `collect_ignore_glob` keeps the GPU tests out of the kind suite where a skip marker would add summary rows (PR 114).
