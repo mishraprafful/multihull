@@ -18,6 +18,19 @@ import Horizon from '../../components/Horizon.astro';
 import StatusPill from '../../components/StatusPill.astro';
 import SpecToProviders from '../../components/SpecToProviders.astro';
 
+<figure class="mh-demo not-content">
+  <img
+    src="/demo/demo.gif"
+    width="1092"
+    height="702"
+    loading="lazy"
+    alt="Terminal recording of make demo: the spec with three docker targets, hull deploy, streaming completions through one URL, hull top live, the primary stopped while traffic moves to the secondary with errors at 0, the primary restored and traffic returning to it"
+  />
+  <figcaption>
+    <code>make demo</code> in five beats: one spec and <code>hull deploy</code>; streaming completions through one URL; <code>hull top</code> live; the primary stopped, traffic moves, errors stay at 0; the primary restored, traffic returns. Free and local: <a href="https://github.com/mishraprafful/multihull/tree/main/examples/demo">examples/demo</a>.
+  </figcaption>
+</figure>
+
 <section class="mh-section mh-value-props not-content">
   <div>
     <h3>One spec</h3>
