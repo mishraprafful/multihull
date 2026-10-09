@@ -36,9 +36,9 @@ The router retries only when all of these hold:
 
 - zero bytes committed to the client,
 - request body fully buffered,
-- the method is idempotent, or an `Idempotency-Key` is present, or the outcome is Capacity or a connect failure.
+- the method is idempotent, or an `Idempotency-Key` is present, or the request provably never reached the model: the outcome is Capacity, a connect failure, or a provider edge error.
 
-A 408 counts as `Transient` like 502 to 504, so a POST without an `Idempotency-Key` gets the 408 back rather than a retry: the model may already have started.
+A 408 counts as `Transient` like 502 to 504, so a POST without an `Idempotency-Key` gets the 408 back rather than a retry: the model may already have started. A provider edge error (Modal's `404 modal-http:` for a stopped app) is also `Transient`, but it is retried without a key, since the provider's front door answered before any model saw the request; see [Health and circuits](/docs/router/health-and-circuits/#outcome-taxonomy).
 
 Retries go to a different provider, at most `maxRetries` per request (default 2), within a per-route retry budget described below. When every untried provider has an open circuit, or none of them can take the request (a half-open circuit refusing the trial, no concurrency headroom), the retry goes back to a provider already tried that answered and whose circuit is still closed: a Modal URL or a Kubernetes Service spreads requests over replicas, so a second try usually lands on a healthy one, while a provider with an open circuit is known to fail. A connect failure never retries the same endpoint.
 

@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from multihull.providers import modal as modal_provider
-from multihull.providers.base import Ref, Target
+from multihull.providers.base import EdgeError, Ref, Target
 from multihull.providers.modal import (
     IMAGE_BUILDER_VERSION,
     IMAGE_BUILDER_VERSION_ENV,
@@ -90,6 +90,8 @@ def test_endpoint_derives_web_url(monkeypatch: pytest.MonkeyPatch) -> None:
     endpoint = provider.endpoint(ref)
     assert endpoint.url == "https://acme--multihull-llama-8b.modal.run"
     assert endpoint.inject_headers == {}
+    assert endpoint.edge_error == EdgeError(statuses=(404,), body_prefix="modal-http:")
+    assert endpoint.edge_error.to_json() == {"statuses": [404], "body_prefix": "modal-http:"}
     assert (
         derive_web_url("multihull-x", "acme", "staging")
         == "https://acme-staging--multihull-x.modal.run"

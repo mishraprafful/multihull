@@ -175,6 +175,7 @@ pub struct RetryContext {
     pub body_buffered: bool,
     pub idempotent: bool,
     pub server_error: bool,
+    pub edge_rejected: bool,
     pub retries_used: u32,
     pub max_retries: u32,
 }
@@ -200,7 +201,8 @@ pub fn decide(
         return RetryDecision::Stop(StopReason::NotRetryable);
     }
     let connect_failure = matches!(error, Some(AttemptError::Connect));
-    if !(ctx.idempotent || outcome == Outcome::Capacity || connect_failure) {
+    let never_reached_model = connect_failure || ctx.edge_rejected;
+    if !(ctx.idempotent || outcome == Outcome::Capacity || never_reached_model) {
         return RetryDecision::Stop(StopReason::NotIdempotent);
     }
     if ctx.retries_used >= ctx.max_retries {
@@ -224,6 +226,7 @@ mod tests {
             body_buffered: true,
             idempotent: false,
             server_error: false,
+            edge_rejected: false,
             retries_used: 0,
             max_retries: 2,
         }
@@ -321,6 +324,21 @@ mod tests {
                 &mut budget,
                 now()
             ),
+            RetryDecision::Retry {
+                exclude_provider: true
+            }
+        );
+    }
+
+    #[test]
+    fn provider_edge_rejection_retries_without_idempotency() {
+        let mut budget = RetryBudget::default();
+        let edge = RetryContext {
+            edge_rejected: true,
+            ..ctx()
+        };
+        assert_eq!(
+            decide(Outcome::Transient, None, &edge, &mut budget, now()),
             RetryDecision::Retry {
                 exclude_provider: true
             }

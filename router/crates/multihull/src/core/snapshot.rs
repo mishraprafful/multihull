@@ -188,6 +188,28 @@ pub struct Endpoint {
     pub inject_headers: BTreeMap<String, String>,
     #[serde(default)]
     pub health_path: String,
+    #[serde(default)]
+    pub edge_error: Option<EdgeError>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EdgeError {
+    #[serde(default)]
+    pub statuses: Vec<u16>,
+    #[serde(default)]
+    pub body_prefix: String,
+}
+
+pub const EDGE_SIGNATURE_MAX_BYTES: usize = 256;
+
+impl EdgeError {
+    pub fn matches(&self, status: u16, body_start: &[u8]) -> bool {
+        if self.body_prefix.is_empty() || !self.statuses.contains(&status) {
+            return false;
+        }
+        let head = &body_start[..body_start.len().min(EDGE_SIGNATURE_MAX_BYTES)];
+        head.starts_with(self.body_prefix.as_bytes())
+    }
 }
 
 pub const DEFAULT_HEALTH_PATH: &str = "/health";
@@ -314,11 +336,18 @@ mod tests {
                     max_concurrency: 64,
                     inject_headers: BTreeMap::from([("X-Token".to_string(), "env".to_string())]),
                     health_path: "/healthz".into(),
+                    edge_error: Some(EdgeError {
+                        statuses: vec![404],
+                        body_prefix: "modal-http:".into(),
+                    }),
                 }],
             }],
         };
         let json = serde_json::to_string(&snapshot).unwrap();
         assert!(json.contains("\"type\":\"kubernetes\""));
+        assert!(
+            json.contains("\"edge_error\":{\"statuses\":[404],\"body_prefix\":\"modal-http:\"}")
+        );
         let parsed: Snapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, snapshot);
     }
@@ -335,6 +364,31 @@ mod tests {
         assert_eq!(endpoint.max_concurrency, 32);
         assert_eq!(endpoint.health_path(), "/health");
         assert!(endpoint.accepts_traffic());
+        assert_eq!(endpoint.edge_error, None);
+        let json = r#"{"id":"e","url":"http://x","edge_error":null}"#;
+        let parsed: Endpoint = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.edge_error, None);
+    }
+
+    #[test]
+    fn edge_error_matches_only_its_statuses_and_body_prefix() {
+        let edge = EdgeError {
+            statuses: vec![404],
+            body_prefix: "modal-http:".into(),
+        };
+        assert!(edge.matches(404, b"modal-http: invalid function call"));
+        assert!(!edge.matches(404, b"{\"error\":\"model route not found\"}"));
+        assert!(!edge.matches(404, b""));
+        assert!(!edge.matches(503, b"modal-http: invalid function call"));
+        let mut long = vec![b' '; EDGE_SIGNATURE_MAX_BYTES];
+        long.extend_from_slice(b"modal-http:");
+        assert!(!edge.matches(404, &long));
+        let blank = EdgeError {
+            statuses: vec![404],
+            body_prefix: String::new(),
+        };
+        assert!(!blank.matches(404, b"anything"));
+        assert!(!EdgeError::default().matches(404, b"modal-http:"));
     }
 
     #[test]

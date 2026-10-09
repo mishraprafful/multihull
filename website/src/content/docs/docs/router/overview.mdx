@@ -9,7 +9,7 @@ The router is stateless. It reads a static `router.toml` and a dynamic endpoint 
 
 1. Route match on host, path tree and headers. With `protocol: openai`, the body is buffered (up to 1 MiB) to read the `model` key.
 2. Score endpoints with one function: `priority_spillover` (default), `weighted`, `ewma_latency`, `locality`, optional sticky affinity.
-3. Attempt engine: phase timeouts (connect 2 s, first byte 30 s, idle 60 s, total 10 m), retry before the first committed byte, retry budget, hedging in v0.2.
+3. Attempt engine: phase timeouts (connect 2 s, first byte 30 s, idle 60 s, total 10 m), retry before the first committed byte, retry budget, hedging in v0.2. Outcomes: `Success`, `Capacity`, `Transient` (including a provider edge error such as Modal's `404 modal-http:` for a stopped app, matched by the signature the snapshot carries per endpoint), `Fatal`, `ClientAbort`; the table is in [Health and circuits](/docs/router/health-and-circuits/#outcome-taxonomy).
 4. Auth: client `Authorization` stripped, provider header injected from the snapshot.
 
 ## Snapshot sources

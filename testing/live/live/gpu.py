@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from e2e.client import Outcome
 from live.capture import modal_dashboard_url, modal_state
 from live.harness import LiveDeployment
 from live.summary import GpuCost, ModalInfo, RunSummary
@@ -138,6 +139,10 @@ def running_apps(
         str(app["description"])
         for app in stale_apps(lister(environment), prefix, timedelta(0), now)
     )
+
+
+def edge_not_found(outcomes: Sequence[Outcome]) -> list[str]:
+    return [outcome.describe() for outcome in outcomes if outcome.status == 404]
 
 
 def ejected(entry: dict[str, Any]) -> bool:
