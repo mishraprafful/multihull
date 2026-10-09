@@ -3,8 +3,12 @@ E2E_ARGS ?= -q --timeout 600
 KIND_CLUSTER ?= multihull-live
 IN_CLUSTER ?= multihull-in-cluster
 LIVE_ARGS ?= -q -x
+DEMO_ARGS ?=
 
-.PHONY: e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster router-release mock-image
+.PHONY: demo e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster router-release mock-image
+
+demo:
+	cd python && uv run --extra demo python -m multihull.demo $(DEMO_ARGS)
 
 router-release:
 	cd router && cargo build --release -p multihull
