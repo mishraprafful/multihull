@@ -447,8 +447,19 @@ class KubernetesProvider:
             format="yaml",
         )
 
+    def require_namespace(self, desired: Target) -> None:
+        namespace = kubernetes_block(desired).namespace
+        if self._require_client().get("v1", "Namespace", namespace, None) is not None:
+            return
+        context = self.context or kubernetes_block(desired).context or "current"
+        raise RuntimeError(
+            f"namespace {namespace} not found in context {context}; "
+            f"install the multihull chart or run kubectl create namespace {namespace}"
+        )
+
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
         client = self._require_client()
+        self.require_namespace(desired)
         secret_values = (
             resolve_secret_values(desired.service.container.secrets)
             if desired.service.container.secrets

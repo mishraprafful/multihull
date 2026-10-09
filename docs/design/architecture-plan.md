@@ -107,7 +107,7 @@ targets:
     type: kubernetes
     priority: 1
     replicas: {min: 2}
-    kubernetes: {context: gke_acme_europe-west4_prod, namespace: inference}
+    kubernetes: {context: gke_acme_europe-west4_prod, namespace: multihull}
   - provider: modal-main      # secondary, warm
     type: modal
     priority: 2
@@ -175,7 +175,7 @@ class Provider(Protocol):
 Every resource a translator creates is tagged `multihull.dev/service=<name>` (label, Modal app name prefix, RunPod template name, Baseten model name) so `rediscover` can rebuild state if the backend is lost.
 
 **Per-provider notes**
-- **Kubernetes**: `kubernetes` client, server-side apply with field manager `multihull`, built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and concurrency set) and Secret. No Ingress or Gateway API HTTPRoute in 0.1.0 (planned, see #116). Ref = namespace + names.
+- **Kubernetes**: `kubernetes` client, server-side apply with field manager `multihull`, built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and concurrency set) and Secret. No Ingress or Gateway API HTTPRoute in 0.1.0 (planned, see #116). Ref = namespace + names. `hull init` targets the `multihull` namespace, which the Helm chart creates (`workloads.namespace`, label `multihull.dev/managed-by: multihull`); the translator never creates namespaces and fails before applying when the target namespace is missing (#148).
 - **Modal**: build `modal.App` programmatically, `Image.from_registry` pinned by digest, class with `@modal.web_server` that execs the container command, `app.deploy(name=f"multihull-{svc}")` from the SDK. Endpoint from `web_url`; proxy-auth tokens as inject headers. Ref = app name + environment.
 - **RunPod**: `runpod` SDK where available, REST otherwise: template (image, env, ports) then load-balancing endpoint with `workersMin/Max`, `gpuIds`, `dataCenterIds`. Ref = template id + endpoint id.
 - **Baseten**: generate truss config (`base_image`, `docker_server`, `resources`, autoscaling), `truss.push` via library, promote via management API. Ref = model id + deployment id.

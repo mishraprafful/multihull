@@ -24,9 +24,12 @@ from tests.conftest import assert_golden
 
 
 class FakeKubeClient:
-    def __init__(self) -> None:
+    def __init__(self, namespaces: tuple[str, ...] = ("multihull",)) -> None:
         self.applied: list[dict[str, Any]] = []
-        self.objects: dict[tuple[str, str, str | None], dict[str, Any]] = {}
+        self.objects: dict[tuple[str, str, str | None], dict[str, Any]] = {
+            ("Namespace", name, None): {"kind": "Namespace", "metadata": {"name": name}}
+            for name in namespaces
+        }
         self.nodes: list[dict[str, Any]] = []
         self.deleted: list[tuple[str, str]] = []
 
@@ -120,6 +123,20 @@ def test_apply_with_injected_client(target_for, monkeypatch: pytest.MonkeyPatch)
     assert secret["kind"] == "Secret"
     assert list(secret["stringData"]) == ["hf-token"]
     assert FIELD_MANAGER == "multihull"
+
+
+def test_apply_refuses_a_missing_namespace(target_for, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "fixture-value")
+    client = FakeKubeClient(namespaces=())
+    provider = KubernetesProvider(client=client, context="kind-quickstart")
+    expected = (
+        "namespace multihull not found in context kind-quickstart; "
+        "install the multihull chart or run kubectl create namespace multihull"
+    )
+    with pytest.raises(RuntimeError) as raised:
+        provider.apply(target_for("gke-prod"), None)
+    assert str(raised.value) == expected
+    assert client.applied == []
 
 
 def test_apply_missing_secret_value_fails(target_for, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -296,7 +313,7 @@ def test_endpoint_override_needs_no_client(mock_kind_modal_spec: ServiceSpec) ->
 
 
 def test_endpoint_from_annotation_after_rediscover(mock_kind_modal_spec: ServiceSpec) -> None:
-    client = FakeKubeClient()
+    client = FakeKubeClient(namespaces=("multihull-live",))
     provider = KubernetesProvider(client=client)
     provider.apply(kind_target(mock_kind_modal_spec), None)
     found = provider.rediscover("live-mock")
@@ -308,7 +325,7 @@ def test_endpoint_node_port_uses_node_address(mock_kind_modal_spec: ServiceSpec)
     raw = mock_kind_modal_spec.model_dump(by_alias=True, exclude_none=True)
     del raw["targets"][0]["kubernetes"]["endpoint"]
     spec = ServiceSpec.model_validate(raw)
-    client = FakeKubeClient()
+    client = FakeKubeClient(namespaces=("multihull-live",))
     client.nodes = [
         {"status": {"addresses": [{"type": "Hostname", "address": "kind-control-plane"}]}},
         {"status": {"addresses": [{"type": "InternalIP", "address": "172.18.0.2"}]}},
