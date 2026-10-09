@@ -54,7 +54,11 @@ function code(text, lang = '') {
 }
 
 function inline(value) {
-  return `\`${String(value).replace(/`/g, '\\`')}\``;
+  const text = String(value);
+  const longestRun = Math.max(0, ...[...text.matchAll(/`+/g)].map((run) => run[0].length));
+  const fence = '`'.repeat(longestRun + 1);
+  const pad = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+  return `${fence}${pad}${text}${pad}${fence}`;
 }
 
 function cell(text) {
