@@ -35,7 +35,7 @@ A `v<semver>` tag on `main` drives everything. `release.yml` builds the Python w
 ## Verify
 
 ```sh
-pip install multihull==0.1.0 && hull --help
+pip install multihull==0.1.0 && hull --version
 cargo install multihull --version 0.1.0 && multihull --help
 helm pull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0
 gh release view v0.1.0

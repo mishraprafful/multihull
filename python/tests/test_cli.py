@@ -7,12 +7,14 @@ import signal
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
 from typer.testing import CliRunner
 
+from multihull import __version__
 from multihull import spec as specmod
 from multihull.cli import DEFAULT_IMAGE, app
 from multihull.controller import Controller
@@ -32,6 +34,26 @@ def copy_fixture(tmp_path: Path) -> Path:
     dest = tmp_path / "multihull.yaml"
     shutil.copy(FIXTURES / "llama-8b.yaml", dest)
     return dest
+
+
+def test_version_prints_the_installed_version() -> None:
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0, result.output
+    assert result.output == f"hull {__version__}\n"
+
+
+def test_version_wins_over_a_subcommand(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["--version", "deploy"])
+    assert result.exit_code == 0, result.output
+    assert result.output == f"hull {__version__}\n"
+    assert not (tmp_path / ".multihull").exists()
+
+
+def test_version_matches_pyproject() -> None:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject.open("rb") as handle:
+        assert __version__ == tomllib.load(handle)["project"]["version"]
 
 
 def test_validate_ok(tmp_path: Path) -> None:

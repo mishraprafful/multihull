@@ -14,8 +14,8 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
+from multihull import __version__, discovery, engine
 from multihull import deploy as deploymod
-from multihull import discovery, engine
 from multihull import logs as logsmod
 from multihull import spec as specmod
 from multihull import top as topmod
@@ -44,6 +44,28 @@ app = typer.Typer(
 )
 console = Console()
 errors = Console(stderr=True)
+
+
+def print_version(value: bool) -> None:
+    if value:
+        typer.echo(f"hull {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def root(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=print_version,
+            is_eager=True,
+            help="Print the hull version and exit.",
+        ),
+    ] = False,
+) -> None:
+    pass
+
 
 SpecArg = Annotated[Path, typer.Argument(help="Path to multihull.yaml")]
 DEFAULT_SPEC = Path("multihull.yaml")
