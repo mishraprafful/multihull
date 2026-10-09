@@ -63,7 +63,7 @@ Five commands take a container from your laptop to two GPU providers behind one 
 
 ## Next
 
-- Try the demo: `make demo` in the repository runs three local docker targets behind one URL, streams completions through it and lets you stop the primary with zero client errors. See [examples/demo](https://github.com/mishraprafful/multihull/tree/main/examples/demo).
+- Try the [demo](/docs/demo/): `make demo` runs three local docker targets behind one URL, streams completions through it and lets you stop the primary with zero client errors; `make demo-cloud` does the same on kind and Modal.
 - Run the router: see [Router overview](/docs/router/overview/) or the Helm chart in `charts/multihull`.
 - Prove failover: scale the primary to zero under load and watch `router_failovers_total`; `hull failover test` is planned, not built.
 - Example spec: `examples/llama-8b/multihull.yaml` in the repository.

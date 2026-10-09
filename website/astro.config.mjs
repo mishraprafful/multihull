@@ -25,6 +25,7 @@ export default defineConfig({
       ],
       sidebar: [
         { label: 'Quickstart', slug: 'docs/quickstart' },
+        { label: 'Demo', slug: 'docs/demo' },
         {
           label: 'Concepts',
           items: [
