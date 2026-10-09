@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -254,3 +255,20 @@ def test_resolve_run_id_validates() -> None:
     assert len(localrun.resolve_run_id(None, 10)) == 6
     with pytest.raises(ValueError, match="--run-id"):
         localrun.resolve_run_id("-bad", 10, "--run-id")
+
+
+def test_watch_loop_runs_events_in_order_and_stops_at_the_deadline() -> None:
+    ran: list[str] = []
+    summaries: list[float] = []
+    started = time.monotonic()
+    demomod.watch_loop(
+        [(0.05, "stop"), (0.15, "start")],
+        0.4,
+        0.1,
+        ran.append,
+        lambda: summaries.append(time.monotonic() - started),
+        None,
+    )
+    assert ran == ["stop", "start"]
+    assert 0.35 <= time.monotonic() - started < 1.0
+    assert len(summaries) >= 3
