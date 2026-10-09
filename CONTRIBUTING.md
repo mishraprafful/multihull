@@ -90,6 +90,16 @@ make kind-in-cluster
 kind delete cluster --name multihull-in-cluster
 ```
 
+### Secret scanning
+
+`.github/workflows/secrets.yml` runs [gitleaks](https://github.com/gitleaks/gitleaks) on every PR and push to `main` with the config in `.gitleaks.toml`. To run the same scan locally over the full history:
+
+```sh
+gitleaks git --log-opts=--all .
+```
+
+Add an allowlist entry only for a test fixture, scoped to its path or to the shape of the fake value, never for a real credential. A real value that was committed must be rotated, not allowlisted.
+
 ## Running tests
 
 The commands above run layer 1 (unit and golden) and layer 2 (contract) tests. Every translator has a golden test: spec in, native payload out, compared against `python/tests/golden/`. The end-to-end layers, from local Docker fakes to live GPU smoke, are defined in [docs/design/testing-strategy.md](docs/design/testing-strategy.md).
