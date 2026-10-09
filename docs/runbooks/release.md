@@ -42,7 +42,7 @@ gh release view v0.1.0
 ```
 
 - The GitHub release lists `multihull-linux-amd64`, `multihull-linux-arm64`, `multihull-darwin-arm64` and the wheel and sdist.
-- GHCR packages `multihull-router`, `multihull-controller`, `multihull-mock-server` and `charts/multihull` carry the version tag, are linked to the repository and stay private until the owner switches them to public.
+- GHCR packages `multihull-router`, `multihull-controller`, `multihull-mock-server` and `charts/multihull` carry the version tag, are linked to the repository and are public (anonymous pulls work).
 - `helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` prints the chart's values.
 
 ## After

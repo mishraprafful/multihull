@@ -1,0 +1,5 @@
+# 2026-10-09 GHCR packages public (branch `docs/ghcr-public`)
+
+- The owner made `multihull-router`, `multihull-controller`, `multihull-mock-server` and `charts/multihull` public on GHCR. Verified without credentials: `helm pull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` with Helm v4.3.0 (checksum-verified download) and an empty `HELM_REGISTRY_CONFIG` pulled `multihull-0.1.0.tgz`; `docker manifest inspect ghcr.io/mishraprafful/multihull-router:0.1.0` with an empty `DOCKER_CONFIG` returned the image index.
+- Docs updated: Install from OCI (latest and the `0.1.0` snapshot) drops `helm registry login` and the pull secret, keeping one line for private forks; `docs/releases/0.1.0.md` and its `0.1.0` site mirror, `CHANGELOG.md`, the release and live smoke runbooks and the testing strategy no longer say the packages are private.
+- Untouched: the Modal `registrySecret` docs (`GHCR_USERNAME`, `GHCR_TOKEN`) for a user's private image, and the live workflows, which still pass the registry secret although the mock-server image no longer needs it.
