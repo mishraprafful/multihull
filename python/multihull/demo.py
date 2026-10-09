@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
 import yaml
@@ -50,6 +50,8 @@ MODEL = "mock-llm"
 READY_TIMEOUT = 90.0
 LOAD_WORKERS = 2
 TOP_INTERVAL = 1.0
+
+T = TypeVar("T")
 
 
 class DemoError(RuntimeError):
@@ -188,10 +190,18 @@ class LoadStats:
 
 class LoadGenerator:
     def __init__(
-        self, base_url: str, host: str, api_key: str, primary: str, rate: float, stats: LoadStats
+        self,
+        base_url: str,
+        host: str,
+        api_key: str,
+        primary: str,
+        rate: float,
+        stats: LoadStats,
+        model: str = MODEL,
     ) -> None:
         import openai
 
+        self.model = model
         self.openai = openai.OpenAI(
             base_url=f"{base_url}/v1",
             api_key=api_key,
@@ -235,7 +245,7 @@ class LoadGenerator:
         provider: str | None = None
         try:
             raw = self.openai.chat.completions.with_raw_response.create(
-                model=MODEL,
+                model=self.model,
                 messages=[{"role": "user", "content": f"request {index}"}],
                 stream=True,
                 max_tokens=16,
@@ -530,47 +540,21 @@ class Demo:
             self.say(f"command failed: {result.stderr.strip()}")
 
     def watch(self) -> None:
-        events = self.scripted_events()
-        deadline = self.args.duration if self.args.duration > 0 else None
         top = self.spawn_top() if self.args.top and top_available() else None
         if top is None:
             self.out("Watching /debug/endpoints (hull top not installed); Ctrl-C to stop.")
-        started = time.monotonic()
-        next_summary = started
-        while True:
-            now = time.monotonic() - started
-            while events and now >= events[0][0]:
-                self.run_command(events.pop(0)[1])
-            if deadline is not None and now >= deadline:
-                break
-            if top is not None:
-                if top.poll() is not None:
-                    break
-            elif time.monotonic() >= next_summary:
-                self.say(f"{self.stats.line()} | {self.endpoint_summary()}")
-                next_summary = time.monotonic() + self.args.interval
-            time.sleep(0.1)
-        if top is not None and top.poll() is None:
-            top.terminate()
-            try:
-                top.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                top.kill()
+        watch_loop(
+            self.scripted_events(),
+            self.args.duration,
+            self.args.interval,
+            self.run_command,
+            lambda: self.say(f"{self.stats.line()} | {self.endpoint_summary()}"),
+            top,
+        )
 
     def spawn_top(self) -> subprocess.Popen[bytes]:
         self.out("Opening hull top; press q or Ctrl-C to stop the demo.")
-        return subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "multihull.cli",
-                "top",
-                "--admin",
-                self.admin_url,
-                "--interval",
-                str(self.args.interval),
-            ]
-        )
+        return spawn_top(self.admin_url, self.args.interval)
 
     def run(self) -> int:
         signal.signal(signal.SIGTERM, raise_interrupted)
@@ -676,6 +660,62 @@ class Demo:
 
 def raise_interrupted(*_: Any) -> None:
     raise Interrupted()
+
+
+def spawn_top(admin_url: str, interval: float) -> subprocess.Popen[bytes]:
+    return subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "multihull.cli",
+            "top",
+            "--admin",
+            admin_url,
+            "--interval",
+            str(interval),
+        ]
+    )
+
+
+def stop_top(top: subprocess.Popen[bytes]) -> None:
+    if top.poll() is not None:
+        return
+    top.terminate()
+    try:
+        top.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        top.kill()
+
+
+def watch_loop(
+    events: Sequence[tuple[float, T]],
+    duration: float,
+    interval: float,
+    run_command: Callable[[T], None],
+    summary: Callable[[], None],
+    top: subprocess.Popen[bytes] | None,
+) -> None:
+    pending = list(events)
+    deadline = duration if duration > 0 else None
+    started = time.monotonic()
+    next_summary = started
+    try:
+        while True:
+            now = time.monotonic() - started
+            while pending and now >= pending[0][0]:
+                run_command(pending.pop(0)[1])
+            if deadline is not None and now >= deadline:
+                return
+            if top is not None:
+                if top.poll() is not None:
+                    return
+            elif time.monotonic() >= next_summary:
+                summary()
+                next_summary = time.monotonic() + interval
+            time.sleep(0.1)
+    finally:
+        if top is not None:
+            stop_top(top)
 
 
 def snapshot_ready(controller: Process, path: Path, targets: Sequence[str]) -> bool:
