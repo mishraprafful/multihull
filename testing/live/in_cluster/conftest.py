@@ -34,7 +34,8 @@ def cluster(settings: Settings, workdir: Path) -> InCluster:
     if not created.reachable():
         pytest.fail(
             f"kind context {settings.context} unreachable; create it with "
-            f"kind create cluster --name {settings.cluster}"
+            f"kind create cluster --name {settings.cluster} "
+            "--config testing/live/kind-in-cluster-config.yaml"
         )
     created.prepare_images()
     created.reset()

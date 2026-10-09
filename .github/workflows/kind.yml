@@ -121,6 +121,7 @@ jobs:
       - uses: helm/kind-action@v1.15.1
         with:
           cluster_name: ${{ env.CLUSTER }}
+          config: testing/live/kind-in-cluster-config.yaml
       - uses: azure/setup-helm@v5
         with:
           version: v4.3.0
