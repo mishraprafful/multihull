@@ -28,7 +28,7 @@ A Python control plane translates the spec into each provider's native resources
 ## Quickstart
 
 ```sh
-uv tool install multihull
+uv tool install multihull==0.1.0
 hull init                       # detects a Dockerfile; writes multihull.yaml
 hull doctor                     # checks credentials per target
 hull plan                       # renders native payloads to .multihull/plan/, shows diff
