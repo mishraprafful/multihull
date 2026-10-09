@@ -50,6 +50,14 @@ gh release view v0.1.0
 - Quickstart and install snippets name the released version.
 - Close the milestone. The tag closes the release issue.
 
+## Pushing the Artifact Hub metadata outside a release
+
+`artifacthub-metadata.yml` pushes `charts/artifacthub-repo.yml` next to the chart on demand, for example after registering the repository on Artifact Hub when the latest chart was already published. It needs `ARTIFACTHUB_REPOSITORY_ID` set and runs in the `release` environment:
+
+```bash
+gh workflow run artifacthub-metadata.yml --repo mishraprafful/multihull
+```
+
 ## When a publish job fails
 
 Fix forward. PyPI and crates.io never reuse a version, so a failed `v0.1.0` becomes `v0.1.1`: bump the three version files, land the fix, tag again. A failed `publish-chart` alone can be re-run from the Actions UI once the images exist.
