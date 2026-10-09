@@ -19,11 +19,10 @@ from e2e.harness import (
     Deployment,
     Router,
     TomlValue,
-    host_ports,
-    rewrite_spec,
     sweep_containers,
 )
 from e2e.stream import StreamCredentials, generate_credentials
+from multihull.localrun import host_ports, rewrite_spec
 
 E2E_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = E2E_ROOT.parents[1]
