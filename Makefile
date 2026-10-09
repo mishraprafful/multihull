@@ -4,11 +4,18 @@ KIND_CLUSTER ?= multihull-live
 IN_CLUSTER ?= multihull-in-cluster
 LIVE_ARGS ?= -q -x
 DEMO_ARGS ?=
+DEMO_TAPE ?= examples/demo/demo.tape
+DEMO_GIF ?= website/public/demo/demo.gif
 
-.PHONY: demo e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster router-release mock-image
+.PHONY: demo demo-record e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster router-release mock-image
 
 demo:
 	cd python && uv run --extra demo python -m multihull.demo $(DEMO_ARGS)
+
+demo-record:
+	vhs $(DEMO_TAPE)
+	gifsicle --batch --optimize=3 --lossy=30 --colors 128 $(DEMO_GIF)
+	@ls -l website/public/demo/
 
 router-release:
 	cd router && cargo build --release -p multihull
