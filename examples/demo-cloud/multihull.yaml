@@ -1,0 +1,43 @@
+apiVersion: multihull/v1
+name: demo-cloud
+
+container:
+  image: ghcr.io/mishraprafful/multihull-mock-server:main
+  command: [/app/.venv/bin/python, -m, mock_server]
+  port: 8000
+  health: {path: /health, initialDelaySeconds: 2}
+  env: {MOCK_MODEL: mock-llm}
+
+resources:
+  gpu: []
+  memory: 512Mi
+
+scaling:
+  concurrency: 32
+  replicas: {min: 1, max: 1}
+
+reliability:
+  minWarmProviders: 2
+
+targets:
+  - provider: kind
+    type: kubernetes
+    priority: 1
+    kubernetes:
+      context: kind-multihull-live
+      namespace: multihull-demo
+      serviceType: NodePort
+      nodePort: 30080
+      endpoint: http://127.0.0.1:30080
+  - provider: modal
+    type: modal
+    priority: 2
+    replicas: {max: 2}
+    modal:
+      environment: main
+
+route:
+  hostname: demo.local
+  protocol: openai
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}
+  auth: {apiKeys: {from: env:MULTIHULL_DEMO_API_KEYS}}

@@ -44,6 +44,7 @@ class Settings:
     image: str | None
     workdir: Path | None
     router_bin: Path | None
+    spec_file: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -66,7 +67,7 @@ class Settings:
 
     @property
     def spec_path(self) -> Path:
-        return SPECS / f"{self.spec}.yaml"
+        return self.spec_file or SPECS / f"{self.spec}.yaml"
 
     def source_spec(self) -> dict[str, Any]:
         return yaml.safe_load(self.spec_path.read_text())
