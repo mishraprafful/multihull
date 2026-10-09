@@ -6,7 +6,7 @@ The GPU run on Modal has its own runbook: `docs/runbooks/live-gpu.md`.
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `images.yml` | push to `main` or a `v*` tag, PRs touching `router/`, `proto/`, `python/`, `testing/mock-server/`, manual | Builds `ghcr.io/mishraprafful/multihull-mock-server`, `multihull-router` and `multihull-controller`. Pushes `sha-<short>` and `main` from `main` and the version from `v*` tags; PRs build without pushing. Packages are private because the repo is. |
+| `images.yml` | push to `main` or a `v*` tag, PRs touching `router/`, `proto/`, `python/`, `testing/mock-server/`, manual | Builds `ghcr.io/mishraprafful/multihull-mock-server`, `multihull-router` and `multihull-controller`. Pushes `sha-<short>` and `main` from `main` and the version from `v*` tags; PRs build without pushing. Packages are public since 2026-10-09. |
 | `kind.yml` | PRs and `main` pushes touching `python/`, `router/`, `proto/`, `testing/`, `charts/` | Job `kind`: kind cluster, mock image loaded with `kind load`, release router, `testing/live` with spec `kind-docker` (kind primary, docker secondary), chart `kubectl apply --dry-run=server`. Job `in-cluster`: controller and router images built from their Dockerfiles, chart installed with the controller enabled, `testing/live/in_cluster`. Free. |
 | `live-smoke.yml` | manual, or a PR labelled `live-smoke` (on label and on each push) | Same kind setup with spec `kind-modal`: Modal secondary runs the GHCR mock image on CPU, `min_containers: 1`, app `multihull-live-<run id>-modal`. Skips when `MODAL_TOKEN_ID` or `MODAL_TOKEN_SECRET` is missing. One run at a time. |
 | `live-smoke.yml` (schedule) | daily 03:17 UTC | Stops every `multihull-live-` Modal app older than two hours. |
@@ -24,7 +24,7 @@ gh workflow run live-smoke.yml -f mock_image=ghcr.io/mishraprafful/multihull-moc
 gh pr edit <number> --add-label live-smoke
 ```
 
-Modal pulls the private image during deploy with `github.actor` and `GITHUB_TOKEN` (`packages: read`) through `modal.registrySecret`, then caches it, so a token that expires after the job is fine. The alternative is to make the mock-server package public. kind runs the image built from the checkout; Modal runs the pushed tag, so a PR that changes the mock server tests kind against the new code and Modal against `main`.
+Modal pulls the image during deploy with `github.actor` and `GITHUB_TOKEN` (`packages: read`) through `modal.registrySecret`, then caches it, so a token that expires after the job is fine. The package is public since 2026-10-09, so the secret is no longer required; the workflow still passes it. kind runs the image built from the checkout; Modal runs the pushed tag, so a PR that changes the mock server tests kind against the new code and Modal against `main`.
 
 ## Cost
 

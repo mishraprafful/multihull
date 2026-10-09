@@ -11,7 +11,7 @@ State, decisions, next steps, verification commands and lessons for sessions wor
 - Chart: `charts/multihull` renders router Deployment, Service, ConfigMap, PDB and an optional controller (TLS, token, state volume, `envFrom`, no RBAC); refuses plaintext without the `insecure` opt-ins. `charts/package.sh` packages for CI and release. Listed on Artifact Hub (id in variable `ARTIFACTHUB_REPOSITORY_ID`); the verified publisher flag arrives once the next release pushes `artifacthub-repo.yml`.
 - CI and live runs: `ci.yml` path-filtered jobs python, router, website, chart, mock-server, e2e, demo; `kind.yml` jobs `kind` and `in-cluster`; `secrets.yml` (gitleaks); `images.yml`; `release.yml` (environment `release`, variable `PUBLISH_ENABLED`); `runner-canary.yml` weekly on `ubuntu-26.04`; runners pinned to `ubuntu-24.04`; CodeQL default setup; Dependabot weekly. Last green: live smoke 37919202557 (2026-10-09, schedule), live GPU 37822124427 (2026-10-08).
 - Docs site: https://multihull.pages.dev from `website/` (Astro Starlight), deployed by `docs.yml` on `main`; PR previews swept after 24 h. Version switcher from `starlight-versions` snapshots (`website/src/content/docs/<version>/`); the `0.1.0` snapshot predates PRs 125 and 126. `docs/design/*` and `docs/releases/*` are mirrored at build time.
-- Repo settings: public since 2026-10-08. GHCR images and chart are public (anonymous pull works), so the token steps in Install from OCI and `docs/releases/0.1.0.md` are stale. Ruleset on `main`: PR required, status checks, linear history. Environments `release`, `preview`, `production` with no reviewers. Secrets `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`. `multihull.dev` is not owned (issue 62). CodeQL alerts 2 and 4 are open false positives.
+- Repo settings: public since 2026-10-08. GHCR images and chart are public since 2026-10-09 (anonymous pull works; the install docs no longer mention tokens). Ruleset on `main`: PR required, status checks, linear history. Environments `release`, `preview`, `production` with no reviewers. Secrets `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`. `multihull.dev` is not owned (issue 62). CodeQL alerts 2 and 4 are open false positives.
 
 ## Decisions
 
@@ -66,7 +66,7 @@ Public launch: demo video (issues 39, 42), real-cloud demo (issue 43).
 
 0.3.0: issues 69 to 77 (hedging, cost-aware placement, autoscaling, spot, warm check, Redis rate limits, `SO_REUSEPORT`, flapping scenario, nightly load).
 
-Owner, no issue: dismiss CodeQL alerts 2 and 4 (reasons in `docs/handover/log/2026-10-09-codeql-alerts.md`); drop the `read:packages` token steps from Install from OCI and `docs/releases/0.1.0.md` now that the packages are public; decide the docs domain (issue 62); optional `modal workspace settings set image-builder-version 2025.06`; optional chart RBAC and a kubeconfig mount for targets in other clusters.
+Owner, no issue: dismiss CodeQL alerts 2 and 4 (reasons in `docs/handover/log/2026-10-09-codeql-alerts.md`); decide the docs domain (issue 62); optional `modal workspace settings set image-builder-version 2025.06`; optional chart RBAC and a kubeconfig mount for targets in other clusters.
 
 ## How to verify
 
