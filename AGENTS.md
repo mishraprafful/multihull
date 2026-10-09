@@ -4,9 +4,9 @@ Instructions for coding agents working in this repository.
 
 ## Start here
 
-1. Read `docs/handover.md`. It holds current state, decisions and next steps.
+1. Read `docs/handover.md` (current state, decisions, next steps), then the newest files in `docs/handover/log/`.
 2. Read `docs/design/architecture-plan.md` before changing anything under `python/`, `router/` or `proto/`.
-3. Before ending a session, update `docs/handover.md`: new log entry at the top, refresh "Current state" and "Next steps".
+3. Before ending a session, write `docs/handover/log/YYYY-MM-DD-<topic>.md` (a new file, never another session's) and refresh "Current state" and "Next steps" in `docs/handover.md` only where they changed. Merge `main` before pushing.
 
 ## What Multihull is
 
