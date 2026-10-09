@@ -60,13 +60,13 @@ State, decisions, next steps, verification commands and lessons for sessions wor
 
 ## Next steps
 
-Public launch: demo video (issues 39, 42).
+0.2.0, the stable launch (milestone "0.2.0- Stable launch"): launch checklist (issue 141), fresh-user quickstart walkthrough (issue 140), Docker Hub pull limits in CI (issue 139), `hull --version` (issue 124), fail over on provider edge 404s (issue 122). Create `docs/releases/0.2.0.md` and point `website/scripts/sync-design-docs.mjs` at it before tagging.
 
-0.2.0: `hull --version` (issue 124), fail over on provider edge 404s (issue 122), Kubernetes Ingress or HTTPRoute (issue 116), RunPod, Baseten and Replicate `apply` (issues 63, 64, 65) with the translator conformance suite (issue 66), credential overrides (issue 67), Kubernetes GPU run on a real cluster (issue 68). Create `docs/releases/0.2.0.md` before tagging.
+0.3.0, more providers: RunPod, Baseten and Replicate `apply` (issues 63, 64, 65) with the translator conformance suite (issue 66), credential overrides (issue 67), Kubernetes GPU run on a real cluster (issue 68).
 
-0.3.0: issues 69 to 77 (hedging, cost-aware placement, autoscaling, spot, warm check, Redis rate limits, `SO_REUSEPORT`, flapping scenario, nightly load).
+0.4.0, efficiency and scale: issues 69 to 77 (hedging, cost-aware placement, autoscaling, spot, warm check, Redis rate limits, `SO_REUSEPORT`, flapping scenario, nightly load) and Kubernetes Ingress or HTTPRoute (issue 116).
 
-Owner, no issue: dismiss CodeQL alerts 2 and 4 (reasons in `docs/handover/log/2026-10-09-codeql-alerts.md`); run the cloud demo once with Modal credentials (`make kind-up && make demo-cloud DEMO_CLOUD_ARGS="--duration 180 --scripted --check --no-top"`, then `make kind-down`, cents; GPU variant `--spec examples/demo-cloud/gpu.yaml --duration 600`, about 0.3 USD) and record it in `docs/runbooks/demo-cloud.md`; decide the docs domain (issue 62); optional `modal workspace settings set image-builder-version 2025.06`; optional chart RBAC and a kubeconfig mount for targets in other clusters.
+Owner, tracked in issue 141 unless noted: set the contact in `CODE_OF_CONDUCT.md`; add the repository social preview; decide the `v0.1.0` pre-release flag; dismiss CodeQL alerts 2 and 4 (reasons in `docs/handover/log/2026-10-09-codeql-alerts.md`); run the cloud demo once with Modal credentials (`make kind-up && make demo-cloud DEMO_CLOUD_ARGS="--duration 180 --scripted --check --no-top"`, then `make kind-down`, cents; GPU variant `--spec examples/demo-cloud/gpu.yaml --duration 600`, about 0.3 USD) and record it in `docs/runbooks/demo-cloud.md`; decide the docs domain (issue 62); optional `modal workspace settings set image-builder-version 2025.06`; optional chart RBAC and a kubeconfig mount for targets in other clusters.
 
 ## How to verify
 
