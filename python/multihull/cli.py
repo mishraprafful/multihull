@@ -555,7 +555,12 @@ def top(
         float, typer.Option("--interval", min=0.1, help="Seconds between polls")
     ] = topmod.DEFAULT_INTERVAL,
 ) -> None:
+    signal.signal(signal.SIGTERM, raise_keyboard_interrupt)
     topmod.run_top(admin, interval, console)
+
+
+def raise_keyboard_interrupt(*_: object) -> None:
+    raise KeyboardInterrupt
 
 
 @app.command()

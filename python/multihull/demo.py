@@ -532,7 +532,8 @@ class Demo:
     def watch(self) -> None:
         events = self.scripted_events()
         deadline = self.args.duration if self.args.duration > 0 else None
-        top = self.spawn_top() if self.args.top and top_available() else None
+        use_top = self.args.top and top_available()
+        top = self.spawn_top() if use_top else None
         if top is None:
             self.out("Watching /debug/endpoints (hull top not installed); Ctrl-C to stop.")
         started = time.monotonic()
@@ -540,7 +541,11 @@ class Demo:
         while True:
             now = time.monotonic() - started
             while events and now >= events[0][0]:
+                if top is not None:
+                    stop_top(top)
                 self.run_command(events.pop(0)[1])
+                if top is not None:
+                    top = self.spawn_top(announce=False)
             if deadline is not None and now >= deadline:
                 break
             if top is not None:
@@ -550,15 +555,12 @@ class Demo:
                 self.say(f"{self.stats.line()} | {self.endpoint_summary()}")
                 next_summary = time.monotonic() + self.args.interval
             time.sleep(0.1)
-        if top is not None and top.poll() is None:
-            top.terminate()
-            try:
-                top.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                top.kill()
+        if top is not None:
+            stop_top(top)
 
-    def spawn_top(self) -> subprocess.Popen[bytes]:
-        self.out("Opening hull top; press q or Ctrl-C to stop the demo.")
+    def spawn_top(self, announce: bool = True) -> subprocess.Popen[bytes]:
+        if announce:
+            self.out("Opening hull top; press q or Ctrl-C to stop the demo.")
         return subprocess.Popen(
             [
                 sys.executable,
@@ -676,6 +678,15 @@ class Demo:
 
 def raise_interrupted(*_: Any) -> None:
     raise Interrupted()
+
+
+def stop_top(top: subprocess.Popen[bytes]) -> None:
+    if top.poll() is None:
+        top.terminate()
+        try:
+            top.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            top.kill()
 
 
 def snapshot_ready(controller: Process, path: Path, targets: Sequence[str]) -> bool:
