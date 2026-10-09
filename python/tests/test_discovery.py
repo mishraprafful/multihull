@@ -146,7 +146,7 @@ def test_snapshot_skips_unreachable_endpoint(
         "gke-prod",
         "kubernetes",
         llama_spec.name,
-        {"namespace": "inference", "service": "llama-8b", "deployment": "llama-8b"},
+        {"namespace": "multihull", "service": "llama-8b", "deployment": "llama-8b"},
     )
     state.put(StateRecord(llama_spec.name, "gke-prod", ref.to_json(), None, "h"))
     providers = {t.provider: create(t.type) for t in llama_spec.targets}

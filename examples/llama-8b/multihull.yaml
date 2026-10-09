@@ -29,7 +29,7 @@ targets:
     type: kubernetes
     priority: 1
     replicas: {min: 2}
-    kubernetes: {context: gke_acme_europe-west4_prod, namespace: inference}
+    kubernetes: {context: gke_acme_europe-west4_prod, namespace: multihull}
   - provider: modal-main      # secondary, warm
     type: modal
     priority: 2

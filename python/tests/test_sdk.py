@@ -35,8 +35,8 @@ def test_from_yaml_matches_kwargs(llama_raw: dict[str, Any]) -> None:
 
 
 def test_target_factory_builds_spec_targets() -> None:
-    k8s = target.kubernetes("gke", 1, namespace="inference", context="ctx", replicas=(2, 4))
-    assert k8s.type == "kubernetes" and k8s.kubernetes.namespace == "inference"
+    k8s = target.kubernetes("gke", 1, namespace="multihull", context="ctx", replicas=(2, 4))
+    assert k8s.type == "kubernetes" and k8s.kubernetes.namespace == "multihull"
     assert k8s.kubernetes.context == "ctx" and k8s.replicas.min == 2 and k8s.replicas.max == 4
     assert k8s.kubernetes.serviceType == "LoadBalancer" and k8s.kubernetes.endpoint is None
     kind = target.kubernetes(

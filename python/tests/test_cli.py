@@ -130,7 +130,7 @@ def test_status_reads_state(tmp_path: Path) -> None:
     empty = runner.invoke(app, ["status", str(path), "--state", str(state_path)])
     assert empty.exit_code == 0 and "no state" in empty.output
     state = LocalState(state_path)
-    ref = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "inference"})
+    ref = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "multihull"})
     state.put(StateRecord("llama-8b", "gke-prod", ref.to_json(), None, "h", "Ready"))
     result = runner.invoke(app, ["status", str(path), "--state", str(state_path)])
     assert result.exit_code == 0, result.output
@@ -143,7 +143,7 @@ def test_status_rebuilds_missing_state_via_rediscover(
     path = copy_fixture(tmp_path)
     state_path = tmp_path / "state.db"
     fake = fake_registry["kubernetes"]
-    fake.rediscovered = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "inference"})
+    fake.rediscovered = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "multihull"})
     result = runner.invoke(app, ["status", str(path), "--state", str(state_path)])
     assert result.exit_code == 0, result.output
     assert "rebuilt state from rediscover: gke-prod" in result.output

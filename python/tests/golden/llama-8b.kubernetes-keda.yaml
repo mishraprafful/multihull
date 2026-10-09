@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: multihull-llama-8b
-  namespace: inference
+  namespace: multihull
   labels:
     multihull.dev/service: llama-8b
     multihull.dev/provider: gke-prod
@@ -14,7 +14,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: llama-8b
-  namespace: inference
+  namespace: multihull
   labels:
     multihull.dev/service: llama-8b
     multihull.dev/provider: gke-prod
@@ -107,7 +107,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: llama-8b
-  namespace: inference
+  namespace: multihull
   labels:
     multihull.dev/service: llama-8b
     multihull.dev/provider: gke-prod
@@ -125,7 +125,7 @@ apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
   name: llama-8b
-  namespace: inference
+  namespace: multihull
   labels:
     multihull.dev/service: llama-8b
     multihull.dev/provider: gke-prod

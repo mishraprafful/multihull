@@ -111,7 +111,7 @@ def test_apply_with_injected_client(target_for, monkeypatch: pytest.MonkeyPatch)
     provider = KubernetesProvider(client=client)
     ref = provider.apply(target_for("gke-prod"), None)
     assert ref.ids == {
-        "namespace": "inference",
+        "namespace": "multihull",
         "deployment": "llama-8b",
         "service": "llama-8b",
         "context": "gke_acme_europe-west4_prod",
@@ -137,15 +137,15 @@ def test_status_endpoint_rediscover_logs_destroy(
     ref = provider.apply(target_for("gke-prod"), None)
 
     assert provider.status(ref).phase == "Pending"
-    deployment = client.objects[("Deployment", "llama-8b", "inference")]
+    deployment = client.objects[("Deployment", "llama-8b", "multihull")]
     deployment["status"] = {"readyReplicas": 1}
     assert provider.status(ref).phase == "Degraded"
     deployment["status"] = {"readyReplicas": 2}
     observed = provider.status(ref)
     assert (observed.phase, observed.ready_replicas, observed.desired_replicas) == ("Ready", 2, 2)
 
-    assert provider.endpoint(ref).url == "http://llama-8b.inference.svc.cluster.local:80"
-    service = client.objects[("Service", "llama-8b", "inference")]
+    assert provider.endpoint(ref).url == "http://llama-8b.multihull.svc.cluster.local:80"
+    service = client.objects[("Service", "llama-8b", "multihull")]
     service["status"] = {"loadBalancer": {"ingress": [{"ip": "10.0.0.9"}]}}
     assert provider.endpoint(ref).url == "http://10.0.0.9:80"
 
@@ -156,7 +156,7 @@ def test_status_endpoint_rediscover_logs_destroy(
     assert list(provider.logs(ref, timedelta(minutes=5)))[0].startswith("pod-a hello")
 
     provider.scale(ref, 3, 9)
-    assert client.objects[("Deployment", "llama-8b", "inference")]["spec"]["replicas"] == 3
+    assert client.objects[("Deployment", "llama-8b", "multihull")]["spec"]["replicas"] == 3
 
     provider.destroy(ref)
     assert ("Deployment", "llama-8b") in client.deleted
