@@ -1,6 +1,9 @@
 # Multihull
 
-[![CI](https://github.com/mishraprafful/multihull/actions/workflows/ci.yml/badge.svg)](https://github.com/mishraprafful/multihull/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/multihull)](https://pypi.org/project/multihull/)
+[![crates.io](https://img.shields.io/crates/v/multihull)](https://crates.io/crates/multihull)
+[![CI](https://github.com/mishraprafful/multihull/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mishraprafful/multihull/actions/workflows/ci.yml?query=branch%3Amain)
+[![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
 
 Deploy always-warm GPU inference containers to many providers from one `multihull.yaml`, serve them behind one URL, and fail over between providers per request.
 
