@@ -30,6 +30,14 @@ impl UpstreamResponse {
     pub fn body_pending(&self) -> bool {
         self.first_frame.is_some() && !self.response.body().is_end_stream()
     }
+
+    pub fn first_bytes(&self) -> &[u8] {
+        self.first_frame
+            .as_ref()
+            .and_then(Frame::data_ref)
+            .map(|data| data.as_ref())
+            .unwrap_or_default()
+    }
 }
 
 pub struct AttemptOutcome {

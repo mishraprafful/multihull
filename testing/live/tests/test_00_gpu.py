@@ -5,12 +5,14 @@ from typing import Any
 
 import pytest
 
+from e2e.client import Outcome
 from live.gpu import (
     BUDGET_USD,
     DEFAULT_MAX_MINUTES,
     MAX_MINUTES_ENV,
     Budget,
     BudgetExceeded,
+    edge_not_found,
     ejected,
     max_minutes_from_env,
     new_api_key,
@@ -105,6 +107,14 @@ def test_ejected_mirrors_the_router_gates_not_just_the_health_label() -> None:
     assert ejected({"health": "down", "circuit": None, "probe": None})
     for routable in ("unspecified", "degraded", "draining"):
         assert not ejected({"health": routable, "circuit": "closed", "probe": {"state": "up"}})
+
+
+def test_edge_not_found_lists_only_404_outcomes() -> None:
+    served = Outcome(index=0, stream=False, started_at=0.0, status=200, done=True)
+    edge = Outcome(index=1, stream=False, started_at=0.0, status=404, body="modal-http: x")
+    failed = Outcome(index=2, stream=False, started_at=0.0, status=502)
+    assert edge_not_found([served, failed]) == []
+    assert edge_not_found([served, edge, failed]) == [edge.describe()]
 
 
 def gpu_summary() -> RunSummary:

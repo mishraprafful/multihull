@@ -127,6 +127,12 @@ message Endpoint {
   uint32 max_concurrency = 10;
   map<string, string> inject_headers = 11;
   string health_path = 12;
+  EdgeError edge_error = 13;
+}
+
+message EdgeError {
+  repeated uint32 statuses = 1;
+  string body_prefix = 2;
 }
 
 enum EndpointType {

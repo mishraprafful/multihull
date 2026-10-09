@@ -17,6 +17,7 @@ import httpx
 from multihull.providers.base import (
     SERVICE_LABEL,
     CredHealth,
+    EdgeError,
     Endpoint,
     GPUOffer,
     Observed,
@@ -60,6 +61,7 @@ RESET_ENTRYPOINT = "ENTRYPOINT []"
 HEALTH_PATH_KEY = "health_path"
 DEFAULT_HEALTH_PATH = "/health"
 HEALTH_TIMEOUT_SECONDS = 5.0
+EDGE_ERROR = EdgeError(statuses=(404,), body_prefix="modal-http:")
 
 
 class CredentialStatus(StrEnum):
@@ -399,7 +401,12 @@ class ModalProvider:
         token_secret = os.environ.get(PROXY_TOKEN_SECRET_ENV)
         if token_id and token_secret:
             headers = {"Modal-Key": token_id, "Modal-Secret": token_secret}
-        return Endpoint(url=url, inject_headers=headers, region=ref.ids.get("region"))
+        return Endpoint(
+            url=url,
+            inject_headers=headers,
+            region=ref.ids.get("region"),
+            edge_error=EDGE_ERROR,
+        )
 
     def gpu_inventory(self) -> list[GPUOffer]:
         return [GPUOffer(gpu=gpu, region=None, available=True) for gpu in MODAL_GPU]

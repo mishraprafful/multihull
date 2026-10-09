@@ -65,6 +65,7 @@ def test_snapshot_shape(
         "max_concurrency",
         "inject_headers",
         "health_path",
+        "edge_error",
     }
     assert first["id"] == "llama-8b/gke-prod"
     assert first["health_path"] == "/health"
@@ -195,6 +196,66 @@ def test_snapshot_docker_endpoints(mock_docker_spec: ServiceSpec, tmp_path: Path
     proto_endpoints = message.routes[0].endpoints
     assert [e.url for e in proto_endpoints] == [e["url"] for e in endpoints]
     assert {e.type for e in proto_endpoints} == {pb.ENDPOINT_TYPE_DOCKER}
+
+
+ENDPOINT_REF_IDS: dict[str, dict[str, str]] = {
+    "kubernetes": {"endpoint": "http://10.0.0.1:8000"},
+    "modal": {"app": "multihull-llama-8b-modal-main", "environment": "main"},
+    "runpod": {"endpoint": "abc"},
+    "baseten": {"model": "abc"},
+    "replicate": {"owner": "acme"},
+    "docker": {"host": "127.0.0.1", "host_port": "18001"},
+}
+
+
+def test_only_the_modal_translator_sets_an_edge_error_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MODAL_PROXY_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_PROXY_TOKEN_SECRET", raising=False)
+    assert set(ENDPOINT_REF_IDS) == set(PROVIDERS)
+    signatures = {
+        provider_type: create(provider_type)
+        .endpoint(Ref(provider_type, provider_type, "llama-8b", ids))
+        .edge_error
+        for provider_type, ids in ENDPOINT_REF_IDS.items()
+    }
+    modal = signatures.pop("modal")
+    assert modal is not None
+    assert modal.to_json() == {"statuses": [404], "body_prefix": "modal-http:"}
+    assert signatures == {provider_type: None for provider_type in signatures}
+
+
+def test_snapshot_carries_the_modal_edge_error_to_the_router_document(
+    llama_spec: ServiceSpec, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LLAMA_API_KEYS", "hull_test_snapshotkey")
+    monkeypatch.delenv("MODAL_PROXY_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_PROXY_TOKEN_SECRET", raising=False)
+    state = LocalState(tmp_path / "state.db")
+    providers = {
+        t.provider: create("modal", workspace="acme") if t.type == "modal" else FakeProvider()
+        for t in llama_spec.targets
+    }
+    for target in llama_spec.targets:
+        ref = Ref(target.provider, target.type, llama_spec.name, ENDPOINT_REF_IDS[target.type])
+        state.put(StateRecord(llama_spec.name, target.provider, ref.to_json(), None, "h", "Ready"))
+    snapshot = discovery.build_snapshot(llama_spec, state, providers, version=1)
+    by_provider = {e["provider"]: e for e in snapshot["routes"][0]["endpoints"]}
+    assert by_provider["modal-main"]["edge_error"] == {
+        "statuses": [404],
+        "body_prefix": "modal-http:",
+    }
+    assert by_provider["gke-prod"]["edge_error"] is None
+    message = discovery.snapshot_to_proto(snapshot)
+    proto_by_provider = {e.provider: e for e in message.routes[0].endpoints}
+    assert list(proto_by_provider["modal-main"].edge_error.statuses) == [404]
+    assert proto_by_provider["modal-main"].edge_error.body_prefix == "modal-http:"
+    assert not proto_by_provider["gke-prod"].HasField("edge_error")
+    document = discovery.router_document(snapshot)["routes"][0]
+    written = {e["provider"]: e["edge_error"] for e in document["endpoints"]}
+    assert written["modal-main"] == {"statuses": [404], "body_prefix": "modal-http:"}
+    assert written["gke-prod"] is None
 
 
 def test_every_provider_type_has_a_distinct_proto_endpoint_type() -> None:
