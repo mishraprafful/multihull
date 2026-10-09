@@ -14,7 +14,7 @@ import yaml
 from typer.testing import CliRunner
 
 from multihull import spec as specmod
-from multihull.cli import app
+from multihull.cli import DEFAULT_IMAGE, app
 from multihull.controller import Controller
 from multihull.providers import docker as dockermod
 from multihull.providers.base import Ref
@@ -89,7 +89,7 @@ def test_init_with_and_without_dockerfile(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     written = yaml.safe_load((project / "multihull.yaml").read_text())
     assert written["name"] == "my-model"
-    assert written["container"]["image"].startswith("ghcr.io/")
+    assert written["container"]["image"] == DEFAULT_IMAGE
     specmod.load(project / "multihull.yaml")
 
     assert runner.invoke(app, ["init", str(project)]).exit_code == 1

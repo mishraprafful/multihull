@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from live import preflight
-from live.preflight import annotation, render, run
+from live.preflight import STATUS_URL, annotation, render, run
 from multihull.providers.modal import CredentialCheck, CredentialStatus
 
 FAKE_ID = "ak-fakeFAKEfake0123456789"
@@ -88,7 +88,7 @@ def test_unreachable_does_not_ask_for_a_new_token() -> None:
     unreachable = CredentialCheck(CredentialStatus.UNREACHABLE, "no answer from Modal within 10 s")
     result = run(env(), lambda: unreachable)
     report = render(result)
-    assert "**Credentials unreachable.**" in report and "status.modal.com" in report
+    assert "**Credentials unreachable.**" in report and STATUS_URL in report
     assert "### Fix" not in report
 
 
