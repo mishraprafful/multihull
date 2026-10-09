@@ -47,4 +47,4 @@ make demo DEMO_ARGS="--duration 60 --scripted --check --no-top"
 | `--router-bin`, `MULTIHULL_ROUTER_BIN` | Router binary; built with `cargo build --release` when missing |
 | `--spec PATH` | Another spec with docker targets |
 
-The route API key is generated per run and handed to `hull deploy` and `hull controller` through `MULTIHULL_DEMO_API_KEYS`; it is never written to disk. The discovery stream runs in plaintext on loopback (`hull controller --insecure`), which is the local development mode described in the security reference.
+The route API key is a throwaway generated per run, handed to `hull deploy` and `hull controller` through `MULTIHULL_DEMO_API_KEYS` and written only to `route-api-key` (mode 0600) in the run's temp directory, which teardown removes. The demo never prints it; it prints the path and `export OPENAI_API_KEY=$(cat <path>)` instead. The discovery stream runs in plaintext on loopback (`hull controller --insecure`), which is the local development mode described in the security reference.

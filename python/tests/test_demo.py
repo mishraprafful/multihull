@@ -91,11 +91,30 @@ def test_demo_prints_live_moment_with_container_names(tmp_path: Path) -> None:
     text = "\n".join(lines)
     assert "  docker stop multihull-demo-ab12cd-primary" in text
     assert "  docker start multihull-demo-ab12cd-primary" in text
-    assert demo.api_key not in text
+    assert f"export OPENAI_API_KEY=$(cat {tmp_path / 'route-api-key'})" in text
+    secret = demo.api_key.split("_", 2)[2]
+    assert demo.api_key not in text and secret not in text
     assert demo.scripted_events() == [
         (15.0, "docker stop multihull-demo-ab12cd-primary"),
         (30.0, "docker start multihull-demo-ab12cd-primary"),
     ]
+
+
+def test_key_file_is_private_and_never_printed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lines: list[str] = []
+    demo = Demo(DemoArgs(run_id="ab12cd"), FakeDockerClient(), out=lines.append)
+    monkeypatch.setattr(demo, "verify_cleanup", lambda: [])
+    demo.workdir = tmp_path
+    path = demo.write_key_file()
+    assert path == tmp_path / "route-api-key"
+    assert path.read_text() == demo.api_key + "\n"
+    assert path.stat().st_mode & 0o777 == 0o600
+    demo.say("deploying")
+    demo.stats = LoadStats(requests=1)
+    demo.report()
+    assert demo.api_key not in "\n".join(lines)
 
 
 class FakeProcess:

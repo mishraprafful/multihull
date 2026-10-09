@@ -310,6 +310,18 @@ class Demo:
     def primary(self) -> str:
         return self.targets[0]
 
+    @property
+    def key_path(self) -> Path:
+        assert self.workdir is not None
+        return self.workdir / "route-api-key"
+
+    def write_key_file(self) -> Path:
+        path = self.key_path
+        path.touch(mode=0o600)
+        path.chmod(0o600)
+        path.write_text(self.api_key + "\n")
+        return path
+
     def elapsed(self) -> float:
         return time.monotonic() - self.started_at
 
@@ -351,6 +363,7 @@ class Demo:
     def prepare_workdir(self) -> Path:
         self.workdir = Path(tempfile.mkdtemp(prefix=f"multihull-demo-{self.run_id}-"))
         (self.workdir / ".multihull").mkdir()
+        self.write_key_file()
         document = yaml.safe_load(self.args.spec.read_text())
         self.targets = [target["provider"] for target in document["targets"]]
         ports = host_ports(self.run_id, count=len(self.targets))
@@ -494,15 +507,14 @@ class Demo:
             self.out(f"  {command}")
         host = self.spec_document()["route"]["hostname"]
         self.out("")
-        self.out(f"Call it yourself (route key in {API_KEY_ENV}, printed only on a terminal):")
+        self.out(f"Call it yourself (throwaway route key for this run in {self.key_path}):")
+        self.out(f"  export OPENAI_API_KEY=$(cat {self.key_path})")
         self.out(
             f'  curl -N {self.router_url}/v1/chat/completions -H "Host: {host}" '
-            f'-H "Authorization: Bearer ${API_KEY_ENV}" -H "Content-Type: application/json" '
+            '-H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" '
             f'-d \'{{"model":"{MODEL}","stream":true,'
             f'"messages":[{{"role":"user","content":"hi"}}]}}\''
         )
-        if sys.stdin.isatty() and not self.args.scripted:
-            self.out(f"  export {API_KEY_ENV}={self.api_key}")
         self.out("")
 
     def scripted_events(self) -> list[tuple[float, str]]:
