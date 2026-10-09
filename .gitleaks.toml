@@ -1,0 +1,14 @@
+title = "Multihull gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixture: a hull_-prefixed API key and its blake3 digest, shared by the Python and Rust tests"
+targetRules = ["generic-api-key"]
+paths = ['''^proto/testdata/api-key-hash\.json$''']
+
+[[allowlists]]
+description = "Test fixture: placeholder Postgres state URLs with the fake host db.internal"
+regexTarget = "line"
+regexes = ['''postgres(ql)?://[^:@\s]+:[^@\s]+@db\.internal/''']
