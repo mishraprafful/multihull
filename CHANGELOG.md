@@ -14,8 +14,13 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - `CODE_OF_CONDUCT.md`, the Contributor Covenant 2.1, linked from `CONTRIBUTING.md` (#141).
 - Snapshot field `Endpoint.edge_error` (statuses plus body prefix): the signature of a response from the provider's edge rather than the model. The Modal translator sets `404` and `modal-http:`, what a stopped app answers (#122).
 
+### Changed
+
+- `hull init` writes `namespace: multihull`; the examples and docs follow. The Helm chart creates that namespace (`workloads.namespace`, `workloads.createNamespace`, label `multihull.dev/managed-by: multihull`, kept on uninstall) and skips it when it is the release namespace, where `helm install --create-namespace` applies. A spec without `namespace` still deploys to `default` (#148).
+
 ### Fixed
 
+- `hull deploy` to a Kubernetes namespace that does not exist stops before applying with one line naming the namespace and context and pointing at the chart or `kubectl create namespace`; the translator never creates namespaces. The deploy, destroy and status tables show only the exception reason (for a Kubernetes `ApiException`, the status and the message from its body), never the client's header and body dump (#148).
 - The router treats a response matching the endpoint's edge error signature as `Transient`, retries it on another provider even for a POST without an `Idempotency-Key`, and counts it against the endpoint circuit, so a stopped Modal app no longer returns `404 modal-http: invalid function call` to callers during the 14 s before the probe ejects it. A 404 without the signature is still the model's answer and is returned as before (#122).
 
 ## [0.1.0] - 2026-10-09

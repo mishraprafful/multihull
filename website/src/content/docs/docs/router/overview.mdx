@@ -80,10 +80,15 @@ Each `v*` release pushes the chart to `oci://ghcr.io/mishraprafful/charts/multih
 The chart and images are public, so no registry login or pull secret is needed:
 
 ```sh
-helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0
+helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0 \
+  -n multihull --create-namespace
 ```
 
 `helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` lists every value. A private fork publishing its own packages needs `helm registry login ghcr.io` and a pull secret named in `imagePullSecrets`.
+
+### Workload namespace
+
+`hull init` targets `namespace: multihull`. The chart renders that Namespace (`workloads.namespace`, `workloads.createNamespace: true`) with the chart labels plus `multihull.dev/managed-by: multihull`, so one `helm install` leaves the cluster ready for `hull deploy`; `hull` never creates namespaces. The Namespace carries `helm.sh/resource-policy: keep`, so `helm uninstall` leaves it and the workloads in it; remove it with `kubectl delete namespace`. Helm cannot create its own release namespace from a template: when `workloads.namespace` equals the release namespace, as in the install above, the chart skips the manifest and `--create-namespace` creates it. `workloads.forceCreateNamespace: true` renders it anyway.
 
 ### Artifact Hub
 
