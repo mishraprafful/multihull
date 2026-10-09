@@ -69,6 +69,6 @@ First release. Human-facing notes: [docs/releases/0.1.0.md](docs/releases/0.1.0.
 - SQLite is the only state backend. `s3://`, `gs://` and `postgres://` URLs exit with a not-implemented error.
 - The chart ships no RBAC for the controller and cannot mount a kubeconfig for other clusters.
 - GPU proven on Modal only (`live-gpu.yml`, #49); no Kubernetes GPU run. `hull failover test`, hedging, cost-aware placement and per-key rate limits are planned, not built.
-- Images and the chart are private until the owner switches the packages to public.
+- Images and the chart were private at tag time; public on GHCR since 2026-10-09.
 
 [0.1.0]: https://github.com/mishraprafful/multihull/releases/tag/v0.1.0
