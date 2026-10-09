@@ -78,3 +78,7 @@ helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.
 ```
 
 `helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` lists every value.
+
+### Artifact Hub
+
+`Chart.yaml` carries the `artifacthub.io/*` annotations (license, links, images, changes) and `charts/artifacthub-repo.yml` holds the repository metadata. The listing appears once the owner registers `oci://ghcr.io/mishraprafful/charts/multihull` on Artifact Hub and the GHCR packages are public; the next release tag then pushes the metadata to the `artifacthub.io` tag next to the chart.

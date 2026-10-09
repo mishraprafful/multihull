@@ -20,6 +20,8 @@ version=${tag#v}
 chart="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/multihull"
 helm="${HELM:-helm}"
 package="$destination/multihull-$version.tgz"
+staging="$(mktemp -d)"
+trap 'rm -rf "$staging"' EXIT
 
 check_image() {
   local component=$1 expected=$2 image
@@ -31,10 +33,24 @@ check_image() {
   fi
 }
 
-"$helm" package "$chart" --version "$version" --app-version "$version" --destination "$destination"
+check_annotated_image() {
+  local expected=$1
+  if ! "$helm" show chart "$package" | grep -qF "image: $expected"; then
+    echo "artifacthub.io/images does not list '$expected'" >&2
+    exit 1
+  fi
+}
+
+cp -R "$chart" "$staging/multihull"
+sed -i.bak -E "s#(image: ghcr\.io/mishraprafful/multihull-[a-z]+):[0-9A-Za-z.-]+\$#\1:$version#" "$staging/multihull/Chart.yaml"
+rm "$staging/multihull/Chart.yaml.bak"
+
+"$helm" package "$staging/multihull" --version "$version" --app-version "$version" --destination "$destination"
 "$helm" lint "$package"
 
 check_image router "ghcr.io/mishraprafful/multihull-router:$version"
 check_image controller "ghcr.io/mishraprafful/multihull-controller:$version" \
   --set controller.enabled=true --set controller.stateBackend.existingSecret=state \
   --set controller.insecure=true
+check_annotated_image "ghcr.io/mishraprafful/multihull-router:$version"
+check_annotated_image "ghcr.io/mishraprafful/multihull-controller:$version"

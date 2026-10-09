@@ -140,6 +140,8 @@ jobs:
           > /dev/null
       - name: Package the chart as a release would, without pushing
         run: charts/package.sh "v0.0.0-ci.$GITHUB_RUN_NUMBER" "$RUNNER_TEMP/chart"
+      - name: Render the Artifact Hub metadata as a release would, without pushing
+        run: charts/artifacthub-metadata.sh 00000000-0000-4000-8000-000000000000 "$RUNNER_TEMP/artifacthub"
       - name: Reject release tags that are not semver
         run: |
           for tag in v1.2 1.2.3 v1.2.3+build.1; do
