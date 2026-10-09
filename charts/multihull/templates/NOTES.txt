@@ -6,6 +6,15 @@ Port-forward the router:
 Inspect live endpoints via the admin listener:
   curl http://localhost:9090/debug/endpoints
 
+{{- if not .Values.workloads.createNamespace }}
+Workload namespace: {{ .Values.workloads.namespace }} (not created by the chart; create it before hull deploy)
+{{- else if and (eq .Values.workloads.namespace .Release.Namespace) (not .Values.workloads.forceCreateNamespace) }}
+Workload namespace: {{ .Values.workloads.namespace }} (the release namespace; install with --create-namespace, the chart cannot create it)
+{{- else }}
+Workload namespace: {{ .Values.workloads.namespace }} (created by the chart, kept on uninstall)
+{{- end }}
+Point hull deploy at it with kubernetes.namespace: {{ .Values.workloads.namespace }} in multihull.yaml.
+
 Snapshot source: {{ .Values.router.snapshot.type }}
 {{- if .Values.controller.enabled }}
 Controller: enabled, streaming snapshots from {{ include "multihull.fullname" . }}-controller:{{ .Values.controller.grpcPort }} ({{ if .Values.controller.insecure }}plaintext, controller.insecure=true{{ else }}TLS{{ if .Values.controller.tls.clientCaSecret }} with client certificates{{ end }}{{ end }})

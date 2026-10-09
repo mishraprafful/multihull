@@ -340,6 +340,8 @@ class InCluster:
             "router.snapshot.type": "grpc",
             "router.snapshot.tls.secretName": ROUTER_DISCOVERY_SECRET,
             "router.snapshot.token.existingSecret": TOKEN_SECRET,
+            "workloads.namespace": self.namespace,
+            "workloads.createNamespace": "false",
         }
         return [arg for key, value in values.items() for arg in ("--set", f"{key}={value}")]
 

@@ -123,6 +123,16 @@ manifest_lacks() {
   fi
 }
 
+rendered_lacks() {
+  local name=$1 text=$2
+  shift 2
+  if ! "$helm" template multihull "$chart" "$@" >"$work/$name-all.yaml"; then
+    fail "$name" "helm template failed"
+  elif grep -qF -- "$text" "$work/$name-all.yaml"; then
+    fail "$name" "unexpected '$text' in the full render"
+  fi
+}
+
 lacks() {
   local name=$1 text=$2
   if grep -qF "$text" "$work/$name.toml"; then
@@ -264,6 +274,16 @@ lacks https-token "ca = "
 accepted http-plaintext-opt-in --set router.snapshot.type=http \
   --set router.snapshot.value=http://snapshots.local/llama.json --set router.snapshot.insecure=true
 has_line http-plaintext-opt-in "insecure = true"
+
+manifest_has workload-namespace namespace.yaml 'name: "multihull"'
+manifest_has workload-namespace namespace.yaml "multihull.dev/managed-by: multihull"
+manifest_has workload-namespace namespace.yaml "helm.sh/resource-policy: keep"
+manifest_has workload-namespace-custom namespace.yaml 'name: "inference"' \
+  --set workloads.namespace=inference
+rendered_lacks workload-namespace-is-release "kind: Namespace" --namespace multihull
+manifest_has workload-namespace-forced namespace.yaml 'name: "multihull"' \
+  --namespace multihull --set workloads.forceCreateNamespace=true
+rendered_lacks workload-namespace-disabled "kind: Namespace" --set workloads.createNamespace=false
 
 template_fails grpc-without-tls "router.snapshot.tls.secretName" \
   "${controller_tls[@]}" --set router.snapshot.type=grpc
