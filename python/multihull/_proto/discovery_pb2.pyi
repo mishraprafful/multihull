@@ -208,7 +208,7 @@ class Sticky(_message.Message):
     def __init__(self, key: _Optional[str] = ..., ttl_seconds: _Optional[int] = ..., mode: _Optional[_Union[StickyMode, str]] = ..., on_unhealthy: _Optional[_Union[StickyOnUnhealthy, str]] = ..., fallback_key: _Optional[str] = ...) -> None: ...
 
 class Endpoint(_message.Message):
-    __slots__ = ("id", "provider", "type", "url", "region", "priority", "weight", "health", "ready_replicas", "max_concurrency", "inject_headers", "health_path")
+    __slots__ = ("id", "provider", "type", "url", "region", "priority", "weight", "health", "ready_replicas", "max_concurrency", "inject_headers", "health_path", "edge_error")
     class InjectHeadersEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -228,6 +228,7 @@ class Endpoint(_message.Message):
     MAX_CONCURRENCY_FIELD_NUMBER: _ClassVar[int]
     INJECT_HEADERS_FIELD_NUMBER: _ClassVar[int]
     HEALTH_PATH_FIELD_NUMBER: _ClassVar[int]
+    EDGE_ERROR_FIELD_NUMBER: _ClassVar[int]
     id: str
     provider: str
     type: EndpointType
@@ -240,4 +241,13 @@ class Endpoint(_message.Message):
     max_concurrency: int
     inject_headers: _containers.ScalarMap[str, str]
     health_path: str
-    def __init__(self, id: _Optional[str] = ..., provider: _Optional[str] = ..., type: _Optional[_Union[EndpointType, str]] = ..., url: _Optional[str] = ..., region: _Optional[str] = ..., priority: _Optional[int] = ..., weight: _Optional[int] = ..., health: _Optional[_Union[Health, str]] = ..., ready_replicas: _Optional[int] = ..., max_concurrency: _Optional[int] = ..., inject_headers: _Optional[_Mapping[str, str]] = ..., health_path: _Optional[str] = ...) -> None: ...
+    edge_error: EdgeError
+    def __init__(self, id: _Optional[str] = ..., provider: _Optional[str] = ..., type: _Optional[_Union[EndpointType, str]] = ..., url: _Optional[str] = ..., region: _Optional[str] = ..., priority: _Optional[int] = ..., weight: _Optional[int] = ..., health: _Optional[_Union[Health, str]] = ..., ready_replicas: _Optional[int] = ..., max_concurrency: _Optional[int] = ..., inject_headers: _Optional[_Mapping[str, str]] = ..., health_path: _Optional[str] = ..., edge_error: _Optional[_Union[EdgeError, _Mapping]] = ...) -> None: ...
+
+class EdgeError(_message.Message):
+    __slots__ = ("statuses", "body_prefix")
+    STATUSES_FIELD_NUMBER: _ClassVar[int]
+    BODY_PREFIX_FIELD_NUMBER: _ClassVar[int]
+    statuses: _containers.RepeatedScalarFieldContainer[int]
+    body_prefix: str
+    def __init__(self, statuses: _Optional[_Iterable[int]] = ..., body_prefix: _Optional[str] = ...) -> None: ...

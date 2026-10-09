@@ -65,6 +65,7 @@ def test_snapshot_shape(
         "max_concurrency",
         "inject_headers",
         "health_path",
+        "edge_error",
     }
     assert first["id"] == "llama-8b/gke-prod"
     assert first["health_path"] == "/health"

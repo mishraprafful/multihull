@@ -105,6 +105,7 @@ def endpoint_entry(
         "max_concurrency": spec.scaling.concurrency or 0,
         "inject_headers": dict(endpoint.inject_headers),
         "health_path": spec.container.health.path,
+        "edge_error": endpoint.edge_error.to_json() if endpoint.edge_error else None,
     }
 
 
@@ -225,6 +226,16 @@ def router_endpoint(endpoint: pb.Endpoint) -> dict[str, Any]:
         "max_concurrency": endpoint.max_concurrency,
         "inject_headers": dict(endpoint.inject_headers),
         "health_path": endpoint.health_path,
+        "edge_error": router_edge_error(endpoint),
+    }
+
+
+def router_edge_error(endpoint: pb.Endpoint) -> dict[str, Any] | None:
+    if not endpoint.HasField("edge_error"):
+        return None
+    return {
+        "statuses": list(endpoint.edge_error.statuses),
+        "body_prefix": endpoint.edge_error.body_prefix,
     }
 
 
@@ -289,7 +300,14 @@ def endpoint_to_proto(entry: dict[str, Any]) -> pb.Endpoint:
         max_concurrency=entry["max_concurrency"],
         inject_headers=dict(entry["inject_headers"]),
         health_path=entry.get("health_path", ""),
+        edge_error=edge_error_to_proto(entry.get("edge_error")),
     )
+
+
+def edge_error_to_proto(entry: dict[str, Any] | None) -> pb.EdgeError | None:
+    if not entry:
+        return None
+    return pb.EdgeError(statuses=list(entry["statuses"]), body_prefix=entry["body_prefix"])
 
 
 def route_to_proto(route: dict[str, Any]) -> pb.Route:

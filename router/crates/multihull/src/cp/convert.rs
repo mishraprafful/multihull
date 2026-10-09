@@ -151,6 +151,7 @@ impl From<proto::Endpoint> for core::Endpoint {
             max_concurrency: value.max_concurrency,
             inject_headers: value.inject_headers.into_iter().collect::<BTreeMap<_, _>>(),
             health_path: value.health_path,
+            edge_error: value.edge_error.map(Into::into),
         }
     }
 }
@@ -170,6 +171,29 @@ impl From<core::Endpoint> for proto::Endpoint {
             max_concurrency: value.max_concurrency,
             inject_headers: value.inject_headers.into_iter().collect(),
             health_path: value.health_path,
+            edge_error: value.edge_error.map(Into::into),
+        }
+    }
+}
+
+impl From<proto::EdgeError> for core::EdgeError {
+    fn from(value: proto::EdgeError) -> Self {
+        Self {
+            statuses: value
+                .statuses
+                .into_iter()
+                .filter_map(|status| u16::try_from(status).ok())
+                .collect(),
+            body_prefix: value.body_prefix,
+        }
+    }
+}
+
+impl From<core::EdgeError> for proto::EdgeError {
+    fn from(value: core::EdgeError) -> Self {
+        Self {
+            statuses: value.statuses.into_iter().map(u32::from).collect(),
+            body_prefix: value.body_prefix,
         }
     }
 }
@@ -318,6 +342,10 @@ mod tests {
                         "from-env".to_string(),
                     )]),
                     health_path: "/healthz".into(),
+                    edge_error: Some(core::EdgeError {
+                        statuses: vec![404],
+                        body_prefix: "modal-http:".into(),
+                    }),
                 }],
             }],
         }
@@ -362,6 +390,24 @@ mod tests {
         let converted: core::Endpoint = endpoint.into();
         assert_eq!(converted.kind, core::EndpointType::Unspecified);
         assert_eq!(converted.health, core::Health::Unspecified);
+        assert_eq!(converted.edge_error, None);
+    }
+
+    #[test]
+    fn edge_error_round_trips_and_drops_statuses_above_u16() {
+        let endpoint = proto::Endpoint {
+            edge_error: Some(proto::EdgeError {
+                statuses: vec![404, 70_000],
+                body_prefix: "modal-http:".into(),
+            }),
+            ..Default::default()
+        };
+        let converted: core::Endpoint = endpoint.into();
+        let edge = converted.edge_error.clone().unwrap();
+        assert_eq!(edge.statuses, vec![404]);
+        assert_eq!(edge.body_prefix, "modal-http:");
+        let back: proto::Endpoint = converted.into();
+        assert_eq!(back.edge_error.unwrap().statuses, vec![404]);
     }
 
     #[test]

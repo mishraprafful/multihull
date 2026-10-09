@@ -89,11 +89,21 @@ class Observed:
     message: str = ""
 
 
+@dataclass(frozen=True)
+class EdgeError:
+    statuses: tuple[int, ...]
+    body_prefix: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {"statuses": list(self.statuses), "body_prefix": self.body_prefix}
+
+
 @dataclass
 class Endpoint:
     url: str
     inject_headers: dict[str, str] = field(default_factory=dict)
     region: str | None = None
+    edge_error: EdgeError | None = None
 
 
 @dataclass
