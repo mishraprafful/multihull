@@ -8,6 +8,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 
 - `hull top`: a live terminal view of the router from its admin listener, with per-endpoint state, circuit, probe, request rate, in-flight count and TTFT quantiles, plus per-route rates, errors and failovers (#40).
 - Router metric `router_responses_total{route,status}` counting responses returned to clients (#40).
+- `make demo-cloud`: the five-beat failover demo on kind and Modal, specs in `examples/demo-cloud/` (CPU mock server, and two Modal L4 targets serving a real model), runbook `docs/runbooks/demo-cloud.md` (#43).
 
 ## [0.1.0] - 2026-10-09
 
