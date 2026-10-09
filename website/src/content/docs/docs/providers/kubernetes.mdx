@@ -15,6 +15,8 @@ Uses the `kubernetes` Python client with server-side apply (field manager `multi
 
 Credentials: the kubeconfig context named in the target. Without `context`, `hull` running in a pod with no kubeconfig uses the pod's service account, as the [in-cluster controller](/docs/router/controller-stream/#controller-in-the-cluster) does.
 
+The namespace must exist; `hull deploy` does not create it and fails with a 404 from the API server when it is missing.
+
 ## Reaching the Service
 
 | Option | Default | Effect |
@@ -35,6 +37,8 @@ kubernetes:
 ```
 
 An empty `resources.gpu` runs the pod on CPU: no `nvidia.com/gpu` limit, toleration or GPU node selector.
+
+The images under `ghcr.io/mishraprafful` are `linux/amd64` only. A kind node on Apple Silicon cannot pull them; build the image locally and load it with `kind load docker-image <image> --name <cluster>`.
 
 ## Translation
 
