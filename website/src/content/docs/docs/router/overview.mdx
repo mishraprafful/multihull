@@ -67,7 +67,7 @@ The Helm chart in `charts/multihull` runs the router as a Deployment with a Serv
 
 Each `v*` release pushes the chart to `oci://ghcr.io/mishraprafful/charts/multihull`. The chart `version` and `appVersion` are the release version without the `v`. The router image defaults to `ghcr.io/mishraprafful/multihull-router:<appVersion>` and the controller image to `ghcr.io/mishraprafful/multihull-controller:<appVersion>`; the same release publishes both. See [Controller in the cluster](/docs/router/controller-stream/#controller-in-the-cluster) for the controller's values.
 
-The chart and images stay private until the public launch. Keep a GitHub token with `read:packages` in an environment variable such as `GHCR_TOKEN`, log in, give the cluster a pull secret for the images, then install:
+The chart and images stay private until the owner switches the packages to public. Keep a GitHub token with `read:packages` in an environment variable such as `GHCR_TOKEN`, log in, give the cluster a pull secret for the images, then install:
 
 ```sh
 printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username <github-user> --password-stdin

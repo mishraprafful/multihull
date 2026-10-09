@@ -60,7 +60,7 @@ First release. Human-facing notes: [docs/releases/0.1.0.md](docs/releases/0.1.0.
 - RunPod, Baseten and Replicate are render-only: `apply`, `destroy`, `status` and `scale` raise not implemented.
 - SQLite is the only state backend. `s3://`, `gs://` and `postgres://` URLs exit with a not-implemented error.
 - The chart ships no RBAC for the controller and cannot mount a kubeconfig for other clusters.
-- No GPU run yet: `live-gpu.yml` exists but has not been executed (#49). `hull failover test`, hedging, cost-aware placement and per-key rate limits are planned, not built.
-- Images and the chart are private until the public launch.
+- GPU proven on Modal only (`live-gpu.yml`, #49); no Kubernetes GPU run. `hull failover test`, hedging, cost-aware placement and per-key rate limits are planned, not built.
+- Images and the chart are private until the owner switches the packages to public.
 
 [0.1.0]: https://github.com/mishraprafful/multihull/releases/tag/v0.1.0
