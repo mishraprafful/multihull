@@ -2,6 +2,13 @@
 
 Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `hull top`: a live terminal view of the router from its admin listener, with per-endpoint state, circuit, probe, request rate, in-flight count and TTFT quantiles, plus per-route rates, errors and failovers (#40).
+- Router metric `router_responses_total{route,status}` counting responses returned to clients (#40).
+
 ## [0.1.0] - 2026-10-09
 
 First release. Human-facing notes: [docs/releases/0.1.0.md](docs/releases/0.1.0.md).

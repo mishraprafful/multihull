@@ -44,7 +44,17 @@ timeout = 2
 
 ## Observability
 
-OTel spans `router.request` and `upstream.attempt{provider, endpoint, n, outcome}`. Prometheus: `router_requests_total`, `router_failovers_total{from,to,reason}`, `router_circuit_state`, `router_probe_total{endpoint,outcome}`, `router_upstream_ttft_seconds`, `router_queue_wait_seconds`, `router_concurrency_limit`, `router_retry_budget_remaining`, `router_output_tokens_total`. JSON access log with `attempts[]`. `/debug/endpoints`, `/debug/sessions` and `/debug/config` on the admin listener.
+OTel spans `router.request` and `upstream.attempt{provider, endpoint, n, outcome}`. Prometheus: `router_requests_total{route,endpoint,outcome}`, `router_responses_total{route,status}`, `router_failovers_total{from,reason}`, `router_circuit_state`, `router_probe_total{endpoint,outcome}`, `router_upstream_ttft_seconds`, `router_queue_wait_seconds`, `router_concurrency_limit`, `router_retry_budget_remaining`, `router_output_tokens_total`. JSON access log with `attempts[]`. `/debug/endpoints`, `/debug/sessions` and `/debug/config` on the admin listener.
+
+### Live view
+
+`hull top` polls the admin listener and renders the router in the terminal:
+
+```sh
+hull top --admin http://127.0.0.1:9090 --interval 1.0
+```
+
+Per endpoint: provider, state (`serving`, `recovering`, `down`), circuit, probe, requests per second, in-flight requests, p50 and p95 upstream time to first token. Per route: responses per second, errors per second (4xx and 5xx responses), the error total and failovers by reason. Rates come from counter deltas between polls, so the first frame shows dashes. When the router stops answering the view keeps the last frame, says `router unreachable, retrying` and keeps polling. Ctrl-C exits.
 
 ## Auth
 
