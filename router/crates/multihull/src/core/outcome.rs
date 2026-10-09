@@ -40,6 +40,7 @@ pub fn classify(
     status: Option<u16>,
     error: Option<&AttemptError>,
     ttft_timed_out: bool,
+    edge_rejected: bool,
 ) -> Outcome {
     if ttft_timed_out {
         return Outcome::Capacity;
@@ -50,6 +51,9 @@ pub fn classify(
             AttemptError::Connect | AttemptError::Reset => Outcome::Transient,
             AttemptError::IdleTimeout | AttemptError::Total => Outcome::Transient,
         };
+    }
+    if edge_rejected && status.is_some() {
+        return Outcome::Transient;
     }
     match status {
         None => Outcome::ClientAbort,
@@ -67,47 +71,60 @@ mod tests {
 
     #[test]
     fn ttft_timeout_is_capacity_regardless_of_status() {
-        assert_eq!(classify(Some(200), None, true), Outcome::Capacity);
+        assert_eq!(classify(Some(200), None, true, false), Outcome::Capacity);
         assert_eq!(
-            classify(None, Some(&AttemptError::FirstByteTimeout), false),
+            classify(None, Some(&AttemptError::FirstByteTimeout), false, false),
             Outcome::Capacity
         );
     }
 
     #[test]
     fn status_mapping_follows_taxonomy() {
-        assert_eq!(classify(Some(200), None, false), Outcome::Success);
-        assert_eq!(classify(Some(204), None, false), Outcome::Success);
-        assert_eq!(classify(Some(429), None, false), Outcome::Capacity);
-        assert_eq!(classify(Some(502), None, false), Outcome::Transient);
-        assert_eq!(classify(Some(503), None, false), Outcome::Transient);
-        assert_eq!(classify(Some(504), None, false), Outcome::Transient);
-        assert_eq!(classify(Some(500), None, false), Outcome::Fatal);
-        assert_eq!(classify(Some(404), None, false), Outcome::Fatal);
-        assert_eq!(classify(Some(401), None, false), Outcome::Fatal);
+        assert_eq!(classify(Some(200), None, false, false), Outcome::Success);
+        assert_eq!(classify(Some(204), None, false, false), Outcome::Success);
+        assert_eq!(classify(Some(429), None, false, false), Outcome::Capacity);
+        assert_eq!(classify(Some(502), None, false, false), Outcome::Transient);
+        assert_eq!(classify(Some(503), None, false, false), Outcome::Transient);
+        assert_eq!(classify(Some(504), None, false, false), Outcome::Transient);
+        assert_eq!(classify(Some(500), None, false, false), Outcome::Fatal);
+        assert_eq!(classify(Some(404), None, false, false), Outcome::Fatal);
+        assert_eq!(classify(Some(401), None, false, false), Outcome::Fatal);
+    }
+
+    #[test]
+    fn provider_edge_rejection_is_transient_but_a_plain_404_stays_fatal() {
+        assert_eq!(classify(Some(404), None, false, true), Outcome::Transient);
+        assert_eq!(classify(Some(404), None, false, false), Outcome::Fatal);
+        assert_eq!(classify(Some(503), None, false, true), Outcome::Transient);
+        assert_eq!(classify(Some(200), None, true, true), Outcome::Capacity);
+        assert_eq!(
+            classify(None, Some(&AttemptError::Reset), false, true),
+            Outcome::Transient
+        );
+        assert_eq!(classify(None, None, false, true), Outcome::ClientAbort);
     }
 
     #[test]
     fn request_timeout_is_transient_not_fatal() {
-        assert_eq!(classify(Some(408), None, false), Outcome::Transient);
+        assert_eq!(classify(Some(408), None, false, false), Outcome::Transient);
         assert!(Outcome::Transient.is_retryable_before_first_byte());
     }
 
     #[test]
     fn transport_errors_are_transient() {
         assert_eq!(
-            classify(None, Some(&AttemptError::Connect), false),
+            classify(None, Some(&AttemptError::Connect), false, false),
             Outcome::Transient
         );
         assert_eq!(
-            classify(None, Some(&AttemptError::Reset), false),
+            classify(None, Some(&AttemptError::Reset), false, false),
             Outcome::Transient
         );
     }
 
     #[test]
     fn no_status_and_no_error_is_client_abort() {
-        assert_eq!(classify(None, None, false), Outcome::ClientAbort);
+        assert_eq!(classify(None, None, false, false), Outcome::ClientAbort);
     }
 
     #[test]

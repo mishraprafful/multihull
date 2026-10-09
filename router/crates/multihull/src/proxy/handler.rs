@@ -184,7 +184,18 @@ async fn proxy_route(
             attempt.error,
             Some(crate::core::outcome::AttemptError::FirstByteTimeout)
         );
-        let outcome = classify(attempt.status(), attempt.error.as_ref(), ttft_timed_out);
+        let edge_rejected = attempt.response.as_ref().is_some_and(|response| {
+            endpoint
+                .edge_error
+                .as_ref()
+                .is_some_and(|edge| edge.matches(response.status(), response.first_bytes()))
+        });
+        let outcome = classify(
+            attempt.status(),
+            attempt.error.as_ref(),
+            ttft_timed_out,
+            edge_rejected,
+        );
         if attempt.response.is_some() {
             state.runtime.record_ttft(&route, &endpoint, attempt.ttft);
         }
@@ -232,6 +243,7 @@ async fn proxy_route(
             body_buffered: true,
             idempotent,
             server_error,
+            edge_rejected,
             retries_used: attempts.saturating_sub(1),
             max_retries: route.failover.max_retries,
         };

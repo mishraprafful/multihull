@@ -7,12 +7,45 @@ use common::{
 };
 use http_body_util::Full;
 use hyper::{Request, StatusCode};
-use multihull::core::snapshot::Endpoint;
+use multihull::core::snapshot::{EdgeError, Endpoint};
 use multihull::proxy::{PhaseTimeouts, ProxyConfig};
 use router_testkit::{MockUpstream, MockUpstreamConfig};
 use std::time::{Duration, Instant};
 
 const COMPLETIONS: &str = "/v1/chat/completions";
+const MODAL_EDGE_BODY: &[u8] = b"modal-http: invalid function call";
+
+fn modal_edge_error() -> EdgeError {
+    EdgeError {
+        statuses: vec![404],
+        body_prefix: "modal-http:".into(),
+    }
+}
+
+async fn stopped_modal_app(body: &'static [u8]) -> MockUpstream {
+    MockUpstream::start(
+        MockUpstreamConfig::default()
+            .with_status(StatusCode::NOT_FOUND)
+            .with_body(body),
+    )
+    .await
+    .unwrap()
+}
+
+async fn modal_pair(
+    stopped: &MockUpstream,
+    healthy: &MockUpstream,
+    edge_error: Option<EdgeError>,
+) -> (RunningProxy, Endpoint) {
+    let mut primary = endpoint("modal-a", "modal-a", stopped.url(), 1);
+    primary.edge_error = edge_error;
+    let proxy = start_proxy(vec![
+        primary.clone(),
+        endpoint("modal-b", "modal-b", healthy.url(), 2),
+    ])
+    .await;
+    (proxy, primary)
+}
 
 async fn open_circuit_of(proxy: &RunningProxy, primary: &Endpoint) {
     for _ in 0..20 {
@@ -169,4 +202,71 @@ async fn connect_failure_is_not_retried_on_the_same_endpoint() {
 
     assert_eq!(reply.status, 502);
     assert_eq!(reply.header("x-hull-attempts"), Some("1"));
+}
+
+#[tokio::test]
+async fn keyless_post_fails_over_on_a_provider_edge_404() {
+    let stopped = stopped_modal_app(MODAL_EDGE_BODY).await;
+    let healthy = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let (proxy, _) = modal_pair(&stopped, &healthy, Some(modal_edge_error())).await;
+
+    let reply = post(&proxy, COMPLETIONS, &[], b"{}").await;
+
+    assert_eq!(reply.status, 200, "{:?}", reply.body);
+    assert_eq!(reply.header("x-hull-provider"), Some("modal-b"));
+    assert_eq!(reply.header("x-hull-attempts"), Some("2"));
+    assert_eq!(stopped.request_count(), 1);
+    assert_eq!(healthy.request_count(), 1);
+}
+
+#[tokio::test]
+async fn provider_edge_404s_open_the_endpoint_circuit() {
+    let stopped = stopped_modal_app(MODAL_EDGE_BODY).await;
+    let healthy = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let (proxy, primary) = modal_pair(&stopped, &healthy, Some(modal_edge_error())).await;
+
+    for _ in 0..5 {
+        let reply = post(&proxy, COMPLETIONS, &[], b"{}").await;
+        assert_eq!(reply.status, 200, "{:?}", reply.body);
+    }
+
+    let now = proxy.state.runtime.now();
+    assert!(proxy.state.runtime.endpoint_open(&primary, now));
+    assert_eq!(stopped.request_count(), 5);
+}
+
+#[tokio::test]
+async fn a_404_from_the_model_is_returned_even_with_the_edge_signature_configured() {
+    let model = stopped_modal_app(b"{\"detail\":\"Not Found\"}").await;
+    let healthy = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let (proxy, _) = modal_pair(&model, &healthy, Some(modal_edge_error())).await;
+
+    let reply = post(&proxy, COMPLETIONS, &[("idempotency-key", "k-404")], b"{}").await;
+
+    assert_eq!(reply.status, 404);
+    assert_eq!(reply.header("x-hull-provider"), Some("modal-a"));
+    assert_eq!(reply.header("x-hull-attempts"), Some("1"));
+    assert_eq!(healthy.request_count(), 0);
+}
+
+#[tokio::test]
+async fn an_edge_body_without_a_signature_on_the_endpoint_stays_fatal() {
+    let stopped = stopped_modal_app(MODAL_EDGE_BODY).await;
+    let healthy = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let (proxy, _) = modal_pair(&stopped, &healthy, None).await;
+
+    let reply = post(&proxy, COMPLETIONS, &[("idempotency-key", "k-edge")], b"{}").await;
+
+    assert_eq!(reply.status, 404);
+    assert_eq!(reply.body.as_ref(), MODAL_EDGE_BODY);
+    assert_eq!(reply.header("x-hull-attempts"), Some("1"));
+    assert_eq!(healthy.request_count(), 0);
 }
