@@ -178,3 +178,27 @@ def resolve_secret_values(names: list[str]) -> dict[str, str]:
             + ", ".join(f"{n} (env {secret_env_name(n)})" for n in missing)
         )
     return {n: os.environ[secret_env_name(n)] for n in names}
+
+
+def api_error_message(body: Any) -> str | None:
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", errors="replace")
+    if not isinstance(body, str):
+        return None
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return None
+    message = parsed.get("message") if isinstance(parsed, dict) else None
+    return str(message) if message else None
+
+
+def error_reason(exc: BaseException) -> str:
+    status = getattr(exc, "status", None)
+    body = getattr(exc, "body", None)
+    if status is not None and body is not None:
+        reason = f"{status} {getattr(exc, 'reason', None) or ''}".strip()
+        message = api_error_message(body)
+        return f"{reason}: {message}" if message else reason
+    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+    return lines[0] if lines else exc.__class__.__name__
