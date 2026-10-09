@@ -71,7 +71,7 @@ A second job, `in-cluster`, builds the controller and router images from their D
 
 ## Layer 5: live smoke
 
-`live-smoke.yml`, triggered by hand or by the `live-smoke` PR label, skipped without Modal secrets, one run at a time, 30-minute budget. Same suite with spec `kind-modal.yaml`: Modal is the secondary, running the private GHCR mock image on CPU with `min_containers: 1`. `hull destroy` and a `modal app stop` backstop run in `if: always()` steps, and a daily job stops `multihull-live-` apps older than two hours. This is the layer that catches SDK drift. RunPod, Baseten and Replicate join once their `apply` exists. Operating notes: `docs/runbooks/live-smoke.md`.
+`live-smoke.yml`, triggered by hand or by the `live-smoke` PR label, skipped without Modal secrets, one run at a time, 30-minute budget. Same suite with spec `kind-modal.yaml`: Modal is the secondary, running the GHCR mock image on CPU with `min_containers: 1`. `hull destroy` and a `modal app stop` backstop run in `if: always()` steps, and a daily job stops `multihull-live-` apps older than two hours. This is the layer that catches SDK drift. RunPod, Baseten and Replicate join once their `apply` exists. Operating notes: `docs/runbooks/live-smoke.md`.
 
 ## Layer 6: live GPU
 
