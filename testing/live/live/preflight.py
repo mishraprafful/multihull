@@ -131,7 +131,7 @@ def call_cell(result: Preflight) -> str:
     return one_line(f"{result.check.status.value}: {result.check.message}")
 
 
-def secret_commands(result: Preflight, repository: str | None = None) -> list[str]:
+def store_commands(result: Preflight, repository: str | None = None) -> list[str]:
     repo = f" --repo {repository}" if repository else ""
     return [f"gh secret set {shape.name}{repo}" for shape in result.shapes]
 
@@ -144,7 +144,7 @@ def token_steps(result: Preflight, repository: str | None) -> list[str]:
         "2. Store both, entering each value at the prompt so it stays out of shell history:",
         "",
         "```sh",
-        *secret_commands(result, repository),
+        *store_commands(result, repository),
         "```",
         "",
         "3. Revoke the old token in the dashboard, then re-run this workflow.",
@@ -221,7 +221,7 @@ def annotation(result: Preflight) -> str:
     if needs_new_token(result):
         message += (
             f" Create a new token at {TOKENS_URL}, then run "
-            f"{' and '.join(secret_commands(result))}, entering each value at the prompt."
+            f"{' and '.join(store_commands(result))}, entering each value at the prompt."
         )
     return message
 
