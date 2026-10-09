@@ -7,6 +7,7 @@ A `v<semver>` tag on `main` drives everything. `release.yml` builds the Python w
 - Versions on `main` match the tag: `python/pyproject.toml`, `router/Cargo.toml` (workspace version) and `charts/multihull/Chart.yaml` (`version` and `appVersion`). `charts/package.sh` fails the chart job otherwise.
 - GitHub environment `release` exists. `release.yml` and both trusted publishers reference it; add required reviewers there if a human gate is wanted.
 - Repository variable `PUBLISH_ENABLED` is `true`. Without it the three publish jobs are skipped and the tag produces only the GitHub release.
+- Repository variable `ARTIFACTHUB_REPOSITORY_ID` holds the Artifact Hub repository ID once the chart is registered there. While it is unset, `publish-chart` pushes the chart and logs a notice instead of pushing `charts/artifacthub-repo.yml`.
 - Trusted publishers configured for `release.yml` with environment `release`: PyPI project `multihull` and crates.io crate `multihull`. Owner-only check; the public APIs cannot show it.
 - `CHANGELOG.md` has the version's section, `docs/releases/<version>.md` exists and the website sidebar points at it (`website/scripts/sync-design-docs.mjs`).
 

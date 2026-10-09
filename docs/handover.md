@@ -29,6 +29,7 @@ Rules for entries
 - Test counts: Python 308 passed, 1 skipped; Rust 269; live unit tests 29.
 - Release docs for 0.1.0 (PR 115, issue 112): `CHANGELOG.md` (Keep a Changelog, 0.1.0 section dated by PR 123), `docs/releases/0.1.0.md` with "What is proven and what is not" (mirrored to the site as Reference > Release notes by `website/scripts/sync-design-docs.mjs`), `docs/runbooks/release.md` (prerequisites, tag, verify, fix forward with `v0.1.1`). README, landing page and quickstart now say Kubernetes and Modal work, RunPod, Baseten and Replicate are render-only, and no longer show `hull failover test`, `runpod-eu` status rows or GPU checks in `hull doctor`.
 - PyPI and crates.io: `multihull` 0.0.1 placeholders were uploaded by hand from `fbdf211`; 0.1.0 went through the trusted publishers for `release.yml` with environment `release`, which the release run proved for both.
+- Artifact Hub (issue 61, branch `feat/artifact-hub-listing`): `Chart.yaml` carries `artifacthub.io/license`, `links`, `images` and `changes`; `charts/package.sh` rewrites the image tags in `artifacthub.io/images` to the release version and checks them in the packaged chart. `charts/artifacthub-repo.yml` keeps `repositoryID: ARTIFACTHUB_REPOSITORY_ID` as a placeholder and `owners` with the GitHub handle only; `charts/artifacthub-metadata.sh <uuid> <dir>` renders and shape-checks it with `yq` (the CI chart job runs it with a zero UUID). `publish-chart` pushes the rendered file with `oras` to `ghcr.io/mishraprafful/charts/multihull:artifacthub.io` only when the repository variable `ARTIFACTHUB_REPOSITORY_ID` is set, else logs a notice. Nothing is registered on Artifact Hub yet.
 - Logo explorations (PR 28) closed unmerged; the original three-hull mark stays.
 - GitHub repo `mishraprafful/multihull` is public since 2026-10-08 (made public to restore GitHub Actions after the account's spending limit stopped jobs). GHCR packages and the chart stay private until the owner switches them; Install from OCI still documents the `read:packages` token. `multihull.dev` is not owned; all URLs use `multihull.pages.dev`.
 
@@ -85,12 +86,13 @@ Rules for entries
 
 ## Next steps
 
-1. Owner: switch the GHCR packages `multihull-router`, `multihull-controller`, `multihull-mock-server` and `charts/multihull` to public, then drop the token steps from Install from OCI and `docs/releases/0.1.0.md` and list the chart on Artifact Hub.
-2. Plan 0.2.0: open the milestone, start a new `## [Unreleased]` section in `CHANGELOG.md` and `docs/releases/0.2.0.md`. Candidates: `hull --version` (issue 124), RunPod, Baseten and Replicate `apply` implementations (currently render-only) with the translator conformance suite from the plan, a Kubernetes GPU run on a real cluster (kind has no GPUs).
-3. If `publish-pypi` fails again with `invalid-pending-publisher` on 0.1.1, find the cause before rerunning: compare the project's publishing settings with the account's pending publishers on PyPI (`docs/runbooks/release.md`).
-4. Work through the TODO list below.
-5. Owner, optional: `modal workspace settings set image-builder-version 2025.06` so other Modal projects in the workspace get the new builder.
-6. Chart: optional controller RBAC, and a kubeconfig mount for targets in other clusters.
+1. Owner: switch the GHCR packages `multihull-router`, `multihull-controller`, `multihull-mock-server` and `charts/multihull` to public, then drop the token steps from Install from OCI and `docs/releases/0.1.0.md`.
+2. Owner, Artifact Hub listing (issue 61), in order: make the four GHCR packages public; sign in to https://artifacthub.io and add a Helm repository with URL `oci://ghcr.io/mishraprafful/charts/multihull`; copy the ID from the repository card into the repository variable `ARTIFACTHUB_REPOSITORY_ID`; tag the next release, whose `publish-chart` job pushes `artifacthub-repo.yml` to the `artifacthub.io` tag and earns the verified publisher flag on the following index. Add an `email` to the owner entry in `charts/artifacthub-repo.yml` only if an ownership claim is ever needed (it must match the Artifact Hub sign-in email).
+3. Plan 0.2.0: open the milestone, start a new `## [Unreleased]` section in `CHANGELOG.md` and `docs/releases/0.2.0.md`. Candidates: `hull --version` (issue 124), RunPod, Baseten and Replicate `apply` implementations (currently render-only) with the translator conformance suite from the plan, a Kubernetes GPU run on a real cluster (kind has no GPUs).
+4. If `publish-pypi` fails again with `invalid-pending-publisher` on 0.1.1, find the cause before rerunning: compare the project's publishing settings with the account's pending publishers on PyPI (`docs/runbooks/release.md`).
+5. Work through the TODO list below.
+6. Owner, optional: `modal workspace settings set image-builder-version 2025.06` so other Modal projects in the workspace get the new builder.
+7. Chart: optional controller RBAC, and a kubeconfig mount for targets in other clusters.
 
 ## TODO from the PR 29 review
 
@@ -126,6 +128,11 @@ Rules for entries
 Line numbers refer to `main` at PR 29 (`08a3b2f`), paths to the module layout after issue 47; the blocker fixes shift some of them in `body.rs`, `handler.rs` and `controller.py`.
 
 ## Session log
+
+### 2026-10-09 (Artifact Hub listing, issue 61)
+- Branch `feat/artifact-hub-listing`: `artifacthub.io/license`, `links`, `images` and `changes` annotations in `Chart.yaml`; `charts/package.sh` rewrites the `artifacthub.io/images` tags to the release version in a staging copy and checks `helm show chart` lists them; `charts/artifacthub-repo.yml` plus `charts/artifacthub-metadata.sh` (UUID check, `yq` shape check); `publish-chart` pushes the rendered file with `oras-project/setup-oras@v2.0.2` (oras 1.3.4) to the `artifacthub.io` tag, gated on `ARTIFACTHUB_REPOSITORY_ID`; the CI chart job renders it with a zero UUID. Release runbook, website Deploying page and next steps updated.
+- Facts from the Artifact Hub docs (fetched this session): OCI repositories are added as `oci://registry/namespace/chart-name`; the metadata file is pushed with `oras push <ref>:artifacthub.io --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml`; `repositoryID` enables the verified publisher flag; `owners` email is only needed for an ownership claim.
+- Verified locally with Helm v4.3.0: `helm lint`, `charts/package.sh` on a test tag, `charts/multihull/tests/render.sh`, actionlint, website build.
 
 ### 2026-10-09 (release 0.1.0)
 - Tagged `v0.1.0` on `4a60f83` (PR 123 dated the changelog). Release run 37895991523: python build, the three router binaries, the GitHub release, `publish-chart` and `publish-crates` passed on the first attempt. Images run 37895991551 tagged `multihull-router`, `multihull-controller` and `multihull-mock-server` with `0.1.0`.
