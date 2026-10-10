@@ -141,6 +141,7 @@ If `cargo` is missing, add `$HOME/.cargo/bin` or `$(brew --prefix rustup)/bin` t
 
 **PyPI and crates.io**
 - PyPI checks pending publishers before project publishers; a stale pending entry answers `invalid-pending-publisher` for an existing project. Rerun only the failed job first (`gh run rerun <id> --failed`, run 37895991523).
+- A version bump changes four lockfiles: `router/Cargo.lock`, `python/uv.lock`, `testing/live/uv.lock` and `testing/e2e/uv.lock` (the suites depend on the package by path); the kind, in-cluster and e2e jobs fail at `uv sync --locked` until all are refreshed (PR 157). `starlight-versions` slugs snapshot paths with `github-slugger`, so a page named `0.1.0.md` becomes `010` unless its frontmatter sets `slug`.
 - `cargo publish --dry-run` on an already published version only warns, so PR CI stays green after a release; `router-testkit` builds its own rustls config so it stays a versionless path dev-dependency that `cargo publish` strips (PR 100).
 
 **Docs site**
