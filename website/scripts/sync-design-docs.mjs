@@ -13,10 +13,17 @@ const pages = [
     note: 'Mirrored at build time from `docs/design/architecture-plan.md` in the repository. Edit the source, not this page.',
   },
   {
-    source: '../../docs/releases/0.1.0.md',
+    source: '../../docs/releases/0.2.0.md',
     target: '../src/content/docs/docs/reference/release-notes.md',
     title: 'Release notes',
-    description: 'What 0.1.0 ships, what is proven and what is not, mirrored from docs/releases/0.1.0.md.',
+    description: 'What 0.2.0 ships, what is proven and what is not, mirrored from docs/releases/0.2.0.md.',
+    note: 'Mirrored at build time from `docs/releases/0.2.0.md` in the repository. Edit the source, not this page.',
+  },
+  {
+    source: '../../docs/releases/0.1.0.md',
+    target: '../src/content/docs/docs/reference/release-notes/0.1.0.md',
+    title: 'Release notes 0.1.0',
+    description: 'What 0.1.0 shipped, what was proven and what was not, mirrored from docs/releases/0.1.0.md.',
     note: 'Mirrored at build time from `docs/releases/0.1.0.md` in the repository. Edit the source, not this page.',
   },
 ];

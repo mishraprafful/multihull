@@ -60,6 +60,7 @@ export default defineConfig({
             { label: 'Spec schema', slug: 'docs/reference/spec-schema' },
             { label: 'Security', slug: 'docs/reference/security' },
             { label: 'Release notes', slug: 'docs/reference/release-notes' },
+            { label: 'Release notes 0.1.0', slug: 'docs/reference/release-notes/0.1.0' },
           ],
         },
         {
