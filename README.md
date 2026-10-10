@@ -35,16 +35,18 @@ A Python control plane translates the spec into each provider's native resources
 ## Quickstart
 
 ```sh
-uv tool install multihull==0.1.0
-hull init                       # detects a Dockerfile; writes multihull.yaml
+uv tool install 'multihull[modal]==0.1.0'
+hull init                       # writes multihull.yaml; edit the image, contexts and GPU request
 hull doctor                     # checks credentials per target
 hull plan                       # renders native payloads to .multihull/plan/, shows diff
 export LLAMA_8B_API_KEYS=...    # route keys hull_<id>_<secret>; deploy refuses a route with none
-hull deploy                     # applies all targets concurrently, waits for ready
+hull deploy --apply             # applies all targets concurrently, waits for ready; no --apply is a dry run
 hull status
-  gke-prod    Ready  2/2  L4    https://gke.int/llama
-  modal-main  Ready  1/1  A10G  https://acme--multihull-llama-8b.modal.run
+  k8s-primary  kubernetes  Ready  context=..., deployment=llama-8b, namespace=multihull  2026-10-10T07:25:31Z
+  modal-warm   modal       Ready  app=multihull-llama-8b-modal-warm, ...                 2026-10-10T07:26:02Z
 ```
+
+The full walkthrough, router and first request included, is the [quickstart](https://multihull.pages.dev/docs/quickstart/).
 
 Then run the router against the snapshot `hull deploy` wrote, or `hull controller` and the Helm chart: see the [router overview](https://multihull.pages.dev/docs/router/overview/). Releases: [CHANGELOG.md](CHANGELOG.md), [release notes](docs/releases/0.1.0.md), [release runbook](docs/runbooks/release.md).
 
