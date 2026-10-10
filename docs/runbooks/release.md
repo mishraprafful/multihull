@@ -30,7 +30,7 @@ A `v<semver>` tag on `main` drives everything. `release.yml` builds the Python w
    gh run list --workflow images.yml --limit 3
    ```
 
-   `publish-chart` waits up to 30 minutes for `multihull-router:<version>` and `multihull-controller:<version>` from `images.yml` before it pushes.
+   `publish-chart` waits up to 30 minutes for `multihull-router:<version>` and `multihull-controller:<version>` from `images.yml` to list both `linux/amd64` and `linux/arm64` before it pushes; the per-architecture pushes carry no tag until the `manifest` job merges them.
 
 ## Verify
 

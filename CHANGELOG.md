@@ -20,6 +20,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 
 ### Fixed
 
+- `images.yml` publishes `linux/amd64,linux/arm64` manifests for `multihull-router`, `multihull-controller` and `multihull-mock-server` under every tag (`main`, `sha-<short>`, the release version): each architecture builds on its own native runner and is pushed by digest, then one manifest list is created per tag. An Apple Silicon kind node or Docker target can now pull the images instead of failing with `no match for platform in manifest` (#147).
 - `hull deploy` to a Kubernetes namespace that does not exist stops before applying with one line naming the namespace and context and pointing at the chart or `kubectl create namespace`; the translator never creates namespaces. The deploy, destroy and status tables show only the exception reason (for a Kubernetes `ApiException`, the status and the message from its body), never the client's header and body dump (#148).
 - The router treats a response matching the endpoint's edge error signature as `Transient`, retries it on another provider even for a POST without an `Idempotency-Key`, and counts it against the endpoint circuit, so a stopped Modal app no longer returns `404 modal-http: invalid function call` to callers during the 14 s before the probe ejects it. A 404 without the signature is still the model's answer and is returned as before (#122).
 
