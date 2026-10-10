@@ -2,8 +2,8 @@ apiVersion: v2
 name: multihull
 description: Multihull router and optional controller
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 home: https://multihull.pages.dev
 sources:
   - https://github.com/mishraprafful/multihull
@@ -23,18 +23,22 @@ annotations:
       url: https://github.com/mishraprafful/multihull/issues
   artifacthub.io/images: |
     - name: router
-      image: ghcr.io/mishraprafful/multihull-router:0.1.0
+      image: ghcr.io/mishraprafful/multihull-router:0.2.0
       platforms:
         - linux/amd64
+        - linux/arm64
     - name: controller
-      image: ghcr.io/mishraprafful/multihull-controller:0.1.0
+      image: ghcr.io/mishraprafful/multihull-controller:0.2.0
       platforms:
         - linux/amd64
+        - linux/arm64
   artifacthub.io/changes: |
     - kind: added
-      description: First release of the chart with the router Deployment, Service, ConfigMap, PodDisruptionBudget and optional controller
+      description: The chart creates the workloads Namespace (workloads.namespace, default multihull, kept on uninstall) and skips it when it is the release namespace
       links:
         - name: Release notes
-          url: https://github.com/mishraprafful/multihull/blob/main/docs/releases/0.1.0.md
+          url: https://github.com/mishraprafful/multihull/blob/main/docs/releases/0.2.0.md
         - name: Changelog
           url: https://github.com/mishraprafful/multihull/blob/main/CHANGELOG.md
+    - kind: changed
+      description: The router and controller images are published for linux/amd64 and linux/arm64
