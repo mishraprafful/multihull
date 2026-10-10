@@ -69,7 +69,7 @@ State, decisions, next steps, verification commands and lessons for sessions wor
 
 0.4.0, efficiency and scale: issues 69 to 77 (hedging, cost-aware placement, autoscaling, spot, warm check, Redis rate limits, `SO_REUSEPORT`, flapping scenario, nightly load) and Kubernetes Ingress or HTTPRoute (issue 116).
 
-Owner, tracked in issue 141 unless noted: run `gh workflow run live-gpu.yml -f max_minutes=20` to confirm zero 404s between `modal app stop` and ejection (issue 122 is merged; the failover test asserts it); set the contact in `CODE_OF_CONDUCT.md`; upload `website/public/social-preview.png` as the repository social preview; decide the `v0.1.0` pre-release flag; optional GPU demo run (`make demo-cloud DEMO_CLOUD_ARGS="--spec examples/demo-cloud/gpu.yaml --duration 600 --scripted --check --no-top"`, about 0.3 USD); decide the docs domain (issue 62); optional `modal workspace settings set image-builder-version 2025.06`; optional chart RBAC and a kubeconfig mount for targets in other clusters.
+Owner, tracked in issue 141 unless noted: run `gh workflow run live-gpu.yml -f max_minutes=20` to confirm zero 404s between `modal app stop` and ejection (issue 122 is merged; the failover test asserts it); upload `website/public/social-preview.png` as the repository social preview; decide the `v0.1.0` pre-release flag; optional GPU demo run (`make demo-cloud DEMO_CLOUD_ARGS="--spec examples/demo-cloud/gpu.yaml --duration 600 --scripted --check --no-top"`, about 0.3 USD); decide the docs domain (issue 62); optional `modal workspace settings set image-builder-version 2025.06`; optional chart RBAC and a kubeconfig mount for targets in other clusters.
 
 ## How to verify
 
