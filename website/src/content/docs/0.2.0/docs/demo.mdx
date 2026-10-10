@@ -1,0 +1,52 @@
+---
+title: Demo
+description: One URL, a provider dies mid-traffic, callers see zero errors.
+  Locally with docker, or on kind and Modal.
+slug: 0.2.0/docs/demo
+---
+
+The demo shows the core promise in five beats: one `multihull.yaml`, streaming chat completions through the router with the standard OpenAI client, a live view, the primary killed under load with zero client errors, and the primary coming back as `recovering` and then `serving` once real requests succeed on it.
+
+Both variants need the repository cloned, `uv` and Docker. The scripts build the release router on the first run.
+
+## Local, free
+
+Three `docker` targets running the mock model server on your machine. No GPUs, no cloud credentials.
+
+```sh
+make demo
+```
+
+The script prints `docker stop` and `docker start` for the primary container; run them in another terminal and watch `hull top`. A scripted, asserted run for CI: `make demo DEMO_ARGS="--duration 60 --scripted --check --no-top"`. Details in [examples/demo](https://github.com/mishraprafful/multihull/tree/main/examples/demo).
+
+## Cloud: kind and Modal
+
+The same script on real infrastructure: a kind cluster as the primary (priority 1) and Modal as the secondary (priority 2), both serving the public mock-server image from GHCR on CPU. Cents per run. Needs `kind` v0.33.0 or newer for the pinned node image.
+
+```sh
+export MODAL_TOKEN_ID=... MODAL_TOKEN_SECRET=...   # or ~/.modal.toml
+make kind-up
+make demo-cloud
+make kind-down
+```
+
+`make demo-cloud` runs `hull doctor`, `hull deploy --apply --wait`, the controller over mTLS, the router on its stream, streaming load and `hull top`, then prints the kill and restore commands:
+
+```sh
+kubectl --context kind-multihull-live --namespace multihull-demo scale deployment/live-demo-<id> --replicas=0
+kubectl --context kind-multihull-live --namespace multihull-demo scale deployment/live-demo-<id> --replicas=1
+```
+
+Traffic moves to Modal while kind is down and returns only after kind's circuit closes. Ctrl-C tears everything down (`hull destroy`, a Modal sweep by app prefix) and reports anything left in kind, on Modal or in Docker.
+
+Scripted and asserted: `make demo-cloud DEMO_CLOUD_ARGS="--duration 180 --scripted --check --no-top"`.
+
+### Real model on a Modal GPU
+
+`examples/demo-cloud/gpu.yaml` serves `Qwen/Qwen2.5-1.5B-Instruct` on vLLM from two Modal L4 targets, so the streamed tokens are real text. kind stays on CPU: a spec runs one image on every target and kind has no GPUs. About 0.03 USD per minute while both targets are up; a short demo with the image cached costs about 0.06 to 0.3 USD.
+
+```sh
+make demo-cloud DEMO_CLOUD_ARGS="--spec examples/demo-cloud/gpu.yaml --duration 600"
+```
+
+Setup, every command for the five beats by hand, guaranteed teardown with a checklist, and the cost table are in the runbook [docs/runbooks/demo-cloud.md](https://github.com/mishraprafful/multihull/blob/main/docs/runbooks/demo-cloud.md).

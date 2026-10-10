@@ -10,7 +10,7 @@ export default defineConfig({
       plugins: [
         starlightVersions({
           current: { label: 'latest' },
-          versions: [{ slug: '0.1.0' }],
+          versions: [{ slug: '0.2.0' }, { slug: '0.1.0' }],
         }),
       ],
       description: 'Deploy hot GPU containers to many providers. One URL. Automatic failover.',
