@@ -20,7 +20,7 @@ A `v<semver>` tag on `main` drives everything. `release.yml` builds the Python w
 
    ```sh
    git fetch origin && git checkout main && git pull --ff-only
-   git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
    ```
 
 4. Watch the runs:
@@ -35,15 +35,15 @@ A `v<semver>` tag on `main` drives everything. `release.yml` builds the Python w
 ## Verify
 
 ```sh
-pip install multihull==0.1.0 && hull --version
-cargo install multihull --version 0.1.0 && multihull --help
-helm pull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0
-gh release view v0.1.0
+pip install multihull==0.2.0 && hull --version
+cargo install multihull --version 0.2.0 && multihull --help
+helm pull oci://ghcr.io/mishraprafful/charts/multihull --version 0.2.0
+gh release view v0.2.0
 ```
 
 - The GitHub release lists `multihull-linux-amd64`, `multihull-linux-arm64`, `multihull-darwin-arm64` and the wheel and sdist.
 - GHCR packages `multihull-router`, `multihull-controller`, `multihull-mock-server` and `charts/multihull` carry the version tag, are linked to the repository and are public (anonymous pulls work).
-- `helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` prints the chart's values.
+- `helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.2.0` prints the chart's values.
 
 ## After
 
