@@ -13,11 +13,11 @@ A Python control plane translates the spec into each provider's native resources
 
 *`make demo` in five beats: one spec and `hull deploy`; streaming completions through one URL; `hull top` live; the primary stopped, traffic moves, errors stay at 0; the primary restored, traffic returns. Free, local, no GPUs: [examples/demo](examples/demo/README.md).*
 
-**Status (0.1.0):** Kubernetes and Modal deploy from one spec and fail over per request, proven with the mock model server on CPU and with a real model (Qwen2.5-1.5B-Instruct on vLLM) on two Modal L4 targets. RunPod, Baseten and Replicate render plans only. No Kubernetes GPU run yet. See [what is proven and what is not](docs/releases/0.1.0.md#what-is-proven-and-what-is-not).
+**Status (0.2.0):** Kubernetes and Modal deploy from one spec and fail over per request, proven with the mock model server on CPU and with a real model (Qwen2.5-1.5B-Instruct on vLLM) on two Modal L4 targets. RunPod, Baseten and Replicate render plans only. No Kubernetes GPU run yet. See [what is proven](docs/releases/0.2.0.md#what-is-proven).
 
 ## Providers
 
-| Provider | 0.1.0 |
+| Provider | 0.2.0 |
 |---|---|
 | Kubernetes | Working: deploy, status, scale, logs, destroy |
 | Modal | Working: deploy, status, scale, logs, destroy |
@@ -35,7 +35,7 @@ A Python control plane translates the spec into each provider's native resources
 ## Quickstart
 
 ```sh
-uv tool install 'multihull[modal]==0.1.0'
+uv tool install 'multihull[modal]==0.2.0'
 hull init                       # writes multihull.yaml; edit the image, contexts and GPU request
 hull doctor                     # checks credentials per target
 hull plan                       # renders native payloads to .multihull/plan/, shows diff
@@ -48,7 +48,7 @@ hull status
 
 The full walkthrough, router and first request included, is the [quickstart](https://multihull.pages.dev/docs/quickstart/).
 
-Then run the router against the snapshot `hull deploy` wrote, or `hull controller` and the Helm chart: see the [router overview](https://multihull.pages.dev/docs/router/overview/). Releases: [CHANGELOG.md](CHANGELOG.md), [release notes](docs/releases/0.1.0.md), [release runbook](docs/runbooks/release.md).
+Then run the router against the snapshot `hull deploy` wrote, or `hull controller` and the Helm chart: see the [router overview](https://multihull.pages.dev/docs/router/overview/). Releases: [CHANGELOG.md](CHANGELOG.md), [release notes](docs/releases/0.2.0.md), [release runbook](docs/runbooks/release.md).
 
 ## Repository
 

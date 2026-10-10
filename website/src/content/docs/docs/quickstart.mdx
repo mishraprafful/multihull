@@ -8,7 +8,7 @@ import { Steps } from '@astrojs/starlight/components';
 Seven steps take a container from your laptop to two providers behind one URL. A first run against a kind cluster on a laptop took six minutes of wall clock, cluster creation, a router build and one detour included; `make demo` from a fresh clone took 73 seconds.
 
 :::note
-0.1.0 deploys to Kubernetes and Modal. RunPod, Baseten and Replicate render plans only. See the [release notes](/docs/reference/release-notes/) for what is proven and what is not.
+0.2.0 deploys to Kubernetes and Modal. RunPod, Baseten and Replicate render plans only. See the [release notes](/docs/reference/release-notes/) for what is proven and what is not.
 :::
 
 <Steps>
@@ -16,11 +16,11 @@ Seven steps take a container from your laptop to two providers behind one URL. A
 1. **Install**
 
    ```sh
-   uv tool install 'multihull[modal]==0.1.0'
+   uv tool install 'multihull[modal]==0.2.0'
    hull --version
    ```
 
-   The `modal` extra brings the Modal SDK; without it `hull doctor` cannot verify Modal credentials. `hull --version` and `hull top` are in 0.2.0; before that tag, install the `main` branch with `uv tool install 'multihull[modal] @ git+https://github.com/mishraprafful/multihull@main#subdirectory=python'` (it still reports `hull 0.1.0`).
+   The `modal` extra brings the Modal SDK; without it `hull doctor` cannot verify Modal credentials. For the unreleased `main` branch instead: `uv tool install 'multihull[modal] @ git+https://github.com/mishraprafful/multihull@main#subdirectory=python'`.
 
 2. **Initialise a spec**
 
@@ -30,7 +30,7 @@ Seven steps take a container from your laptop to two providers behind one URL. A
    hull init
    ```
 
-   Edit the file before going on: the image, each target's `kubernetes.context` and, for a CPU container, `resources.gpu: []`. To try Kubernetes alone, delete the `modal-warm` target and set `reliability.minWarmProviders: 1`; `hull validate` refuses a spec whose warm targets are fewer than that number. A kind cluster reached from the host needs `serviceType: NodePort`, a `nodePort` mapped in the kind config and an explicit `endpoint`; see [Kubernetes](/docs/providers/kubernetes/#reaching-the-service). The published images are `linux/amd64` only, so an Apple Silicon kind node needs a locally built image loaded with `kind load docker-image`.
+   Edit the file before going on: the image, each target's `kubernetes.context` and, for a CPU container, `resources.gpu: []`. To try Kubernetes alone, delete the `modal-warm` target and set `reliability.minWarmProviders: 1`; `hull validate` refuses a spec whose warm targets are fewer than that number. A kind cluster reached from the host needs `serviceType: NodePort`, a `nodePort` mapped in the kind config and an explicit `endpoint`; see [Kubernetes](/docs/providers/kubernetes/#reaching-the-service).
 
 3. **Check credentials**
 
@@ -48,7 +48,7 @@ Seven steps take a container from your laptop to two providers behind one URL. A
    The spec targets the `multihull` namespace. Installing the chart creates it; `hull deploy` stops with a one-line error when it is missing.
 
    ```sh
-   helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0 \
+   helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.2.0 \
      -n multihull --create-namespace
    ```
 
@@ -79,7 +79,7 @@ Seven steps take a container from your laptop to two providers behind one URL. A
 
 7. **Serve one URL**
 
-   Get the router: `cargo install multihull --version 0.1.0`, a binary from the [GitHub release](https://github.com/mishraprafful/multihull/releases/tag/v0.1.0) (linux amd64, linux arm64, macOS arm64) or the image `ghcr.io/mishraprafful/multihull-router:0.1.0` (`linux/amd64`). For an untagged `main`, clone the repository and run `cargo build --release -p multihull` in `router/`; the binary is `router/target/release/multihull`. Point it at the snapshot and send a request with the route's hostname and one of the keys:
+   Get the router: `cargo install multihull --version 0.2.0`, a binary from the [GitHub release](https://github.com/mishraprafful/multihull/releases/tag/v0.2.0) (linux amd64, linux arm64, macOS arm64) or the image `ghcr.io/mishraprafful/multihull-router:0.2.0` (`linux/amd64` and `linux/arm64`). For an untagged `main`, clone the repository and run `cargo build --release -p multihull` in `router/`; the binary is `router/target/release/multihull`. Point it at the snapshot and send a request with the route's hostname and one of the keys:
 
    ```sh
    $ cat > router.toml <<'EOF'
