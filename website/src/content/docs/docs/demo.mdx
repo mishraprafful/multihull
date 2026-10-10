@@ -19,7 +19,7 @@ The script prints `docker stop` and `docker start` for the primary container; ru
 
 ## Cloud: kind and Modal
 
-The same script on real infrastructure: a kind cluster as the primary (priority 1) and Modal as the secondary (priority 2), both serving the public mock-server image from GHCR on CPU. Cents per run.
+The same script on real infrastructure: a kind cluster as the primary (priority 1) and Modal as the secondary (priority 2), both serving the public mock-server image from GHCR on CPU. Cents per run. Needs `kind` v0.33.0 or newer for the pinned node image; on Apple Silicon build the mock-server image locally first, as the runbook describes, because the GHCR images are `linux/amd64` only.
 
 ```sh
 export MODAL_TOKEN_ID=... MODAL_TOKEN_SECRET=...   # or ~/.modal.toml
