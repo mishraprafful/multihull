@@ -73,7 +73,7 @@ cd website && npm install && npm run build
 
 - [Architecture plan](docs/design/architecture-plan.md)
 - [Handover: current state and next steps](docs/handover.md)
-- [Contributing guide](CONTRIBUTING.md)
+- [Contributing guide](CONTRIBUTING.md). Questions and ideas go to [Discussions](https://github.com/mishraprafful/multihull/discussions), bugs to [issues](https://github.com/mishraprafful/multihull/issues), security and conduct reports to the private report form.
 - [Security policy: reporting vulnerabilities](SECURITY.md)
 - [AGENTS.md: instructions for coding agents](AGENTS.md)
 - [Docs site source](website/)

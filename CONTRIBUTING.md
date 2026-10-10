@@ -143,7 +143,7 @@ Tag every created resource with `multihull.dev/service=<name>` so `rediscover` c
 
 ## Questions
 
-Open a GitHub issue or start a GitHub discussion on `mishraprafful/multihull`.
+Questions and ideas go to [GitHub Discussions](https://github.com/mishraprafful/multihull/discussions), bugs to [issues](https://github.com/mishraprafful/multihull/issues). Security vulnerabilities and conduct reports go through the private report form ([SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)), never a public issue or discussion.
 
 ## License
 
