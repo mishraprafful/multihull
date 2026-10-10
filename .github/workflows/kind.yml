@@ -134,14 +134,14 @@ jobs:
           file: python/Dockerfile
           load: true
           tags: ${{ env.CONTROLLER_IMAGE }}
-          cache-from: type=gha,scope=controller
+          cache-from: type=gha,scope=controller-amd64
       - uses: docker/build-push-action@v7
         with:
           context: .
           file: router/Dockerfile
           load: true
           tags: ${{ env.ROUTER_IMAGE }}
-          cache-from: type=gha,scope=router
+          cache-from: type=gha,scope=router-amd64
       - run: docker build -t "$MOCK_IMAGE" testing/mock-server
       - uses: astral-sh/setup-uv@v10.2.0
         with:

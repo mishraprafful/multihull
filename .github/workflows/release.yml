@@ -133,18 +133,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Wait for the router and controller images this chart defaults to
+      - name: Wait for the multi-arch router and controller manifests this chart defaults to
         run: |
           for _ in $(seq 60); do
             missing=""
             for repository in $IMAGES; do
               image="$repository:${GITHUB_REF_NAME#v}"
-              docker buildx imagetools inspect "$image" > /dev/null 2>&1 || missing="$missing $image"
+              platforms=$(docker buildx imagetools inspect "$image" --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}' 2>/dev/null || true)
+              case "$platforms" in
+                *linux/amd64*linux/arm64*|*linux/arm64*linux/amd64*) ;;
+                *) missing="$missing $image" ;;
+              esac
             done
             if [ -z "$missing" ]; then exit 0; fi
             sleep 30
           done
-          echo "not published within 30 minutes:$missing" >&2
+          echo "multi-arch manifests not published within 30 minutes:$missing" >&2
           exit 1
       - run: printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
         env:

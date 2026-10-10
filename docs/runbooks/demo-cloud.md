@@ -199,5 +199,3 @@ cleanup verified: nothing left in kind, on Modal, in docker or in processes
 ```
 
 Deploy to both Ready in 14 s (Modal image cached). The kill at 40 s opened the kind circuit 12 s later, the probe marked it down 5 s after that, and every request in between went to Modal with no client error. The restore at 70 s reached `half_open` at 94 s and `closed` at 99 s, then traffic returned to kind. `modal billing report --for today --show-resources` afterwards: 0.0012 USD for the app (CPU plus memory), 0.0015 USD with an aborted first attempt. `modal app list --env main` showed the app `stopped`, and `kind delete cluster --name multihull-live` left no cluster.
-
-On Apple Silicon the GHCR mock-server image is `linux/amd64` only (`images.yml`), so the kind node cannot pull it (`no match for platform in manifest`). Build it locally under the same tag first, `docker build -t ghcr.io/mishraprafful/multihull-mock-server:main testing/mock-server`; the demo sees the local image, loads it into kind, and Modal still pulls the amd64 image from GHCR by the same reference. Remove the local tag afterwards (`docker rmi ghcr.io/mishraprafful/multihull-mock-server:main`).
