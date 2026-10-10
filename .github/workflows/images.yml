@@ -26,9 +26,13 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+  REGISTRY_PREFIX: ghcr.io/mishraprafful/multihull-
+
 jobs:
-  image:
-    runs-on: ubuntu-24.04
+  build:
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -36,6 +40,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        name: [mock-server, router, controller]
+        arch: [amd64, arm64]
         include:
           - name: mock-server
             context: testing/mock-server
@@ -46,8 +52,10 @@ jobs:
           - name: controller
             context: python
             file: python/Dockerfile
-    env:
-      PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -62,19 +70,86 @@ jobs:
       - uses: docker/metadata-action@v6
         id: meta
         with:
-          images: ghcr.io/mishraprafful/multihull-${{ matrix.name }}
+          images: ${{ env.REGISTRY_PREFIX }}${{ matrix.name }}
+      - uses: docker/build-push-action@v7
+        id: build
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY_PREFIX }}${{ matrix.name }},push-by-digest=true,name-canonical=true,push=${{ env.PUSH }}
+          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}-${{ matrix.arch }}
+      - name: Record the digest for the manifest job
+        if: env.PUSH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@v7
+        if: env.PUSH == 'true'
+        with:
+          name: digest-${{ matrix.name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    needs: build
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [mock-server, router, controller]
+    env:
+      IMAGE: ghcr.io/mishraprafful/multihull-${{ matrix.name }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-${{ matrix.name }}-*
+          merge-multiple: true
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
           flavor: latest=false
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=main,enable={{is_default_branch}}
             type=semver,pattern={{version}}
-      - uses: docker/build-push-action@v7
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          platforms: linux/amd64
-          push: ${{ env.PUSH == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Merge the per-architecture digests under every tag
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -eu
+          set --
+          while read -r tag; do set -- "$@" -t "$tag"; done <<< "$TAGS"
+          for digest in *; do set -- "$@" "$IMAGE@sha256:$digest"; done
+          docker buildx imagetools create "$@"
+      - name: Every tag lists linux/amd64 and linux/arm64
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -eu
+          for tag in $TAGS; do
+            platforms=$(docker buildx imagetools inspect "$tag" --format '{{range .Manifest.Manifests}}{{if ne .Platform.OS "unknown"}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}{{end}}')
+            echo "$tag: $platforms"
+            case "$platforms" in
+              *linux/amd64*linux/arm64*|*linux/arm64*linux/amd64*) ;;
+              *) echo "$tag is missing a platform" >&2; exit 1 ;;
+            esac
+          done
