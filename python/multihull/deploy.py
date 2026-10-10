@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from multihull import discovery, engine
-from multihull.providers.base import Observed, Provider, Ref
+from multihull.providers.base import Observed, Provider, Ref, error_reason
 from multihull.spec import ServiceSpec
 from multihull.state.base import StateBackend
 
@@ -76,7 +76,7 @@ def wait_ready(
         try:
             observed = provider.status(ref)
         except Exception as exc:
-            observed = Observed(phase="Unknown", message=str(exc))
+            observed = Observed(phase="Unknown", message=error_reason(exc))
         if observed.phase in TERMINAL_PHASES:
             return observed
         if clock() >= deadline:
@@ -135,7 +135,7 @@ def deploy(
             try:
                 return provider.status(ref)
             except Exception as exc:
-                return Observed(phase="Unknown", message=str(exc))
+                return Observed(phase="Unknown", message=error_reason(exc))
         return wait_ready(
             provider, ref, ready_timeout(result.type, timeout), poll_interval, sleep=sleep
         )

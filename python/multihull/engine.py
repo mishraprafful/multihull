@@ -11,7 +11,7 @@ from typing import Any, Literal
 import yaml
 
 from multihull.providers import create
-from multihull.providers.base import Observed, Plan, Provider, Ref, Target
+from multihull.providers.base import Observed, Plan, Provider, Ref, Target, error_reason
 from multihull.spec import ServiceSpec, TargetSpec
 from multihull.state.base import StateBackend, StateRecord
 
@@ -191,7 +191,7 @@ def apply(
             ref = provider.apply(Target(spec, target, image_digest), target_plan.ref)
         except Exception as exc:
             return ApplyResult(
-                target.provider, target.type, target_plan.change, False, None, str(exc)
+                target.provider, target.type, target_plan.change, False, None, error_reason(exc)
             )
         return ApplyResult(target.provider, target.type, target_plan.change, True, ref, "applied")
 
@@ -257,7 +257,7 @@ def destroy(
             )
             provider.destroy(ref)
         except Exception as exc:
-            return DestroyResult(record.provider, ref.type, False, str(exc))
+            return DestroyResult(record.provider, ref.type, False, error_reason(exc))
         return DestroyResult(record.provider, ref.type, True, "destroyed")
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -285,7 +285,7 @@ def rediscover(
         try:
             ref = provider.rediscover(spec.name)
         except Exception as exc:
-            results.append(RediscoverResult(target.provider, target.type, None, str(exc)))
+            results.append(RediscoverResult(target.provider, target.type, None, error_reason(exc)))
             continue
         if ref is None or ref.provider != target.provider:
             results.append(RediscoverResult(target.provider, target.type, None, "nothing found"))
@@ -325,7 +325,7 @@ def refresh(
             )
             observed = provider.status(ref)
         except Exception as exc:
-            observed = Observed(phase="Unknown", message=str(exc))
+            observed = Observed(phase="Unknown", message=error_reason(exc))
         return RefreshResult(
             record.provider, ref.type, ref, observed, observed.phase != record.last_status
         )

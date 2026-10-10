@@ -195,7 +195,7 @@ def default_spec(name: str, has_dockerfile: bool) -> dict:
                 "provider": "k8s-primary",
                 "type": "kubernetes",
                 "priority": 1,
-                "kubernetes": {"namespace": "inference"},
+                "kubernetes": {"namespace": "multihull"},
             },
             {
                 "provider": "modal-warm",

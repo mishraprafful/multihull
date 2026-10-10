@@ -162,6 +162,48 @@ def test_deploy_cli_apply_reports_failure(
     assert runner.invoke(app, ["deploy", str(path), "--timeout", "soon"]).exit_code == 2
 
 
+def test_deploy_cli_shows_only_the_api_error_reason(
+    tmp_path: Path, fake_registry: dict[str, FakeProvider]
+) -> None:
+    from kubernetes.client.exceptions import ApiException
+
+    body = json.dumps(
+        {
+            "kind": "Status",
+            "status": "Failure",
+            "message": 'namespaces "multihull" not found',
+            "reason": "NotFound",
+            "code": 404,
+        }
+    )
+    error = ApiException(status=404, reason="Not Found")
+    error.body = body
+    error.headers = {"Audit-Id": "fixture", "Content-Type": "application/json"}
+    fake_registry["kubernetes"].error = error
+    path = spec_copy(tmp_path)
+    args = ["deploy", str(path), "--apply", "--state", str(tmp_path / "state.db")]
+    snapshot = ["--snapshot-out", str(tmp_path / "snapshot.json")]
+    result = runner.invoke(app, [*args, *snapshot], env={"COLUMNS": "200"})
+    assert result.exit_code == 1, result.output
+    assert '404 Not Found: namespaces "multihull" not found' in result.output
+    for leaked in ("HTTP response headers", "HTTP response body", "Audit-Id", "Traceback"):
+        assert leaked not in result.output
+
+
+def test_error_reason_keeps_one_line() -> None:
+    from multihull.providers.base import error_reason
+
+    assert error_reason(RuntimeError("first line\n  second line")) == "first line"
+    assert error_reason(RuntimeError("")) == "RuntimeError"
+
+    class Opaque(Exception):
+        status = 500
+        reason = "Internal Server Error"
+        body = "<html>not json</html>"
+
+    assert error_reason(Opaque()) == "500 Internal Server Error"
+
+
 def test_engine_destroy_continues_past_failures(llama_spec: ServiceSpec, tmp_path: Path) -> None:
     state = LocalState(tmp_path / "state.db")
     providers = {t.provider: FakeProvider() for t in llama_spec.targets}

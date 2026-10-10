@@ -1,0 +1,12 @@
+{{- $workloads := .Values.workloads }}
+{{- if and $workloads.createNamespace (or (ne $workloads.namespace .Release.Namespace) $workloads.forceCreateNamespace) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $workloads.namespace | quote }}
+  labels:
+    {{- include "multihull.labels" . | nindent 4 }}
+    multihull.dev/managed-by: multihull
+  annotations:
+    helm.sh/resource-policy: keep
+{{- end }}

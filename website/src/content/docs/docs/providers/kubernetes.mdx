@@ -10,10 +10,14 @@ Uses the `kubernetes` Python client with server-side apply (field manager `multi
   type: kubernetes
   priority: 1
   replicas: {min: 2}
-  kubernetes: {context: gke_acme_europe-west4_prod, namespace: inference}
+  kubernetes: {context: gke_acme_europe-west4_prod, namespace: multihull}
 ```
 
 Credentials: the kubeconfig context named in the target. Without `context`, `hull` running in a pod with no kubeconfig uses the pod's service account, as the [in-cluster controller](/docs/router/controller-stream/#controller-in-the-cluster) does.
+
+## Namespace
+
+`hull init` writes `namespace: multihull`, and the Helm chart creates that namespace (`workloads.namespace`, labelled `multihull.dev/managed-by: multihull`) so `helm install` prepares the cluster for `hull deploy`. `hull` never creates namespaces: when the target namespace is missing, `hull deploy` stops before applying anything with `namespace multihull not found in context <ctx>; install the multihull chart or run kubectl create namespace multihull`. A spec without `namespace` still deploys to `default`.
 
 ## Reaching the Service
 

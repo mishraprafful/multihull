@@ -151,6 +151,19 @@ controller:
       cpu: 500m
       memory: 256Mi
 
+workloads:
+  # Namespace hull deploy targets: hull init writes namespace: multihull. The
+  # chart creates it, labelled multihull.dev/managed-by: multihull, so the
+  # cluster is ready for hull deploy after helm install. hull never creates
+  # namespaces. helm uninstall keeps it (helm.sh/resource-policy: keep) so the
+  # workloads in it survive; delete it with kubectl.
+  namespace: multihull
+  createNamespace: true
+  # Helm cannot create its own release namespace from a template, so the
+  # Namespace is skipped when workloads.namespace equals the release namespace:
+  # pass --create-namespace to helm install instead. Set this to render it anyway.
+  forceCreateNamespace: false
+
 imagePullSecrets: []
 
 serviceAccount:

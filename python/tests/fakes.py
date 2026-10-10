@@ -22,6 +22,7 @@ class FakeProvider:
     ) -> None:
         self.fail = fail
         self.fail_destroy = False
+        self.error: BaseException | None = None
         self.phases = list(phases or ["Ready"])
         self.log_lines = list(log_lines)
         self.kwargs = kwargs
@@ -40,6 +41,8 @@ class FakeProvider:
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
         if self.fail:
             raise RuntimeError("provider exploded")
+        if self.error is not None:
+            raise self.error
         self.applied.append(desired.provider)
         return Ref(desired.provider, desired.type, desired.name, {"id": "1"})
 

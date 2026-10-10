@@ -5,7 +5,7 @@ description: From a Dockerfile to a multi-provider deployment with the hull CLI.
 
 import { Steps } from '@astrojs/starlight/components';
 
-Five commands take a container from your laptop to two GPU providers behind one URL.
+Six commands take a container from your laptop to two GPU providers behind one URL.
 
 :::note
 0.1.0 deploys to Kubernetes and Modal. RunPod, Baseten and Replicate render plans only. See the [release notes](/docs/reference/release-notes/) for what is proven and what is not.
@@ -38,7 +38,16 @@ Five commands take a container from your laptop to two GPU providers behind one 
 
    Credentials come from each provider's native location (kubeconfig, `~/.modal.toml` or `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`). Nothing goes in the file.
 
-4. **Plan**
+4. **Prepare the cluster**
+
+   The spec targets the `multihull` namespace. Installing the chart creates it and runs the router; `hull deploy` stops with a one-line error when it is missing.
+
+   ```sh
+   helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0 \
+     -n multihull --create-namespace
+   ```
+
+5. **Plan**
 
    Renders every provider's native payload to `.multihull/plan/` and diffs it against recorded state.
 
@@ -46,7 +55,7 @@ Five commands take a container from your laptop to two GPU providers behind one 
    hull plan
    ```
 
-5. **Deploy and watch**
+6. **Deploy and watch**
 
    The spec from `hull init` protects the route with keys from `<NAME>_API_KEYS`, where `<NAME>` is the service name in capitals with `-` as `_`. `hull deploy` stops while that variable holds no keys.
 

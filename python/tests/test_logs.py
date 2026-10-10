@@ -53,7 +53,7 @@ def test_logs_cli(tmp_path: Path, fake_registry: dict[str, FakeProvider]) -> Non
     missing = runner.invoke(app, ["logs", *base, "-p", "gke-prod"])
     assert missing.exit_code == 1 and "no state" in missing.output
 
-    ref = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "inference"})
+    ref = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "multihull"})
     LocalState(state_path).put(StateRecord("llama-8b", "gke-prod", ref.to_json(), None, "h"))
     result = runner.invoke(app, ["logs", *base, "-p", "gke-prod", "--since", "5m"])
     assert result.exit_code == 0, result.output
