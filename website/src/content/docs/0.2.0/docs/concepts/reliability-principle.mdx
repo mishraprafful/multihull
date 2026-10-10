@@ -1,0 +1,40 @@
+---
+title: Reliability principle
+description: Robustness over cost, and what that changes in the defaults.
+slug: 0.2.0/docs/concepts/reliability-principle
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Multihull exists to keep models serving. Defaults spend money to buy redundancy.
+
+## Defaults
+
+```yaml
+reliability:
+  minWarmProviders: 2
+  overprovision: 1.4
+  fallbackScaleToZero: false
+  spot: false
+```
+
+* At least two providers warm.
+* Fallbacks never scale to zero.
+* On-demand before spot.
+* Capacity over-provisioned by 1.4x, the Envoy priority-spillover factor. `hull validate`, `plan` and `deploy` warn when the fallbacks' combined `replicas.max` is below 1.4 times the primary's.
+
+## Cost features are opt-in
+
+Cheapest-GPU placement, spot, and scale-to-zero fallbacks exist but must be enabled, and none can lower redundancy below the configured floor.
+
+<Aside type="caution" title="Health beats price">
+  When the router must choose between a cheaper endpoint and a healthier one, health wins. `cost_aware` scoring is health-gated.
+</Aside>
+
+## Fail loudly before deploy, quietly during
+
+`hull doctor` and `hull plan` surface credential, quota and GPU-availability problems up front. At runtime, failover is invisible to callers.
+
+## Boring infrastructure
+
+Files in git, SQLite or object storage for state, gRPC or a JSON file between control plane and router. No message bus, no database cluster required.

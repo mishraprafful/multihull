@@ -1,6 +1,7 @@
 ---
 title: Kubernetes
 description: Any GPU cluster, built-in kinds only, via the Kubernetes API.
+slug: 0.2.0/docs/providers/kubernetes
 ---
 
 Uses the `kubernetes` Python client with server-side apply (field manager `multihull`). Built-in kinds only: Deployment, Service, HPA (KEDA ScaledObject when installed and `concurrency` is set) and Secret. No CRDs, no operator. It renders no Ingress and no Gateway API HTTPRoute today; both are planned, see [#116](https://github.com/mishraprafful/multihull/issues/116).
@@ -13,7 +14,7 @@ Uses the `kubernetes` Python client with server-side apply (field manager `multi
   kubernetes: {context: gke_acme_europe-west4_prod, namespace: multihull}
 ```
 
-Credentials: the kubeconfig context named in the target. Without `context`, `hull` running in a pod with no kubeconfig uses the pod's service account, as the [in-cluster controller](/docs/router/controller-stream/#controller-in-the-cluster) does.
+Credentials: the kubeconfig context named in the target. Without `context`, `hull` running in a pod with no kubeconfig uses the pod's service account, as the [in-cluster controller](/0.2.0/docs/router/controller-stream/#controller-in-the-cluster) does.
 
 ## Namespace
 

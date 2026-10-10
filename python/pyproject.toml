@@ -1,6 +1,6 @@
 [project]
 name = "multihull"
-version = "0.1.0"
+version = "0.2.0"
 description = "Deploy always-warm GPU inference containers to many providers from one spec and fail over between them automatically."
 readme = "README.md"
 license = "Apache-2.0"

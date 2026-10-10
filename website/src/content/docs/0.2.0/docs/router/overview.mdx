@@ -1,6 +1,7 @@
 ---
 title: Router overview
 description: A stateless Rust data plane that consumes endpoint snapshots.
+slug: 0.2.0/docs/router/overview
 ---
 
 The router is stateless. It reads a static `router.toml` and a dynamic endpoint snapshot, then routes each request by priority, weight or latency with per-request failover.
@@ -9,7 +10,7 @@ The router is stateless. It reads a static `router.toml` and a dynamic endpoint 
 
 1. Route match on host, path tree and headers. With `protocol: openai`, the body is buffered (up to 1 MiB) to read the `model` key.
 2. Score endpoints with one function: `priority_spillover` (default), `weighted`, `ewma_latency`, `locality`, optional sticky affinity.
-3. Attempt engine: phase timeouts (connect 2 s, first byte 30 s, idle 60 s, total 10 m), retry before the first committed byte, retry budget, hedging in v0.2. Outcomes: `Success`, `Capacity`, `Transient` (including a provider edge error such as Modal's `404 modal-http:` for a stopped app, matched by the signature the snapshot carries per endpoint), `Fatal`, `ClientAbort`; the table is in [Health and circuits](/docs/router/health-and-circuits/#outcome-taxonomy).
+3. Attempt engine: phase timeouts (connect 2 s, first byte 30 s, idle 60 s, total 10 m), retry before the first committed byte, retry budget, hedging in v0.2. Outcomes: `Success`, `Capacity`, `Transient` (including a provider edge error such as Modal's `404 modal-http:` for a stopped app, matched by the signature the snapshot carries per endpoint), `Fatal`, `ClientAbort`; the table is in [Health and circuits](/0.2.0/docs/router/health-and-circuits/#outcome-taxonomy).
 4. Auth: client `Authorization` stripped, provider header injected from the snapshot.
 
 ## Snapshot sources
@@ -20,9 +21,9 @@ The router is stateless. It reads a static `router.toml` and a dynamic endpoint 
 | `snapshot.json` written by `hull deploy` | Solo dev, CI |
 | HTTPS or object-store URL polled | Multi-region routers without controller reachability |
 
-The gRPC stream and HTTPS URLs take a CA bundle, a client certificate and a bearer token under `[snapshot]`; plaintext `grpc://` and `http://` need `insecure = true`. See [Controller stream](/docs/router/controller-stream/).
+The gRPC stream and HTTPS URLs take a CA bundle, a client certificate and a bearer token under `[snapshot]`; plaintext `grpc://` and `http://` need `insecure = true`. See [Controller stream](/0.2.0/docs/router/controller-stream/).
 
-The router nacks a streamed snapshot older than the one it holds. From any source, a route that arrives with no endpoints keeps the endpoints the router holds; removing the route from the snapshot stops serving it. See [Versions and empty routes](/docs/router/controller-stream/#versions-and-empty-routes).
+The router nacks a streamed snapshot older than the one it holds. From any source, a route that arrives with no endpoints keeps the endpoints the router holds; removing the route from the snapshot stops serving it. See [Versions and empty routes](/0.2.0/docs/router/controller-stream/#versions-and-empty-routes).
 
 The last snapshot is persisted to disk and served indefinitely on control-plane loss, with an alert after 1 h.
 
@@ -60,22 +61,22 @@ Per endpoint: provider, state (`serving`, `recovering`, `down`), circuit, probe,
 
 Set `route.auth.apiKeys.from` in the spec to `env:NAME` (comma-separated keys) or `file:PATH` (one key per line, lines starting with `#` are comments, a relative path resolves against the working directory of `hull`). Clients send `Authorization: Bearer hull_<id>_<secret>`.
 
-- `<id>` is ASCII letters and digits. `<secret>` is printable ASCII without spaces and may contain underscores. Generate one with `echo "hull_$(openssl rand -hex 4)_$(openssl rand -hex 32)"`.
-- Hashing contract: lowercase hex `blake3("<id>_<secret>")`, the key without its `hull_` prefix. The control plane publishes only these hashes in the snapshot's `auth.api_key_hashes`; the router hashes the presented key the same way and compares it with every hash in constant time. `proto/testdata/api-key-hash.json` is a test vector both sides assert.
-- `hull deploy`, `destroy`, `snapshot` and `controller` reject a malformed key before acting. The error names the source and entry, never the key.
-- A missing, malformed or unknown key gets `401` with error type `unauthorized`.
-- A route with `auth.apiKeys` never runs open. If its source is unset, missing, empty or only comments, `hull deploy`, `destroy`, `snapshot` and `controller` stop with an error naming the route and the source, and a running controller keeps its last snapshot and logs the error.
-- The snapshot marks such a route `required`. On a `required` route with no key hashes the router answers every request with `401` and logs a warning naming the route. Snapshots without the flag, from older control planes, keep an empty hash list open.
-- A route without `auth.apiKeys` accepts every request.
-- Per-key rate limits and provider or service allowlists are planned, not enforced yet.
+* `<id>` is ASCII letters and digits. `<secret>` is printable ASCII without spaces and may contain underscores. Generate one with `echo "hull_$(openssl rand -hex 4)_$(openssl rand -hex 32)"`.
+* Hashing contract: lowercase hex `blake3("<id>_<secret>")`, the key without its `hull_` prefix. The control plane publishes only these hashes in the snapshot's `auth.api_key_hashes`; the router hashes the presented key the same way and compares it with every hash in constant time. `proto/testdata/api-key-hash.json` is a test vector both sides assert.
+* `hull deploy`, `destroy`, `snapshot` and `controller` reject a malformed key before acting. The error names the source and entry, never the key.
+* A missing, malformed or unknown key gets `401` with error type `unauthorized`.
+* A route with `auth.apiKeys` never runs open. If its source is unset, missing, empty or only comments, `hull deploy`, `destroy`, `snapshot` and `controller` stop with an error naming the route and the source, and a running controller keeps its last snapshot and logs the error.
+* The snapshot marks such a route `required`. On a `required` route with no key hashes the router answers every request with `401` and logs a warning naming the route. Snapshots without the flag, from older control planes, keep an empty hash list open.
+* A route without `auth.apiKeys` accepts every request.
+* Per-key rate limits and provider or service allowlists are planned, not enforced yet.
 
 ## Deploying
 
-The Helm chart in `charts/multihull` runs the router as a Deployment with a Service, ConfigMap for `router.toml`, and an optional PodDisruptionBudget and controller. A grpc snapshot source needs TLS values or an explicit plaintext opt-in; see [Controller stream](/docs/router/controller-stream/#helm-chart).
+The Helm chart in `charts/multihull` runs the router as a Deployment with a Service, ConfigMap for `router.toml`, and an optional PodDisruptionBudget and controller. A grpc snapshot source needs TLS values or an explicit plaintext opt-in; see [Controller stream](/0.2.0/docs/router/controller-stream/#helm-chart).
 
 ### Install from OCI
 
-Each `v*` release pushes the chart to `oci://ghcr.io/mishraprafful/charts/multihull`. The chart `version` and `appVersion` are the release version without the `v`. The router image defaults to `ghcr.io/mishraprafful/multihull-router:<appVersion>` and the controller image to `ghcr.io/mishraprafful/multihull-controller:<appVersion>`; the same release publishes both. See [Controller in the cluster](/docs/router/controller-stream/#controller-in-the-cluster) for the controller's values.
+Each `v*` release pushes the chart to `oci://ghcr.io/mishraprafful/charts/multihull`. The chart `version` and `appVersion` are the release version without the `v`. The router image defaults to `ghcr.io/mishraprafful/multihull-router:<appVersion>` and the controller image to `ghcr.io/mishraprafful/multihull-controller:<appVersion>`; the same release publishes both. See [Controller in the cluster](/0.2.0/docs/router/controller-stream/#controller-in-the-cluster) for the controller's values.
 
 The chart and images are public, so no registry login or pull secret is needed:
 

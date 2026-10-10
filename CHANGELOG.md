@@ -4,12 +4,20 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-10
+
+Stable launch. Human-facing notes: [docs/releases/0.2.0.md](docs/releases/0.2.0.md).
+
 ### Added
 
 - `hull top`: a live terminal view of the router from its admin listener, with per-endpoint state, circuit, probe, request rate, in-flight count and TTFT quantiles, plus per-route rates, errors and failovers (#40).
 - Router metric `router_responses_total{route,status}` counting responses returned to clients (#40).
+- `make demo`: the local five-beat failover demo, three docker targets from `examples/demo/multihull.yaml` behind one URL, streaming completions, `hull top`, the primary stopped and restored with zero client errors; CI job `demo` runs it scripted (#41).
+- A recording of `make demo` (`examples/demo/demo.tape`, `make demo-record`) embedded in the README and the docs home page (#42).
 - `make demo-cloud`: the five-beat failover demo on kind and Modal, specs in `examples/demo-cloud/` (CPU mock server, and two Modal L4 targets serving a real model), runbook `docs/runbooks/demo-cloud.md` (#43).
 - `hull --version` prints the installed package version (#124).
+- Docs version switcher: `latest` plus a committed snapshot per release, with an outdated notice and per-version search (#117).
+- Chart annotations for Artifact Hub (`artifacthub.io/license`, `links`, `images`, `changes`) and `charts/artifacthub-repo.yml`, pushed next to the chart on release when `ARTIFACTHUB_REPOSITORY_ID` is set (#61).
 - README badges for PyPI, crates.io, CI and the licence (#141).
 - `CODE_OF_CONDUCT.md`, the Contributor Covenant 2.1, linked from `CONTRIBUTING.md` (#141).
 - Snapshot field `Endpoint.edge_error` (statuses plus body prefix): the signature of a response from the provider's edge rather than the model. The Modal translator sets `404` and `modal-http:`, what a stopped app answers (#122).
@@ -17,12 +25,20 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 ### Changed
 
 - `hull init` writes `namespace: multihull`; the examples and docs follow. The Helm chart creates that namespace (`workloads.namespace`, `workloads.createNamespace`, label `multihull.dev/managed-by: multihull`, kept on uninstall) and skips it when it is the release namespace, where `helm install --create-namespace` applies. A spec without `namespace` still deploys to `default` (#148).
+- Images build from `public.ecr.aws/docker/library` base images and kind uses `kindest/node` from `mirror.gcr.io`, all pinned by digest, so CI, forks and local builds no longer share Docker Hub's anonymous pull quota (#139).
+- Quickstart rewritten from a fresh-user walkthrough: seven steps through the first request and `hull top`, `hull deploy --apply`, the `modal` extra, real `hull doctor` and `hull status` output, and the measured time (#140).
 
 ### Fixed
 
 - `images.yml` publishes `linux/amd64,linux/arm64` manifests for `multihull-router`, `multihull-controller` and `multihull-mock-server` under every tag (`main`, `sha-<short>`, the release version): each architecture builds on its own native runner and is pushed by digest, then one manifest list is created per tag. An Apple Silicon kind node or Docker target can now pull the images instead of failing with `no match for platform in manifest` (#147).
 - `hull deploy` to a Kubernetes namespace that does not exist stops before applying with one line naming the namespace and context and pointing at the chart or `kubectl create namespace`; the translator never creates namespaces. The deploy, destroy and status tables show only the exception reason (for a Kubernetes `ApiException`, the status and the message from its body), never the client's header and body dump (#148).
 - The router treats a response matching the endpoint's edge error signature as `Transient`, retries it on another provider even for a POST without an `Idempotency-Key`, and counts it against the endpoint circuit, so a stopped Modal app no longer returns `404 modal-http: invalid function call` to callers during the 14 s before the probe ejects it. A 404 without the signature is still the model's answer and is returned as before (#122).
+- e2e: the queue-pressure row waits for a scale attempt on every target before comparing them, and starts its clock once the limiter has backed off to the mocks' capacity, so the suite no longer flakes on a partial set of controller log lines (#145).
+- Mock server: an invalid JSON body answers a fixed `detail` and the decoder error goes to the log (#132).
+
+### Security
+
+- Every PR and push to `main` is scanned with gitleaks (#129).
 
 ## [0.1.0] - 2026-10-09
 
@@ -85,4 +101,6 @@ First release. Human-facing notes: [docs/releases/0.1.0.md](docs/releases/0.1.0.
 - GPU proven on Modal only (`live-gpu.yml`, #49); no Kubernetes GPU run. `hull failover test`, hedging, cost-aware placement and per-key rate limits are planned, not built.
 - Images and the chart were private at tag time; public on GHCR since 2026-10-09.
 
+[Unreleased]: https://github.com/mishraprafful/multihull/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mishraprafful/multihull/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mishraprafful/multihull/releases/tag/v0.1.0

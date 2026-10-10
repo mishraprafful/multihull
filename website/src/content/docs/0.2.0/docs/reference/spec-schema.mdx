@@ -1,0 +1,1112 @@
+---
+title: Spec schema
+description: JSON Schema for multihull.yaml, generated from the pydantic model
+  by hull schema.
+tableOfContents:
+  maxHeadingLevel: 3
+slug: 0.2.0/docs/reference/spec-schema
+---
+
+:::note
+Generated at build time from `hull schema`. Edit `python/multihull/spec.py`, not this page.
+:::
+
+Export the schema and point your editor at it for completion and validation:
+
+```sh
+hull schema --out multihull.schema.json
+```
+
+```yaml
+# yaml-language-server: $schema=./multihull.schema.json
+apiVersion: multihull/v1
+name: llama-8b
+```
+
+See [The spec](/0.2.0/docs/concepts/spec/) for the section-by-section description.
+
+## Objects
+
+### ServiceSpec
+
+Top-level document. Schema id: `https://multihull.pages.dev/schema/v1/multihull.schema.json`.
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `apiVersion` | const `"multihull/v1"` | required |  |
+| `name` | string | required | max length `40`, pattern `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` |
+| `container` | [Container](#container) | required |  |
+| `resources` | [Resources](#resources) | required |  |
+| `scaling` | [Scaling](#scaling) | `{"concurrency":null,"replicas":{"max":1,"min":1}}` |  |
+| `reliability` | [Reliability](#reliability) | `{"minWarmProviders":2,"overprovision":1.4,"fallbackScaleToZero":false,"spot":false}` |  |
+| `targets` | array of [TargetSpec](#targetspec) | required | min items `1` |
+| `route` | [Route](#route) | required |  |
+
+### ApiKeys
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `from` | string | required | pattern `^(env\|file):.+$` | `env:NAME` (comma-separated keys) or `file:PATH` (one key per line, `#` comments). Keys are `hull_<id>_<secret>`; only `blake3("<id>_<secret>")` reaches the snapshot. A source that yields no keys is refused. |
+
+### Auth
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `apiKeys` | [ApiKeys](#apikeys), nullable | `null` |  |
+
+### BasetenBlock
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| *no fields* | | | |
+
+### Build
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `context` | string | `"."` |  |
+| `target` | `"docker"` | `"cog"` | `"docker"` |  |
+
+### Container
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `image` | string, nullable | `null` |  |
+| `build` | [Build](#build), nullable | `null` |  |
+| `command` | array of string, nullable | `null` |  |
+| `port` | integer | `8000` | min `1`, max `65535` |
+| `health` | [Health](#health) | `{"path":"/health","initialDelaySeconds":30}` |  |
+| `env` | map of string to string | `{}` |  |
+| `secrets` | array of string | `[]` |  |
+
+### DockerBlock
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `image` | string, nullable | `null` |  |
+| `host` | string | `"127.0.0.1"` |  |
+| `hostPort` | integer, nullable | `null` |  |
+| `env` | map of string to string | `{}` |  |
+| `network` | string, nullable | `null` |  |
+| `pull` | boolean | `true` |  |
+
+### Failover
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `policy` | `"priority"` | `"weighted"` | `"ewma_latency"` | `"locality"` | `"priority"` |  |
+| `retryOn` | array of `"5xx"` | `"timeout"` | `"capacity"` | `"connect"` | `["5xx","timeout","capacity"]` |  |
+| `maxRetries` | integer | `2` | min `0` |
+
+### Health
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `path` | string | `"/health"` |  |
+| `initialDelaySeconds` | integer | `30` | min `0` |
+
+### KubernetesBlock
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `context` | string, nullable | `null` |  |
+| `namespace` | string | `"default"` |  |
+| `keda` | boolean | `false` |  |
+| `prometheusUrl` | string | `"http://prometheus-operated.monitoring.svc:9090"` |  |
+| `serviceType` | `"LoadBalancer"` | `"NodePort"` | `"ClusterIP"` | `"LoadBalancer"` |  |
+| `nodePort` | integer, nullable | `null` |  |
+| `endpoint` | string, nullable | `null` |  |
+
+### ModalBlock
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `environment` | string | `"main"` |  |
+| `region` | string, nullable | `null` |  |
+| `registrySecret` | [RegistrySecret](#registrysecret), nullable | `null` |  |
+| `setupDockerfileCommands` | array of string | `[]` |  |
+
+### RegistrySecret
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `usernameEnv` | string | required | pattern `^[A-Za-z_][A-Za-z0-9_]*$` |
+| `passwordEnv` | string | required | pattern `^[A-Za-z_][A-Za-z0-9_]*$` |
+
+### Reliability
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `minWarmProviders` | integer | `2` | min `0` |
+| `overprovision` | number | `1.4` | min `1` |
+| `fallbackScaleToZero` | boolean | `false` |  |
+| `spot` | boolean | `false` |  |
+
+### Replicas
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `min` | integer | `1` | min `0` |
+| `max` | integer | `1` | min `1` |
+
+### ReplicateBlock
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `owner` | string, nullable | `null` |  |
+
+### Resources
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `gpu` | array of [GPU](#gpu) | `[]` |  |
+| `gpuCount` | integer | `1` | min `1` |
+| `memory` | string, nullable | `null` |  |
+
+### Route
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `hostname` | string | required |  |
+| `protocol` | `"openai"` | `"http"` | `"openai"` |  |
+| `failover` | [Failover](#failover) | `{"policy":"priority","retryOn":["5xx","timeout","capacity"],"maxRetries":2}` |  |
+| `auth` | [Auth](#auth), nullable | `null` |  |
+| `sticky` | [Sticky](#sticky), nullable | `null` |  |
+
+### RunpodBlock
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `dataCenters` | array of string | `[]` |  |
+
+### Scaling
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `concurrency` | integer, nullable | `null` |  |
+| `replicas` | [Replicas](#replicas) | `{"min":1,"max":1}` |  |
+
+### Sticky
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `key` | string | required |  |
+| `ttl` | string | `"30m"` |  |
+| `mode` | `"endpoint"` | `"provider"` | `"endpoint"` |  |
+| `onUnhealthy` | `"rehome"` | `"fail"` | `"rehome"` |  |
+| `fallbackKey` | string, nullable | `null` |  |
+
+### TargetReplicas
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `min` | integer, nullable | `null` |  |
+| `max` | integer, nullable | `null` |  |
+
+### TargetSpec
+
+| Field | Type | Default | Constraints |
+|---|---|---|---|
+| `provider` | string | required | min length `1` |
+| `type` | `"kubernetes"` | `"modal"` | `"runpod"` | `"baseten"` | `"replicate"` | `"docker"` | required |  |
+| `priority` | integer | required | min `1` |
+| `replicas` | [TargetReplicas](#targetreplicas), nullable | `null` |  |
+| `weight` | integer | `1` | min `1` |
+| `kubernetes` | [KubernetesBlock](#kubernetesblock), nullable | `null` |  |
+| `modal` | [ModalBlock](#modalblock), nullable | `null` |  |
+| `runpod` | [RunpodBlock](#runpodblock), nullable | `null` |  |
+| `baseten` | [BasetenBlock](#basetenblock), nullable | `null` |  |
+| `replicate` | [ReplicateBlock](#replicateblock), nullable | `null` |  |
+| `docker` | [DockerBlock](#dockerblock), nullable | `null` |  |
+
+## Enums
+
+### GPU
+
+* `"L4"`
+* `"A10G"`
+* `"A100-40"`
+* `"A100-80"`
+* `"H100"`
+* `"H200"`
+* `"B200"`
+
+## Raw schema
+
+<details>
+  <summary>multihull.schema.json</summary>
+
+  ```json
+  {
+    "$defs": {
+      "ApiKeys": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "description": "`env:NAME` (comma-separated keys) or `file:PATH` (one key per line, `#` comments). Keys are `hull_<id>_<secret>`; only `blake3(\"<id>_<secret>\")` reaches the snapshot. A source that yields no keys is refused.",
+            "pattern": "^(env|file):.+$",
+            "title": "From",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from"
+        ],
+        "title": "ApiKeys",
+        "type": "object"
+      },
+      "Auth": {
+        "additionalProperties": false,
+        "properties": {
+          "apiKeys": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ApiKeys"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "Auth",
+        "type": "object"
+      },
+      "BasetenBlock": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "BasetenBlock",
+        "type": "object"
+      },
+      "Build": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "default": ".",
+            "title": "Context",
+            "type": "string"
+          },
+          "target": {
+            "default": "docker",
+            "enum": [
+              "docker",
+              "cog"
+            ],
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "title": "Build",
+        "type": "object"
+      },
+      "Container": {
+        "additionalProperties": false,
+        "properties": {
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image"
+          },
+          "build": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Build"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "command": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Command"
+          },
+          "port": {
+            "default": 8000,
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Port",
+            "type": "integer"
+          },
+          "health": {
+            "$ref": "#/$defs/Health",
+            "default": {
+              "path": "/health",
+              "initialDelaySeconds": 30
+            }
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Env",
+            "type": "object"
+          },
+          "secrets": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Secrets",
+            "type": "array"
+          }
+        },
+        "title": "Container",
+        "type": "object"
+      },
+      "DockerBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image"
+          },
+          "host": {
+            "default": "127.0.0.1",
+            "title": "Host",
+            "type": "string"
+          },
+          "hostPort": {
+            "anyOf": [
+              {
+                "maximum": 65535,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hostport"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Env",
+            "type": "object"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Network"
+          },
+          "pull": {
+            "default": true,
+            "title": "Pull",
+            "type": "boolean"
+          }
+        },
+        "title": "DockerBlock",
+        "type": "object"
+      },
+      "Failover": {
+        "additionalProperties": false,
+        "properties": {
+          "policy": {
+            "default": "priority",
+            "enum": [
+              "priority",
+              "weighted",
+              "ewma_latency",
+              "locality"
+            ],
+            "title": "Policy",
+            "type": "string"
+          },
+          "retryOn": {
+            "default": [
+              "5xx",
+              "timeout",
+              "capacity"
+            ],
+            "items": {
+              "enum": [
+                "5xx",
+                "timeout",
+                "capacity",
+                "connect"
+              ],
+              "type": "string"
+            },
+            "title": "Retryon",
+            "type": "array"
+          },
+          "maxRetries": {
+            "default": 2,
+            "minimum": 0,
+            "title": "Maxretries",
+            "type": "integer"
+          }
+        },
+        "title": "Failover",
+        "type": "object"
+      },
+      "GPU": {
+        "enum": [
+          "L4",
+          "A10G",
+          "A100-40",
+          "A100-80",
+          "H100",
+          "H200",
+          "B200"
+        ],
+        "title": "GPU",
+        "type": "string"
+      },
+      "Health": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "default": "/health",
+            "title": "Path",
+            "type": "string"
+          },
+          "initialDelaySeconds": {
+            "default": 30,
+            "minimum": 0,
+            "title": "Initialdelayseconds",
+            "type": "integer"
+          }
+        },
+        "title": "Health",
+        "type": "object"
+      },
+      "KubernetesBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Context"
+          },
+          "namespace": {
+            "default": "default",
+            "title": "Namespace",
+            "type": "string"
+          },
+          "keda": {
+            "default": false,
+            "title": "Keda",
+            "type": "boolean"
+          },
+          "prometheusUrl": {
+            "default": "http://prometheus-operated.monitoring.svc:9090",
+            "title": "Prometheusurl",
+            "type": "string"
+          },
+          "serviceType": {
+            "default": "LoadBalancer",
+            "enum": [
+              "LoadBalancer",
+              "NodePort",
+              "ClusterIP"
+            ],
+            "title": "Servicetype",
+            "type": "string"
+          },
+          "nodePort": {
+            "anyOf": [
+              {
+                "maximum": 65535,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nodeport"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "pattern": "^https?://\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Endpoint"
+          }
+        },
+        "title": "KubernetesBlock",
+        "type": "object"
+      },
+      "ModalBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "environment": {
+            "default": "main",
+            "title": "Environment",
+            "type": "string"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Region"
+          },
+          "registrySecret": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RegistrySecret"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "setupDockerfileCommands": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Setupdockerfilecommands",
+            "type": "array"
+          }
+        },
+        "title": "ModalBlock",
+        "type": "object"
+      },
+      "RegistrySecret": {
+        "additionalProperties": false,
+        "properties": {
+          "usernameEnv": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "title": "Usernameenv",
+            "type": "string"
+          },
+          "passwordEnv": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "title": "Passwordenv",
+            "type": "string"
+          }
+        },
+        "required": [
+          "usernameEnv",
+          "passwordEnv"
+        ],
+        "title": "RegistrySecret",
+        "type": "object"
+      },
+      "Reliability": {
+        "additionalProperties": false,
+        "properties": {
+          "minWarmProviders": {
+            "default": 2,
+            "minimum": 0,
+            "title": "Minwarmproviders",
+            "type": "integer"
+          },
+          "overprovision": {
+            "default": 1.4,
+            "minimum": 1,
+            "title": "Overprovision",
+            "type": "number"
+          },
+          "fallbackScaleToZero": {
+            "default": false,
+            "title": "Fallbackscaletozero",
+            "type": "boolean"
+          },
+          "spot": {
+            "default": false,
+            "title": "Spot",
+            "type": "boolean"
+          }
+        },
+        "title": "Reliability",
+        "type": "object"
+      },
+      "Replicas": {
+        "additionalProperties": false,
+        "properties": {
+          "min": {
+            "default": 1,
+            "minimum": 0,
+            "title": "Min",
+            "type": "integer"
+          },
+          "max": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Max",
+            "type": "integer"
+          }
+        },
+        "title": "Replicas",
+        "type": "object"
+      },
+      "ReplicateBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Owner"
+          }
+        },
+        "title": "ReplicateBlock",
+        "type": "object"
+      },
+      "Resources": {
+        "additionalProperties": false,
+        "properties": {
+          "gpu": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/GPU"
+            },
+            "title": "Gpu",
+            "type": "array"
+          },
+          "gpuCount": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Gpucount",
+            "type": "integer"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory"
+          }
+        },
+        "title": "Resources",
+        "type": "object"
+      },
+      "Route": {
+        "additionalProperties": false,
+        "properties": {
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "protocol": {
+            "default": "openai",
+            "enum": [
+              "openai",
+              "http"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "failover": {
+            "$ref": "#/$defs/Failover",
+            "default": {
+              "policy": "priority",
+              "retryOn": [
+                "5xx",
+                "timeout",
+                "capacity"
+              ],
+              "maxRetries": 2
+            }
+          },
+          "auth": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Auth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sticky": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Sticky"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "hostname"
+        ],
+        "title": "Route",
+        "type": "object"
+      },
+      "RunpodBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "dataCenters": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Datacenters",
+            "type": "array"
+          }
+        },
+        "title": "RunpodBlock",
+        "type": "object"
+      },
+      "Scaling": {
+        "additionalProperties": false,
+        "properties": {
+          "concurrency": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Concurrency"
+          },
+          "replicas": {
+            "$ref": "#/$defs/Replicas",
+            "default": {
+              "min": 1,
+              "max": 1
+            }
+          }
+        },
+        "title": "Scaling",
+        "type": "object"
+      },
+      "Sticky": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "ttl": {
+            "default": "30m",
+            "title": "Ttl",
+            "type": "string"
+          },
+          "mode": {
+            "default": "endpoint",
+            "enum": [
+              "endpoint",
+              "provider"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "onUnhealthy": {
+            "default": "rehome",
+            "enum": [
+              "rehome",
+              "fail"
+            ],
+            "title": "Onunhealthy",
+            "type": "string"
+          },
+          "fallbackKey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fallbackkey"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "Sticky",
+        "type": "object"
+      },
+      "TargetReplicas": {
+        "additionalProperties": false,
+        "properties": {
+          "min": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max"
+          }
+        },
+        "title": "TargetReplicas",
+        "type": "object"
+      },
+      "TargetSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "kubernetes",
+              "modal",
+              "runpod",
+              "baseten",
+              "replicate",
+              "docker"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "priority": {
+            "minimum": 1,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "replicas": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TargetReplicas"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "weight": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Weight",
+            "type": "integer"
+          },
+          "kubernetes": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/KubernetesBlock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "modal": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ModalBlock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "runpod": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RunpodBlock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "baseten": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BasetenBlock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "replicate": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ReplicateBlock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "docker": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DockerBlock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "provider",
+          "type",
+          "priority"
+        ],
+        "title": "TargetSpec",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "apiVersion": {
+        "const": "multihull/v1",
+        "title": "Apiversion",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 40,
+        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+        "title": "Name",
+        "type": "string"
+      },
+      "container": {
+        "$ref": "#/$defs/Container"
+      },
+      "resources": {
+        "$ref": "#/$defs/Resources"
+      },
+      "scaling": {
+        "$ref": "#/$defs/Scaling",
+        "default": {
+          "concurrency": null,
+          "replicas": {
+            "max": 1,
+            "min": 1
+          }
+        }
+      },
+      "reliability": {
+        "$ref": "#/$defs/Reliability",
+        "default": {
+          "minWarmProviders": 2,
+          "overprovision": 1.4,
+          "fallbackScaleToZero": false,
+          "spot": false
+        }
+      },
+      "targets": {
+        "items": {
+          "$ref": "#/$defs/TargetSpec"
+        },
+        "minItems": 1,
+        "title": "Targets",
+        "type": "array"
+      },
+      "route": {
+        "$ref": "#/$defs/Route"
+      }
+    },
+    "required": [
+      "apiVersion",
+      "name",
+      "container",
+      "resources",
+      "targets",
+      "route"
+    ],
+    "title": "ServiceSpec",
+    "type": "object",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://multihull.pages.dev/schema/v1/multihull.schema.json"
+  }
+  ```
+</details>
