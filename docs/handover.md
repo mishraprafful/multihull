@@ -63,7 +63,7 @@ State, decisions, next steps, verification commands and lessons for sessions wor
 
 ## Next steps
 
-0.2.0, the stable launch (milestone "0.2.0 - Stable launch"): launch checklist (issue 141), fresh-user quickstart walkthrough (issue 140), deterministic queue-pressure e2e test (issue 145). Create `docs/releases/0.2.0.md` and point `website/scripts/sync-design-docs.mjs` at it before tagging.
+0.2.0, the stable launch (milestone "0.2.0 - Stable launch"): launch checklist (issue 141), arm64 images (issue 147, the last blocker from the quickstart walkthrough, issue 140; the docs are fixed and the time is stated), deterministic queue-pressure e2e test (issue 145). Smaller: doctor hint markup (issue 149), snapshot file mode (issue 150). Create `docs/releases/0.2.0.md` and point `website/scripts/sync-design-docs.mjs` at it before tagging.
 
 0.3.0, more providers: RunPod, Baseten and Replicate `apply` (issues 63, 64, 65) with the translator conformance suite (issue 66), credential overrides (issue 67), Kubernetes GPU run on a real cluster (issue 68).
 
@@ -101,6 +101,7 @@ If `cargo` is missing, add `$HOME/.cargo/bin` or `$(brew --prefix rustup)/bin` t
 - A stopped app answers `404 modal-http: invalid function call` from Modal's edge for about 14 s until three probes fail; a plain 4xx is Fatal and reached the client until the translator marked the endpoint with the `modal-http:` signature and the router retried matches as Transient (PR 120, issue 122). The live artifacts hold only the status, not the edge's headers, so the signature is the body prefix the runs recorded.
 
 **Kubernetes and kind**
+- On Apple Silicon the chart's router pods and any kind target stay in `ImagePullBackOff` (`no match for platform in manifest`, issue 147). Docker Desktop runs the amd64 router image, but `--network host` there is the Linux VM's loopback, not the Mac's, so the router neither reaches a NodePort bound to `127.0.0.1` nor answers on the host; build the router from a clone instead (`cargo build --release -p multihull`, 28 s) (walkthrough of issue 140).
 - Give kind its own `--kubeconfig` so a local run never changes the current context (PR 111).
 - Helm neither creates its release namespace from a template nor adopts a resource it does not own: the chart skips the workloads Namespace when it equals the release namespace, and a suite that creates the namespace by hand before `helm install` must set `workloads.createNamespace=false` (issue 148).
 - The GHCR mock-server image is `linux/amd64` only, so an Apple Silicon kind node fails with `no match for platform in manifest`; build it locally under the same tag and the demo loads it into kind while Modal pulls the amd64 image from GHCR (`docs/runbooks/demo-cloud.md`).
