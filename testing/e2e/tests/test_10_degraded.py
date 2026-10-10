@@ -36,6 +36,7 @@ SLOW_TTFT_MS = 1200
 SLOWDOWN_SECONDS = 3 * DEGRADED_COOLDOWN_SECONDS
 RECOVERY_SECONDS = 2 * DEGRADED_COOLDOWN_SECONDS + 2
 LOAD_LIMIT_SECONDS = 90
+LIMIT_LEARNING_SECONDS = 30
 PRIMARY_DEGRADED = f"degraded {endpoint_id('primary')}: "
 
 
@@ -53,8 +54,27 @@ def targets(pattern: re.Pattern[str], lines: list[str]) -> set[str]:
     return {match.group(1) for match in map(pattern.search, lines) if match}
 
 
+def attempts_covering(pattern: re.Pattern[str], lines: list[str], providers: set[str]) -> list[str]:
+    attempts = [line for line in lines if pattern.search(line)]
+    return attempts if providers <= targets(pattern, attempts) else []
+
+
+def scale_ups_covering(controller: Controller, since: int, providers: set[str]) -> list[str]:
+    return attempts_covering(SCALE_UP, controller.log_lines("scale ")[since:], providers)
+
+
+def scale_backs_covering(controller: Controller, since: int, providers: set[str]) -> list[str]:
+    return attempts_covering(SCALE_BACK, controller.log_lines("scale back ")[since:], providers)
+
+
 def scale_back_lines(controller: Controller) -> list[str]:
     return [line for line in controller.log_lines("scale back ") if SCALE_BACK.search(line)]
+
+
+def requested_min(pattern: re.Pattern[str], line: str) -> int:
+    match = pattern.search(line)
+    assert match is not None, line
+    return int(match.group(2))
 
 
 def primary_ttft_degraded(controller: Controller) -> list[str]:
@@ -75,10 +95,26 @@ def queue_pressure_threshold(config: dict[str, Any]) -> float:
     return config["admission"]["max_wait"] * config["pressure"]["queue_wait_fraction"]
 
 
-def queue_pressure_budget(config: dict[str, Any]) -> float:
+def first_signal_budget(config: dict[str, Any]) -> float:
     return (
         config["admission"]["max_wait"] + config["pressure"]["sustained"] + 2 * HOUSEKEEPING_SECONDS
     )
+
+
+def resend_budget(config: dict[str, Any]) -> float:
+    return (
+        config["pressure"]["resend_every"]
+        + config["admission"]["max_wait"]
+        + 2 * HOUSEKEEPING_SECONDS
+    )
+
+
+def limits_learned(router: Router) -> bool:
+    return all(router.endpoint(name)["concurrency_limit"] == 1 for name in TARGETS)
+
+
+def router_queue_signals(router: Router) -> list[str]:
+    return [line for line in router.log_lines("degraded signal") if '"reason":"QueueDepth"' in line]
 
 
 @pytest.mark.router_tuning(pressure={"resend_every": RESEND_SECONDS})
@@ -87,69 +123,70 @@ def test_sustained_queue_pressure_reaches_the_controller_as_degraded_and_scales_
 ) -> None:
     config = router.config()
     threshold = queue_pressure_threshold(config)
-    budget = queue_pressure_budget(config)
     for name in TARGETS:
         deployment.mock(name).control(max_inflight=1, ttft_ms=1500)
     degraded_before = len(controller.log_lines(DEGRADED_LINE))
     scale_before = len(controller.log_lines("scale "))
     scale_back_before = len(controller.log_lines("scale back "))
+    raised = set(TARGETS)
+    stop = threading.Event()
 
     with ThreadPoolExecutor(max_workers=1) as pool:
-        loading = pool.submit(load_for, client, 2 * budget, False, CLIENTS)
-        signals = wait_until(
-            lambda: resent(router.log_lines("degraded signal")),
-            budget + RESEND_SECONDS + 2 * HOUSEKEEPING_SECONDS,
-            message="router reports and re-sends sustained queue pressure while saturated",
-        )
-        assert not loading.done(), "load ended before the router re-sent pressure"
+        loading = pool.submit(load_for, client, LOAD_LIMIT_SECONDS, False, CLIENTS, None, 8, stop)
+        try:
+            wait_until(
+                lambda: limits_learned(router),
+                LIMIT_LEARNING_SECONDS,
+                message="router learns that each target holds one request",
+            )
+            wait_until(
+                lambda: router_queue_signals(router),
+                first_signal_budget(config),
+                message="router reports sustained queue pressure while saturated",
+            )
+            wait_until(
+                lambda: resent(router_queue_signals(router)),
+                resend_budget(config),
+                message="router re-sends queue pressure while still saturated",
+            )
+            assert not loading.done(), "load ended before the router re-sent pressure"
+
+            degraded = wait_until(
+                lambda: controller.log_lines(DEGRADED_LINE)[degraded_before:],
+                first_signal_budget(config),
+                message="controller logs a Degraded signal",
+            )
+            assert any("QUEUE_DEPTH" in line for line in degraded), degraded
+
+            scale_ups = wait_until(
+                lambda: scale_ups_covering(controller, scale_before, raised),
+                10,
+                message="controller attempts to raise every target's floor",
+            )
+            assert not loading.done(), "load ended before the controller raised the floors"
+        finally:
+            stop.set()
         outcomes = loading.result()
-    assert any('"reason":"QueueDepth"' in line for line in signals), signals
+
+    assert targets(SCALE_UP, scale_ups) == raised
+    assert all(requested_min(SCALE_UP, line) == 2 for line in scale_ups)
+    assert all("exactly one container" in line for line in scale_ups)
 
     assert len(outcomes) >= CLIENTS
     unexpected = [o.describe() for o in outcomes if o.status not in (200, 429)]
     assert unexpected == []
     assert any(outcome.status == 200 for outcome in outcomes)
 
-    degraded = wait_until(
-        lambda: controller.log_lines(DEGRADED_LINE)[degraded_before:],
-        budget,
-        message="controller logs a Degraded signal",
-    )
-    assert any("QUEUE_DEPTH" in line for line in degraded), degraded
-
-    scale_ups = wait_until(
-        lambda: [
-            m for m in map(SCALE_UP.search, controller.log_lines("scale ")[scale_before:]) if m
-        ],
-        10,
-        message="controller attempts to scale up",
-    )
-    assert {match.group(1) for match in scale_ups} <= set(TARGETS)
-    assert all(int(match.group(2)) == 2 for match in scale_ups)
-    assert any(
-        "exactly one container" in line
-        for line in controller.log_lines("scale ")[scale_before:]
-        if SCALE_UP.search(line)
-    )
-
     for name in TARGETS:
         deployment.mock(name).control(max_inflight=0, ttft_ms=50)
 
-    def scale_backs() -> list[str]:
-        return [
-            line
-            for line in controller.log_lines("scale back ")[scale_back_before:]
-            if SCALE_BACK.search(line)
-        ]
-
     attempts = wait_until(
-        scale_backs,
+        lambda: scale_backs_covering(controller, scale_back_before, raised),
         2 * DEGRADED_COOLDOWN_SECONDS + 2,
-        message="controller attempts to scale back within two cooldowns",
+        message="controller attempts to scale back every raised floor within two cooldowns",
     )
-    scaled_back = {SCALE_BACK.search(line).group(1) for line in attempts}  # type: ignore[union-attr]
-    assert scaled_back == {match.group(1) for match in scale_ups}
-    assert all(int(SCALE_BACK.search(line).group(2)) == 1 for line in attempts)  # type: ignore[union-attr]
+    assert targets(SCALE_BACK, attempts) == raised
+    assert all(requested_min(SCALE_BACK, line) == 1 for line in attempts)
     assert all("exactly one container" in line for line in attempts)
 
     first_scale_back = min(logged_at(line) for line in attempts)
@@ -204,12 +241,10 @@ def test_sustained_ttft_slowdown_keeps_raised_floors_until_it_ends(
             raised = targets(SCALE_UP, controller.log_lines("scale ")[scale_before:])
             assert raised == {"secondary", "tertiary"}, raised
 
-            def every_floor_scaled_back() -> list[str]:
-                lines = scale_back_lines(controller)[scale_back_before:]
-                return lines if raised <= targets(SCALE_BACK, lines) else []
-
             attempts = wait_until(
-                every_floor_scaled_back,
+                lambda: attempts_covering(
+                    SCALE_BACK, scale_back_lines(controller)[scale_back_before:], raised
+                ),
                 RECOVERY_SECONDS + DEGRADED_COOLDOWN_SECONDS,
                 message="controller scales back every raised floor once TTFT recovers",
             )
