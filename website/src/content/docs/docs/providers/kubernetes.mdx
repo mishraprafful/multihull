@@ -40,8 +40,6 @@ kubernetes:
 
 An empty `resources.gpu` runs the pod on CPU: no `nvidia.com/gpu` limit, toleration or GPU node selector.
 
-The images under `ghcr.io/mishraprafful` are `linux/amd64` only ([#147](https://github.com/mishraprafful/multihull/issues/147)). A kind node on Apple Silicon fails to pull them with `no match for platform in manifest`; build the image locally under the same tag and load it with `kind load docker-image <image> --name <cluster>`.
-
 ## Translation
 
 | Spec field | Kubernetes |

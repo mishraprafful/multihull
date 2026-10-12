@@ -1,0 +1,57 @@
+---
+title: Modal
+description: Serverless containers via the Modal Python SDK.
+slug: 0.2.0/docs/providers/modal
+---
+
+Builds a `modal.App` programmatically: `Image.from_registry` pinned by digest, a serialized class with `@modal.web_server` that execs the container command, then `app.deploy(name=f"multihull-{svc}-{provider}")`, so two Modal targets in one service get two apps. `destroy` runs `modal app stop`, since the SDK has no stop call. Needs `modal>=1.6`.
+
+```yaml
+- provider: modal-main
+  type: modal
+  priority: 2
+  modal: {environment: main, region: eu}
+```
+
+Credentials: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or `~/.modal.toml`.
+
+Requirements:
+
+* `container.command` must be set. Modal does not run the image `CMD`, and the translator resets the image `ENTRYPOINT` (`ENTRYPOINT []` is the first setup Dockerfile line), because Modal starts its own runtime process in the container; an entrypoint such as the public vLLM image's `python3 -m vllm.entrypoints.openai.api_server` would otherwise swallow Modal's arguments and crash on start.
+* The server must listen on `0.0.0.0`.
+* The Python running `hull deploy` must match the image's Python minor version, because the server class is serialized with cloudpickle.
+* An empty `resources.gpu` runs the container on CPU.
+* Deploys pin Modal's image builder to `2025.06`, whatever the workspace default. Modal then mounts its client at runtime instead of running `pip install` in the image, so images without `pip` (a uv venv first on `PATH`, for example) work. `MODAL_IMAGE_BUILDER_VERSION` overrides it.
+* Modal expects `python` on `PATH`. For an image that ships only `python3` (the public vLLM images, for example), `modal.setupDockerfileCommands` adds Dockerfile lines after `FROM`, passed to `Image.from_registry(setup_dockerfile_commands=...)`:
+
+```yaml
+modal:
+  setupDockerfileCommands: ["RUN ln -s /usr/bin/python3 /usr/local/bin/python"]
+```
+
+## Private registries
+
+`registrySecret` names two environment variables. At deploy time their values become a `modal.Secret.from_dict` with `REGISTRY_USERNAME` and `REGISTRY_PASSWORD`, passed to `Image.from_registry`. Only the names reach plan output, state and the snapshot.
+
+```yaml
+modal:
+  environment: main
+  registrySecret: {usernameEnv: GHCR_USERNAME, passwordEnv: GHCR_TOKEN}
+```
+
+Modal pulls the image once, during deploy, and caches it. A short-lived token, such as `GITHUB_TOKEN` with `packages: read`, is enough.
+
+## Translation
+
+| Spec field | Modal |
+|---|---|
+| `container.image` | `modal.Image.from_registry(ref@digest, secret=)`, image builder `2025.06` |
+| `container.command`, `port` | `@modal.web_server(port, startup_timeout)` wrapping `subprocess.Popen(command)` |
+| `resources.gpu` | `gpu="A10G"`, `gpu="L4"`, and so on; `None` when empty |
+| `scaling.replicas` | `min_containers`, `max_containers`, `buffer_containers` |
+| `scaling.concurrency` | `@modal.concurrent(max_inputs=)` |
+| `container.health` | `startup_timeout` (at least 60 s); `hull deploy --wait` and `hull status` report Ready only once a container runs and `web_url + path` answers 2xx within 5 s; the router probes the same URL |
+| `container.secrets` | `modal.Secret.from_dict`, named `multihull-<svc>` |
+| endpoint | `get_web_url()` with label `multihull-<svc>`, plus proxy-auth headers injected by the router, plus the edge error signature `404` with body prefix `modal-http:` (what a stopped app answers) so the router fails over instead of returning it |
+
+Ref stored in state: app name plus environment.

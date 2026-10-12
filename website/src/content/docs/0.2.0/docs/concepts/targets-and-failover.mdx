@@ -1,0 +1,72 @@
+---
+title: Targets and failover
+description: Priority tiers, spillover and per-request retry across providers.
+slug: 0.2.0/docs/concepts/targets-and-failover
+---
+
+import StatusPill from '../../../../../components/StatusPill.astro';
+
+A target is one deployment of the service on one provider. Targets carry a `priority`; lower is preferred.
+
+```yaml
+targets:
+  - provider: gke-prod
+    type: kubernetes
+    priority: 1
+    replicas: {min: 2}
+  - provider: modal-main
+    type: modal
+    priority: 2
+  - provider: runpod-eu
+    type: runpod
+    priority: 3
+```
+
+## Routing between tiers
+
+Default scoring is `priority_spillover`: power-of-two-choices least-outstanding inside a tier, with gradual spill to the next tier as the current one loses healthy capacity (Envoy priority levels, 1.4 overprovision factor). Alternatives: `weighted`, `ewma_latency` on time-to-first-token, `locality`.
+
+## Failover per request
+
+```yaml
+route:
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}
+```
+
+The router retries only when all of these hold:
+
+* zero bytes committed to the client,
+* request body fully buffered,
+* the method is idempotent, or an `Idempotency-Key` is present, or the request provably never reached the model: the outcome is Capacity, a connect failure, or a provider edge error.
+
+A 408 counts as `Transient` like 502 to 504, so a POST without an `Idempotency-Key` gets the 408 back rather than a retry: the model may already have started. A provider edge error (Modal's `404 modal-http:` for a stopped app) is also `Transient`, but it is retried without a key, since the provider's front door answered before any model saw the request; see [Health and circuits](/0.2.0/docs/router/health-and-circuits/#outcome-taxonomy).
+
+Retries go to a different provider, at most `maxRetries` per request (default 2), within a per-route retry budget described below. When every untried provider has an open circuit, or none of them can take the request (a half-open circuit refusing the trial, no concurrency headroom), the retry goes back to a provider already tried that answered and whose circuit is still closed: a Modal URL or a Kubernetes Service spreads requests over replicas, so a second try usually lands on a healthy one, while a provider with an open circuit is known to fail. A connect failure never retries the same endpoint.
+
+## When the fallback fails too
+
+Spillover keeps walking down the priority list. With P1 down, requests land on P2. With P1 and P2 down, they land on P3. Callers see a 503 only when every target is ejected, or when the panic threshold routes to all endpoints and they all fail.
+
+Each hop spends from the retry budget. Over a trailing 10 s window a route may retry up to 20% of the requests it received, plus a floor of 10 retries per second of window, so a storm cannot double the load on the last healthy tier while a low-volume route can still fail over. The floor is one pool for the whole window (100 retries by default), not a per-second rate, so a burst can spend all of it in one second. The router's `[retry]` table sets `budget_ratio`, `budget_window` (whole seconds) and `min_retries_per_second`; see [Health and circuits](/0.2.0/docs/router/health-and-circuits/#tuning). A request still gets at most `maxRetries` retries, and only before the first byte is committed.
+
+Recovery runs in the other direction. An ejected target waits out its backoff, then its circuit goes half-open and admits 1 request, then 5%, 25% and 100% over 30 s. As each target passes the ramp, traffic climbs back to the best priority that is healthy. The home page hero plays this sequence: Kubernetes down, then Modal down too with traffic on RunPod, then Modal and Kubernetes recovering in turn.
+
+## Streaming
+
+Once the first SSE byte is forwarded the stream is committed and mid-stream failover is never attempted. If the upstream drops or goes idle past `timeouts.idle` mid-stream, the router discards any incomplete event and ends the response cleanly with a terminal event:
+
+```
+data: {"error":{"type":"upstream_disconnected","retryable":true,"provider":"<name>","reason":"disconnect"}}
+
+data: [DONE]
+```
+
+`reason` is `disconnect` or `idle_timeout`. The caller retries with the same `Idempotency-Key`; the router does not retry for it. Non-SSE HTTP/2 responses carry an `x-hull-error: upstream_disconnected` trailer when the request sent `te: trailers` or is gRPC; other streams are reset or closed. A stream still running when `timeouts.total` expires ends the same way with `"type":"total_timeout","retryable":false` (trailer `x-hull-error: total_timeout`): the cap covers the whole request, so a retry would hit it again, and the endpoint is not blamed. See [Mid-stream failures](/0.2.0/docs/router/health-and-circuits/#mid-stream-failures).
+
+## States you will see
+
+| Pill | Meaning |
+|---|---|
+| <StatusPill state="healthy" /> | Replicas ready, circuit closed |
+| <StatusPill state="degraded" /> | Serving, but warm checks or TTFT are slow; limiter lowered |
+| <StatusPill state="failover" /> | Circuit open; traffic spilled to the next tier |

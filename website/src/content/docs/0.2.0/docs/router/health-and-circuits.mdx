@@ -1,0 +1,79 @@
+---
+title: Health and circuits
+description: How the router tells busy from broken, and how it recovers.
+slug: 0.2.0/docs/router/health-and-circuits
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Outcome taxonomy
+
+| Outcome | Examples | Effect |
+|---|---|---|
+| Success | 2xx | Raises adaptive limit |
+| Capacity | 429, queue depth, TTFT timeout | Lowers limit by 0.7; never ejects |
+| Transient | connect failure, 408, 502, 503, 504, reset, provider edge error | Feeds circuit |
+| Fatal | 500 with body, other 4xx from the model | Feeds circuit |
+| ClientAbort | caller disconnected | Ignored |
+
+<Aside type="tip" title="Busy is not broken">
+  Capacity outcomes feed the limiter and admission queue, never the circuit. A cold or saturated endpoint is throttled, not ejected.
+</Aside>
+
+A provider edge error is a response the provider's front door sends for an endpoint whose app is gone, so the request never reached the model. Each translator declares its own signature in the snapshot (`edge_error`: the statuses it applies to and a body prefix); Modal's is `404` with a body starting `modal-http:`, what a stopped app answers. The router compares the status and the first 256 bytes of the body, treats a match as `Transient` and retries on another provider even for a POST without an `Idempotency-Key`, because nothing was executed. A 4xx without the signature is still the model's answer and stays `Fatal`, so an unknown route on a running model is returned, not retried.
+
+## Probes
+
+The router probes every endpoint's health path (`container.health.path` from the spec, carried in the snapshot, default `/health`) every `probe.interval` (5 s, 20 percent jitter) with `probe.timeout` (2 s). 2xx is a success; 5xx, 4xx, connect failures and timeouts are failures; RunPod 204 (warming) and 429 count as neither. Probes can take an endpoint out quickly and let it be retried, but only real requests can close its circuit:
+
+* Each failure counts as `Transient` in the endpoint circuit. The third consecutive failure marks the probe down and ejects the endpoint: its circuit opens (`router_failovers_total{reason="probe"}` increments) and is held open past every backoff while the probe reports down, so admission, selection, sticky placement and the provider circuit all treat it as open. An endpoint whose probe never recovers stays unavailable; the panic threshold still applies.
+* Three consecutive successes after an ejection mark the probe up and release the circuit into half-open. Real requests then decide: `circuit.probe_successes_to_close` (3) admitted-request successes close it, any failure reopens it with a doubled backoff.
+* Probe successes never count toward closing a circuit, and the first success streak after startup leaves the circuit alone, so a passing `/health` cannot route traffic back to an endpoint whose inference is failing.
+
+Probe state is on `/debug/endpoints` and `router_probe_total{endpoint,outcome}`. The optional warm check (`max_tokens=1`) is not implemented yet. Passive: ring of the last 100 outcomes plus 10 s buckets.
+
+## Mid-stream failures
+
+Once the first byte of a response has reached the client, the router never retries. SSE responses (route protocol `sse` or `Content-Type: text/event-stream`) are forwarded event by event: complete events pass through at once, and bytes after the last blank line (LF, CRLF or CR) wait for their event to finish. If the upstream drops the stream, the router discards the incomplete event and appends one final event
+
+```
+data: {"error":{"type":"upstream_disconnected","retryable":true,"provider":"<name>","reason":"disconnect"}}
+
+data: [DONE]
+```
+
+and ends the response cleanly, so SDKs never parse truncated JSON and can retry with the same `Idempotency-Key`. A clean upstream end flushes any trailing bytes unchanged. Non-SSE streams never end as if complete: HTTP/2 requests with `te: trailers` or a gRPC content type get an `x-hull-error: upstream_disconnected` trailer, other HTTP/2 streams are reset (`RST_STREAM`) and HTTP/1 connections are closed. Each case counts as `router_requests_total{outcome="upstream_disconnected"}` and feeds the endpoint circuit as `Transient`.
+
+`timeouts.total` (600 s) caps the whole request, so a stream still running when it expires is not an upstream failure. It ends the same way, but the final event reads `"type":"total_timeout","retryable":false` with `"reason":"total_timeout"` and the trailer is `x-hull-error: total_timeout`, since a retry would hit the same cap. It counts as `router_requests_total{outcome="total_timeout"}` and feeds neither the endpoint nor the provider circuit.
+
+A response whose body is still open after its first frame settles its outcome once, when the body ends: `success` on a clean end, `upstream_disconnected` (`Transient`) when the upstream drops. A caller that leaves after bytes reached it also counts as `success`, since the upstream had not failed (OpenAI SDKs close right after `data: [DONE]`); one that leaves before the first byte counts as `client_abort`, which the circuit ignores. Time to first token is still measured at the first byte, and complete responses are recorded as soon as they arrive.
+
+## Circuit per endpoint
+
+```
+        5 consecutive Transient/Fatal  OR  error ratio > 50% over 10s (min 20 samples)
+        OR  probe down (held open while the probe stays down)
+CLOSED ──────────────────────────────────────────────────────────────► OPEN
+  ▲                                                                     │
+  │ 3 admitted-request successes        wait 5s * 2^n (cap 5m) + jitter,
+  │ (probe successes never count)       or probe up again after an ejection
+  │         ┌───────────┐  admit ramp 1 req → 5% → 25% → 100% over 30s  │
+  └─────────│ HALF-OPEN │◄───────────────────────────────────────────────┘
+            └───────────┘  any failure → OPEN, n += 1
+```
+
+## Circuit per provider
+
+Opens when 50% of a provider's endpoints are open, or on 401/403 (credentials are broken, not capacity).
+
+## Panic threshold
+
+If more than 50% of all endpoints are open, the router routes to all of them rather than none. `circuit.panic_threshold` takes a share in (0, 1]; 1 disables panic routing. A retry first goes back to a healthy provider it already tried before it uses the panic pool.
+
+## Cold-start masking
+
+Gradient2 adaptive concurrency per endpoint on time-to-first-token. A bounded per-service admission queue waits up to 5 s, then returns 429 with `Retry-After`. Sustained pressure lowers the spillover threshold and sends a pre-warm signal to the controller, which raises warm replicas on healthy targets by one per `Degraded`. While queue pressure holds and new requests keep confirming it, the router re-sends `Degraded` every `pressure.resend_every` (default 30 s), so silence means recovery rather than a lost signal; keep it well below the controller's cooldown. A time-to-first-token p95 above `pressure.ttft_degrade_factor` times an endpoint's baseline, over `pressure.ttft_window` samples, sends `Degraded` for that provider and is re-sent the same way until a window is healthy again. Only healthy windows move the baseline, so a slowdown never becomes normal on its own; one that lasts `pressure.ttft_rebaseline_after` (default 1 h) is accepted as the new baseline, which ends the signal. A longer value keeps raised floors through long incidents, a shorter one accepts a permanent latency change sooner. Once no `Degraded` has arrived for `--degraded-cooldown` (default 10 m) the controller lowers that floor one step per cooldown until the pre-degraded minimum is back, never below the spec minimum and never below `reliability.minWarmProviders` warm targets. A scale call that fails leaves the floor unchanged and is retried on the next `Degraded` or cooldown step. Raised floors are saved in the state backend, so a restarted controller keeps them and resumes scale-back after one cooldown without `Degraded`.
+
+## Tuning
+
+Every threshold above is a `router.toml` table: `[timeouts]`, `[circuit]`, `[admission]`, `[pressure]`, `[probe]` and `[retry]`, documented with their defaults in `router/router.example.toml` and mirrored under `router.tuning` in the Helm chart. Durations are seconds (`circuit.ratio_window` and `retry.budget_window` whole seconds only), unknown keys and out-of-range values are rejected on start, and `/debug/config` on the admin listener shows the effective values.

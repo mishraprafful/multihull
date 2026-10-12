@@ -1,0 +1,31 @@
+---
+title: Baseten
+description: Truss-based deployments pushed through the truss library.
+slug: 0.2.0/docs/providers/baseten
+---
+
+Generates a truss config (`base_image`, `docker_server`, `resources`, autoscaling), pushes with `truss.push` via the library, and promotes through the management API.
+
+```yaml
+- provider: baseten-us
+  type: baseten
+  priority: 2
+  baseten: {}
+```
+
+Credentials: `BASETEN_API_KEY`.
+
+## Translation
+
+| Spec field | Baseten |
+|---|---|
+| `container.image` | truss `base_image.image` |
+| `container.command`, `port` | `docker_server.start_command`, `server_port` |
+| `resources.gpu` | `resources.accelerator` |
+| `scaling.replicas` | `min_replica`, `max_replica` |
+| `scaling.concurrency` | `concurrency_target` |
+| `container.health` | `readiness_endpoint`, `liveness_endpoint` |
+| `container.secrets` | truss `secrets` |
+| endpoint | model predict URL |
+
+Ref stored in state: model id plus deployment id. Planned for v0.2.

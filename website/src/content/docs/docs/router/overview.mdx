@@ -80,11 +80,11 @@ Each `v*` release pushes the chart to `oci://ghcr.io/mishraprafful/charts/multih
 The chart and images are public, so no registry login or pull secret is needed:
 
 ```sh
-helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0 \
+helm install multihull oci://ghcr.io/mishraprafful/charts/multihull --version 0.2.0 \
   -n multihull --create-namespace
 ```
 
-`helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.1.0` lists every value. A private fork publishing its own packages needs `helm registry login ghcr.io` and a pull secret named in `imagePullSecrets`.
+`helm show values oci://ghcr.io/mishraprafful/charts/multihull --version 0.2.0` lists every value. A private fork publishing its own packages needs `helm registry login ghcr.io` and a pull secret named in `imagePullSecrets`.
 
 ### Workload namespace
 

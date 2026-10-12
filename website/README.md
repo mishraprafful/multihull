@@ -2,10 +2,11 @@ Multihull docs site (Astro Starlight, "Open water" theme).
 
 Run: `npm install && npm run dev` (http://localhost:4321). Build: `npm run build` (output in `dist/`).
 
-`npm run build` first generates four pages; edit the sources, not the copies:
+`npm run build` first generates five pages; edit the sources, not the copies:
 
 - `docs/design/architecture.md` from `../docs/design/architecture-plan.md`
-- `docs/reference/release-notes.md` from `../docs/releases/0.1.0.md`
+- `docs/reference/release-notes.md` from `../docs/releases/0.2.0.md`
+- `docs/reference/release-notes/0.1.0.md` from `../docs/releases/0.1.0.md`
 - `docs/reference/spec-schema.mdx` from `uv run --project ../python hull schema`
 - `docs/reference/cli.mdx` from `uv run --project ../python hull --help`
 
