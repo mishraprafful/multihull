@@ -4,7 +4,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-10-10
+## [0.2.0] - 2026-10-12
 
 Stable launch. Human-facing notes: [docs/releases/0.2.0.md](docs/releases/0.2.0.md).
 
