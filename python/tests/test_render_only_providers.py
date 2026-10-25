@@ -7,8 +7,6 @@ from multihull.providers.base import Provider, Ref, Target
 from multihull.providers.baseten import BasetenProvider, render_truss_config
 from multihull.providers.replicate import ReplicateProvider
 from multihull.providers.replicate import render_payload as replicate_payload
-from multihull.providers.runpod import RunpodProvider
-from multihull.providers.runpod import render_payload as runpod_payload
 from multihull.spec import ServiceSpec
 from tests.conftest import assert_golden
 
@@ -29,10 +27,6 @@ def cog_spec(llama_spec: ServiceSpec, provider_type: str) -> ServiceSpec:
     return ServiceSpec.model_validate(raw)
 
 
-def test_golden_runpod(target_for) -> None:
-    assert_golden("llama-8b.runpod.json", runpod_payload(target_for("runpod-eu")))
-
-
 def test_golden_baseten(llama_spec: ServiceSpec) -> None:
     spec = cog_spec(llama_spec, "baseten")
     assert_golden(
@@ -48,23 +42,13 @@ def test_golden_replicate(llama_spec: ServiceSpec) -> None:
     assert payload["deployment"]["hardware"] == "gpu-l40s"
 
 
-def test_runpod_payload_shape(target_for) -> None:
-    payload = runpod_payload(target_for("runpod-eu"))
-    assert payload["endpoint"]["workersMin"] == 1
-    assert payload["endpoint"]["dataCenterIds"] == ["EU-RO-1", "EU-SE-1"]
-    assert payload["endpoint"]["scalerType"] == "REQUEST_COUNT"
-    assert payload["template"]["dockerStartCmd"].startswith("vllm serve")
-
-
-@pytest.mark.parametrize("cls", [RunpodProvider, BasetenProvider, ReplicateProvider])
+@pytest.mark.parametrize("cls", [BasetenProvider, ReplicateProvider])
 def test_apply_not_implemented(cls, target_for) -> None:
     with pytest.raises(NotImplementedError, match="v0.2"):
         cls().apply(target_for("runpod-eu"), None)
 
 
 def test_endpoints_from_refs() -> None:
-    runpod = RunpodProvider().endpoint(Ref("r", "runpod", "svc", {"endpoint": "abc"}))
-    assert runpod.url == "https://api.runpod.ai/v2/abc/"
     baseten = BasetenProvider().endpoint(Ref("b", "baseten", "svc", {"model": "m1"}))
     assert baseten.url == "https://model-m1.api.baseten.co/production/predict"
     replicate = ReplicateProvider().endpoint(Ref("x", "replicate", "svc", {"owner": "acme"}))

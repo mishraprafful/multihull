@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-import shlex
-from collections.abc import Iterator
-from datetime import timedelta
+import hashlib
+import json
+import os
+import re
+from collections.abc import Iterator, Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
+
+import httpx
 
 from multihull.providers.base import (
     CredHealth,
@@ -12,102 +17,534 @@ from multihull.providers.base import (
     Observed,
     Plan,
     Ref,
+    ScaleRefused,
     Target,
     env_credential_health,
+    redact_env,
+    resolve_secret_values,
 )
 from multihull.spec import GPU, RunpodBlock
 
-RUNPOD_GPU: dict[GPU, str] = {
-    GPU.L4: "NVIDIA L4",
-    GPU.A10G: "NVIDIA A10G",
-    GPU.A100_40: "NVIDIA A100-SXM4-40GB",
-    GPU.A100_80: "NVIDIA A100 80GB PCIe",
-    GPU.H100: "NVIDIA H100 80GB HBM3",
-    GPU.H200: "NVIDIA H200",
-    GPU.B200: "NVIDIA B200",
-}
+API_URL = "https://api.runpod.io/v2"
 API_KEY_ENV = "RUNPOD_API_KEY"
+ENDPOINT_API_KEY_ENV = "RUNPOD_ENDPOINT_API_KEY"
+RUNPOD_POOL: dict[GPU, str] = {
+    GPU.L4: "AMPERE_24",
+    GPU.A100_80: "AMPERE_80",
+    GPU.H100: "ADA_80_PRO",
+    GPU.H200: "HOPPER_141",
+}
+ENDPOINT_TYPE = "LOAD_BALANCER"
+SCALER_TYPE = "REQUEST_COUNT"
 CONTAINER_DISK_GB = 20
 IDLE_TIMEOUT_SECONDS = 5
-NOT_IMPLEMENTED = "v0.2"
+HTTP_TIMEOUT_SECONDS = 15.0
+HEALTH_TIMEOUT_SECONDS = 5.0
+LOG_IDLE_SECONDS = 3.0
+PAGE_SIZE = 1000
+WARMING_STATUS = 204
+PERMANENT_SCALE_STATUSES = frozenset({400, 422})
+DEFAULT_HEALTH_PATH = "/health"
+HEALTH_CHECK_PATH_ENV = "HEALTH_CHECK_PATH"
+AUTOSCALER_FIELDS = ("workers", "scaling")
+ENDPOINT_KEY = "endpoint"
+NAME_KEY = "name"
+URL_KEY = "url"
+HEALTH_PATH_KEY = "health_path"
+DIGEST_KEY = "spec"
+SECRETS_KEY = "secrets"
+UNSAFE_SECRET_CHARS = re.compile(r"[^A-Za-z0-9_]")
+
+
+class RunpodApiError(RuntimeError):
+    def __init__(self, status: int, detail: str) -> None:
+        super().__init__(f"RunPod API {status}: {detail}")
+        self.status = status
 
 
 def runpod_block(desired: Target) -> RunpodBlock:
     return desired.target.runpod or RunpodBlock()
 
 
-def render_template(desired: Target) -> dict[str, Any]:
+def endpoint_name(desired: Target) -> str:
+    return f"{desired.resource_name}-{desired.provider}"
+
+
+def endpoint_url(endpoint_id: str) -> str:
+    return f"https://{endpoint_id}.api.runpod.ai"
+
+
+def base_url(endpoint: Mapping[str, Any]) -> str:
+    urls = endpoint.get("requestUrls") or {}
+    return str(urls.get("base") or endpoint_url(str(endpoint["id"])))
+
+
+def secret_store_name(desired: Target, secret: str) -> str:
+    return UNSAFE_SECRET_CHARS.sub("_", f"{endpoint_name(desired)}_{secret}")
+
+
+def secret_reference(store_name: str) -> str:
+    return "{{ RUNPOD_SECRET_" + store_name + " }}"
+
+
+def gpu_pools(desired: Target) -> list[str]:
+    return list(dict.fromkeys(RUNPOD_POOL[gpu] for gpu in desired.gpus if gpu in RUNPOD_POOL))
+
+
+def unsupported_gpus(desired: Target) -> list[GPU]:
+    return [gpu for gpu in desired.gpus if gpu not in RUNPOD_POOL]
+
+
+def no_pool_message(gpus: Sequence[GPU]) -> str:
+    names = ", ".join(gpu.value for gpu in gpus)
+    supported = ", ".join(gpu.value for gpu in RUNPOD_POOL)
+    return f"RunPod has no serverless GPU pool for {names}; resources.gpu needs one of {supported}"
+
+
+def endpoint_env(desired: Target) -> dict[str, str]:
     container = desired.service.container
-    return {
-        "name": desired.resource_name,
-        "imageName": desired.image_ref,
-        "dockerStartCmd": shlex.join(container.command) if container.command else None,
-        "containerDiskInGb": CONTAINER_DISK_GB,
-        "ports": f"{container.port}/http",
-        "env": [{"key": k, "value": v} for k, v in sorted(container.env.items())],
-        "secretEnv": [{"key": name, "secret": name} for name in container.secrets],
-        "isServerless": True,
-    }
+    env = dict(sorted(container.env.items()))
+    env.update(
+        {name: secret_reference(secret_store_name(desired, name)) for name in container.secrets}
+    )
+    env.update(
+        {
+            "PORT": str(container.port),
+            "PORT_HEALTH": str(container.port),
+            HEALTH_CHECK_PATH_ENV: container.health.path,
+        }
+    )
+    return env
 
 
-def render_endpoint(desired: Target, template_id: str = "{templateId}") -> dict[str, Any]:
-    block = runpod_block(desired)
+def render_endpoint(desired: Target) -> dict[str, Any]:
+    container = desired.service.container
     replicas = desired.replicas
-    return {
-        "name": desired.resource_name,
-        "templateId": template_id,
-        "gpuIds": ",".join(RUNPOD_GPU[g] for g in desired.gpus),
-        "gpuCount": desired.service.resources.gpuCount,
-        "workersMin": replicas.min,
-        "workersMax": replicas.max,
-        "idleTimeout": IDLE_TIMEOUT_SECONDS,
-        "scalerType": "REQUEST_COUNT",
-        "scalerValue": desired.service.scaling.concurrency or 1,
-        "dataCenterIds": list(block.dataCenters),
-        "loadBalancer": {
-            "port": desired.service.container.port,
-            "healthPath": desired.service.container.health.path,
-        },
-        "allowedCudaVersions": [],
+    body: dict[str, Any] = {
+        "name": endpoint_name(desired),
+        "type": ENDPOINT_TYPE,
+        "image": desired.image_ref,
     }
+    if container.command:
+        body["entrypoint"] = list(container.command)
+        body["cmd"] = []
+    body.update(
+        {
+            "ports": [f"{container.port}/http"],
+            "env": endpoint_env(desired),
+            "disk": CONTAINER_DISK_GB,
+            "gpu": {"pools": gpu_pools(desired), "count": desired.service.resources.gpuCount},
+            "workers": {
+                "min": replicas.min,
+                "max": replicas.max,
+                "idleTimeout": IDLE_TIMEOUT_SECONDS,
+            },
+            "scaling": {
+                "type": SCALER_TYPE,
+                "requestCount": desired.service.scaling.concurrency or 1,
+            },
+            "dataCenterIds": list(runpod_block(desired).dataCenters),
+        }
+    )
+    return body
 
 
 def render_payload(desired: Target) -> dict[str, Any]:
-    return {"template": render_template(desired), "endpoint": render_endpoint(desired)}
+    return {
+        "secrets": [
+            {"name": secret_store_name(desired, name)} for name in desired.service.container.secrets
+        ],
+        "endpoint": render_endpoint(desired),
+    }
+
+
+def plan_notes(desired: Target) -> list[str]:
+    missing = unsupported_gpus(desired)
+    if not missing:
+        return []
+    if not gpu_pools(desired):
+        return [no_pool_message(missing)]
+    names = ", ".join(gpu.value for gpu in missing)
+    return [f"RunPod has no serverless GPU pool for {names}; those classes are skipped"]
+
+
+def update_body(body: Mapping[str, Any]) -> dict[str, Any]:
+    return {field: value for field, value in body.items() if field != "type"}
+
+
+def body_digest(body: Mapping[str, Any]) -> str:
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def autoscaler_drift(current: Mapping[str, Any], body: Mapping[str, Any]) -> dict[str, Any]:
+    drift: dict[str, Any] = {}
+    for field in AUTOSCALER_FIELDS:
+        live = current.get(field) or {}
+        if any(live.get(key) != value for key, value in body[field].items()):
+            drift[field] = body[field]
+    return drift
+
+
+def ref_for(
+    desired: Target,
+    endpoint: Mapping[str, Any] | None,
+    body: Mapping[str, Any],
+    secrets: Sequence[str] = (),
+) -> Ref:
+    ids = {
+        NAME_KEY: str(body["name"]),
+        HEALTH_PATH_KEY: desired.service.container.health.path,
+        DIGEST_KEY: body_digest(body),
+    }
+    if endpoint is not None:
+        ids[ENDPOINT_KEY] = str(endpoint["id"])
+        ids[URL_KEY] = base_url(endpoint)
+    if secrets:
+        ids[SECRETS_KEY] = ",".join(secrets)
+    return Ref(provider=desired.provider, type="runpod", service=desired.name, ids=ids)
+
+
+def redact(text: str) -> str:
+    return redact_env(text, [API_KEY_ENV, ENDPOINT_API_KEY_ENV])
+
+
+def api_key() -> str:
+    value = os.environ.get(API_KEY_ENV, "").strip()
+    if not value:
+        raise RuntimeError(f"{API_KEY_ENV} is not set; RunPod credentials missing")
+    return value
+
+
+def bearer(value: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {value}"}
+
+
+def traffic_headers() -> dict[str, str]:
+    value = (os.environ.get(ENDPOINT_API_KEY_ENV) or os.environ.get(API_KEY_ENV) or "").strip()
+    return bearer(value) if value else {}
+
+
+def problem_detail(response: httpx.Response) -> str:
+    try:
+        problem = response.json()
+    except ValueError:
+        return response.text.strip()[:200] or response.reason_phrase
+    if not isinstance(problem, dict):
+        return str(problem)[:200]
+    title = str(problem.get("title") or response.reason_phrase)
+    detail = str(problem.get("detail") or "")
+    text = f"{title}: {detail}" if detail else title
+    errors = [str(error) for error in problem.get("errors") or []]
+    return "; ".join([text, *errors])
+
+
+def log_event(raw: str) -> dict[str, Any] | None:
+    if not raw.startswith("data:"):
+        return None
+    try:
+        event = json.loads(raw.removeprefix("data:").strip())
+    except ValueError:
+        return None
+    return event if isinstance(event, dict) and "line" in event else None
+
+
+def logged_after(event: Mapping[str, Any], until: datetime) -> bool:
+    stamp = event.get("ts")
+    if not stamp:
+        return False
+    try:
+        return datetime.fromisoformat(str(stamp)) > until
+    except ValueError:
+        return False
+
+
+def waiting_message(summary: Mapping[str, Any]) -> str:
+    counts = ", ".join(
+        f"{int(summary.get(state, 0))} {state}"
+        for state in ("initializing", "throttled", "unhealthy")
+    )
+    return f"no worker ready: {counts}"
+
+
+class RunpodApi:
+    def __init__(self, http: httpx.Client) -> None:
+        self.http = http
+
+    def call(
+        self,
+        method: str,
+        path: str,
+        body: Mapping[str, Any] | None = None,
+        params: Mapping[str, Any] | None = None,
+        missing_ok: bool = False,
+    ) -> Any:
+        response = self.http.request(
+            method, f"{API_URL}{path}", json=body, params=params, headers=bearer(api_key())
+        )
+        if missing_ok and response.status_code == 404:
+            return None
+        if response.is_error:
+            raise RunpodApiError(response.status_code, redact(problem_detail(response)))
+        return response.json() if response.content else None
+
+    def endpoints(self) -> Iterator[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": PAGE_SIZE}
+        while True:
+            page = self.call("GET", "/serverless", params=params)
+            yield from page.get("endpoints") or []
+            pagination = page.get("pagination") or {}
+            cursor = pagination.get("nextCursor")
+            if not pagination.get("hasNextPage") or not cursor:
+                return
+            params = {"limit": PAGE_SIZE, "cursor": cursor}
+
+    def endpoint_named(self, name: str) -> dict[str, Any] | None:
+        return next((e for e in self.endpoints() if e.get("name") == name), None)
+
+    def secret_named(self, name: str) -> dict[str, Any] | None:
+        listing = self.call("GET", "/account/secrets", params={"name": name})
+        return next(
+            (
+                secret
+                for secret in listing.get("secrets") or []
+                if str(secret.get("name", "")).casefold() == name.casefold()
+            ),
+            None,
+        )
+
+    def put_secret(self, name: str, value: str) -> None:
+        existing = self.secret_named(name)
+        if existing is None:
+            self.call("POST", "/account/secrets", {"name": name, "value": value})
+        else:
+            self.call("PATCH", f"/account/secrets/{existing['id']}", {"value": value})
+
+    def delete_secret(self, name: str) -> None:
+        existing = self.secret_named(name)
+        if existing is not None:
+            self.call("DELETE", f"/account/secrets/{existing['id']}", missing_ok=True)
+
+    def worker_logs(
+        self, endpoint_id: str, worker_id: str, start: str, until: datetime
+    ) -> Iterator[str]:
+        url = f"{API_URL}/serverless/{endpoint_id}/workers/{worker_id}/logs"
+        timeout = httpx.Timeout(HTTP_TIMEOUT_SECONDS, read=LOG_IDLE_SECONDS)
+        try:
+            with self.http.stream(
+                "GET", url, params={"since": start}, headers=bearer(api_key()), timeout=timeout
+            ) as response:
+                if response.is_error:
+                    response.read()
+                    raise RunpodApiError(response.status_code, redact(problem_detail(response)))
+                for raw in response.iter_lines():
+                    event = log_event(raw)
+                    if event is None:
+                        continue
+                    if logged_after(event, until):
+                        return
+                    yield f"{worker_id} {event['line']}"
+        except httpx.ReadTimeout:
+            return
 
 
 class RunpodProvider:
     type: ClassVar = "runpod"
 
+    def __init__(
+        self,
+        dry_run: bool = True,
+        provider_name: str = "runpod",
+        http_client: httpx.Client | None = None,
+    ) -> None:
+        self.dry_run = dry_run
+        self.provider_name = provider_name
+        self._http = http_client
+
+    @property
+    def http(self) -> httpx.Client:
+        if self._http is None:
+            self._http = httpx.Client(timeout=HTTP_TIMEOUT_SECONDS)
+        return self._http
+
+    @property
+    def api(self) -> RunpodApi:
+        return RunpodApi(self.http)
+
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
-        return Plan(provider=desired.provider, type=self.type, payload=render_payload(desired))
-
-    def apply(self, desired: Target, observed: Ref | None) -> Ref:
-        raise NotImplementedError(NOT_IMPLEMENTED)
-
-    def destroy(self, ref: Ref) -> None:
-        raise NotImplementedError(NOT_IMPLEMENTED)
-
-    def status(self, ref: Ref) -> Observed:
-        return Observed(phase="Unknown", message="runpod status lands in v0.2")
-
-    def scale(self, ref: Ref, min: int, max: int) -> None:
-        raise NotImplementedError(NOT_IMPLEMENTED)
-
-    def logs(self, ref: Ref, since: timedelta) -> Iterator[str]:
-        yield from ()
-
-    def endpoint(self, ref: Ref) -> Endpoint:
-        endpoint_id = ref.ids.get("endpoint", "{endpointId}")
-        return Endpoint(
-            url=f"https://api.runpod.ai/v2/{endpoint_id}/", region=ref.ids.get("region")
+        return Plan(
+            provider=desired.provider,
+            type=self.type,
+            payload=render_payload(desired),
+            notes=plan_notes(desired),
         )
 
+    def apply(self, desired: Target, observed: Ref | None) -> Ref:
+        body = render_endpoint(desired)
+        if not body["gpu"]["pools"]:
+            raise ValueError(no_pool_message(unsupported_gpus(desired)))
+        if self.dry_run:
+            return ref_for(desired, None, body)
+        secrets = self.sync_secrets(desired)
+        current = self.current_endpoint(observed, body["name"])
+        if current is None:
+            current = self.api.call("POST", "/serverless", body)
+        else:
+            current = self.update(current, observed, body)
+        return ref_for(desired, current, body, secrets)
+
+    def sync_secrets(self, desired: Target) -> list[str]:
+        names = desired.service.container.secrets
+        if not names:
+            return []
+        values = resolve_secret_values(names)
+        stored: list[str] = []
+        for name in names:
+            store_name = secret_store_name(desired, name)
+            self.api.put_secret(store_name, values[name])
+            stored.append(store_name)
+        return stored
+
+    def current_endpoint(self, observed: Ref | None, name: str) -> dict[str, Any] | None:
+        endpoint_id = observed.ids.get(ENDPOINT_KEY) if observed else None
+        if endpoint_id:
+            found = self.api.call("GET", f"/serverless/{endpoint_id}", missing_ok=True)
+            if found is not None:
+                return dict(found)
+        return self.api.endpoint_named(name)
+
+    def update(
+        self, current: dict[str, Any], observed: Ref | None, body: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        if current.get("type") != ENDPOINT_TYPE:
+            raise RuntimeError(
+                f"RunPod endpoint {current.get('name')} ({current['id']}) is "
+                f"{current.get('type')}, not {ENDPOINT_TYPE}; delete it or rename the target"
+            )
+        unchanged = (
+            observed is not None
+            and observed.ids.get(ENDPOINT_KEY) == str(current["id"])
+            and observed.ids.get(DIGEST_KEY) == body_digest(body)
+        )
+        changes = autoscaler_drift(current, body) if unchanged else update_body(body)
+        if not changes:
+            return current
+        return dict(self.api.call("PATCH", f"/serverless/{current['id']}", changes))
+
+    def destroy(self, ref: Ref) -> None:
+        if self.dry_run:
+            return
+        endpoint_id = ref.ids.get(ENDPOINT_KEY)
+        if not endpoint_id and ref.ids.get(NAME_KEY):
+            found = self.api.endpoint_named(ref.ids[NAME_KEY])
+            endpoint_id = str(found["id"]) if found else None
+        if endpoint_id:
+            self.api.call("DELETE", f"/serverless/{endpoint_id}", missing_ok=True)
+        for name in filter(None, ref.ids.get(SECRETS_KEY, "").split(",")):
+            self.api.delete_secret(name)
+
+    def status(self, ref: Ref) -> Observed:
+        if self.dry_run:
+            return Observed(phase="Unknown", message="dry run")
+        endpoint_id = ref.ids.get(ENDPOINT_KEY)
+        if not endpoint_id:
+            return Observed(phase="Unknown", message="no RunPod endpoint id in state")
+        try:
+            endpoint = self.api.call("GET", f"/serverless/{endpoint_id}", missing_ok=True)
+            if endpoint is None:
+                return Observed(phase="Failed", message=f"RunPod endpoint {endpoint_id} not found")
+            listing = self.api.call("GET", f"/serverless/{endpoint_id}/workers")
+        except (httpx.HTTPError, RuntimeError) as exc:
+            return Observed(phase="Unknown", message=redact(str(exc)))
+        summary = listing.get("summary") or {}
+        ready = int(summary.get("running", 0)) + int(summary.get("idle", 0))
+        minimum = int((endpoint.get("workers") or {}).get("min", 0))
+        desired = max(minimum, int(summary.get("total", 0)))
+        if not ready:
+            return Observed("Pending", 0, desired, waiting_message(summary))
+        health_path = ref.ids.get(HEALTH_PATH_KEY, DEFAULT_HEALTH_PATH)
+        return self.probe(f"{base_url(endpoint).rstrip('/')}{health_path}", ready, desired)
+
+    def probe(self, url: str, ready: int, desired: int) -> Observed:
+        try:
+            response = self.http.get(url, headers=traffic_headers(), timeout=HEALTH_TIMEOUT_SECONDS)
+        except httpx.HTTPError as exc:
+            return Observed(
+                "Pending", 0, desired, f"{ready} worker(s) up, health probe {type(exc).__name__}"
+            )
+        if response.status_code == WARMING_STATUS:
+            return Observed(
+                "Pending", 0, desired, f"{ready} worker(s) up, health {WARMING_STATUS} (warming)"
+            )
+        if response.is_success:
+            return Observed("Ready", ready, desired, f"health {response.status_code}")
+        return Observed(
+            "Pending", 0, desired, f"{ready} worker(s) up, health returned {response.status_code}"
+        )
+
+    def scale(self, ref: Ref, min: int, max: int) -> None:
+        if self.dry_run:
+            return
+        endpoint_id = ref.ids.get(ENDPOINT_KEY)
+        if not endpoint_id:
+            raise ScaleRefused("no RunPod endpoint id in state")
+        try:
+            self.api.call(
+                "PATCH", f"/serverless/{endpoint_id}", {"workers": {"min": min, "max": max}}
+            )
+        except RunpodApiError as exc:
+            if exc.status in PERMANENT_SCALE_STATUSES:
+                raise ScaleRefused(str(exc)) from None
+            raise
+
+    def logs(self, ref: Ref, since: timedelta) -> Iterator[str]:
+        if self.dry_run:
+            return
+        endpoint_id = ref.ids.get(ENDPOINT_KEY)
+        if not endpoint_id:
+            return
+        until = datetime.now(UTC)
+        start = (until - since).strftime("%Y-%m-%dT%H:%M:%SZ")
+        listing = self.api.call("GET", f"/serverless/{endpoint_id}/workers")
+        for worker in listing.get("workers") or []:
+            yield from self.api.worker_logs(endpoint_id, str(worker["id"]), start, until)
+
+    def endpoint(self, ref: Ref) -> Endpoint:
+        url = ref.ids.get(URL_KEY) or endpoint_url(ref.ids.get(ENDPOINT_KEY, "{endpointId}"))
+        return Endpoint(url=url, inject_headers=traffic_headers(), region=ref.ids.get("region"))
+
     def gpu_inventory(self) -> list[GPUOffer]:
-        return [GPUOffer(gpu=gpu, available=True) for gpu in RUNPOD_GPU]
+        return [GPUOffer(gpu=gpu, available=True) for gpu in RUNPOD_POOL]
 
     def credentials_health(self) -> CredHealth:
-        return env_credential_health(API_KEY_ENV, self.type)
+        if not os.environ.get(API_KEY_ENV, "").strip():
+            return env_credential_health(API_KEY_ENV, self.type)
+        try:
+            self.api.call("GET", "/serverless", params={"limit": 1})
+        except RunpodApiError as exc:
+            if exc.status == 401:
+                return CredHealth(ok=False, message=f"RunPod rejected {API_KEY_ENV}: {exc}")
+            if exc.status == 403:
+                return CredHealth(ok=False, message=f"{API_KEY_ENV} lacks Serverless access: {exc}")
+            return CredHealth(ok=False, message=f"could not verify {API_KEY_ENV}: {exc}")
+        except httpx.HTTPError as exc:
+            return CredHealth(
+                ok=False, message=redact(f"could not reach RunPod: {type(exc).__name__}: {exc}")
+            )
+        return CredHealth(ok=True, message=f"RunPod accepted {API_KEY_ENV}")
 
     def rediscover(self, service: str) -> Ref | None:
-        return None
+        if self.dry_run:
+            return None
+        name = f"multihull-{service}-{self.provider_name}"
+        found = self.api.endpoint_named(name)
+        if found is None:
+            return None
+        env = found.get("env") or {}
+        ids = {
+            ENDPOINT_KEY: str(found["id"]),
+            NAME_KEY: name,
+            URL_KEY: base_url(found),
+            HEALTH_PATH_KEY: str(env.get(HEALTH_CHECK_PATH_ENV) or DEFAULT_HEALTH_PATH),
+        }
+        return Ref(provider=self.provider_name, type="runpod", service=service, ids=ids)

@@ -1,42 +1,48 @@
 {
-  "template": {
-    "name": "multihull-llama-8b",
-    "imageName": "ghcr.io/acme/vllm-llama:1.4.0",
-    "dockerStartCmd": "vllm serve meta-llama/Llama-3.1-8B-Instruct",
-    "containerDiskInGb": 20,
-    "ports": "8000/http",
-    "env": [
-      {
-        "key": "VLLM_LOGGING_LEVEL",
-        "value": "INFO"
-      }
-    ],
-    "secretEnv": [
-      {
-        "key": "hf-token",
-        "secret": "hf-token"
-      }
-    ],
-    "isServerless": true
-  },
+  "secrets": [
+    {
+      "name": "multihull_llama_8b_runpod_eu_hf_token"
+    }
+  ],
   "endpoint": {
-    "name": "multihull-llama-8b",
-    "templateId": "{templateId}",
-    "gpuIds": "NVIDIA L4,NVIDIA A10G,NVIDIA A100-SXM4-40GB",
-    "gpuCount": 1,
-    "workersMin": 1,
-    "workersMax": 8,
-    "idleTimeout": 5,
-    "scalerType": "REQUEST_COUNT",
-    "scalerValue": 32,
+    "name": "multihull-llama-8b-runpod-eu",
+    "type": "LOAD_BALANCER",
+    "image": "ghcr.io/acme/vllm-llama:1.4.0",
+    "entrypoint": [
+      "vllm",
+      "serve",
+      "meta-llama/Llama-3.1-8B-Instruct"
+    ],
+    "cmd": [],
+    "ports": [
+      "8000/http"
+    ],
+    "env": {
+      "VLLM_LOGGING_LEVEL": "INFO",
+      "hf-token": "{{ RUNPOD_SECRET_multihull_llama_8b_runpod_eu_hf_token }}",
+      "PORT": "8000",
+      "PORT_HEALTH": "8000",
+      "HEALTH_CHECK_PATH": "/health"
+    },
+    "disk": 20,
+    "gpu": {
+      "pools": [
+        "AMPERE_24"
+      ],
+      "count": 1
+    },
+    "workers": {
+      "min": 1,
+      "max": 8,
+      "idleTimeout": 5
+    },
+    "scaling": {
+      "type": "REQUEST_COUNT",
+      "requestCount": 32
+    },
     "dataCenterIds": [
       "EU-RO-1",
       "EU-SE-1"
-    ],
-    "loadBalancer": {
-      "port": 8000,
-      "healthPath": "/health"
-    },
-    "allowedCudaVersions": []
+    ]
   }
 }
