@@ -94,6 +94,18 @@ def test_unsupported_gpu_classes_are_noted_and_an_empty_pool_list_refuses_apply(
         RunpodProvider().apply(blackwell, None)
 
 
+def test_empty_gpu_list_runs_on_cpu_workers(
+    provider: RunpodProvider, fake: FakeRunpod, llama_raw: dict[str, Any]
+) -> None:
+    cpu = variant(llama_raw, resources={"gpu": []})
+    body = render_endpoint(cpu)
+    assert "gpu" not in body
+    assert body["cpu"] == [{"id": "cpu5c", "vcpuCount": 4}]
+    assert RunpodProvider().plan(cpu, None).notes == []
+    ref = provider.apply(cpu, None)
+    assert fake.endpoints[ref.ids["endpoint"]]["cpu"] == body["cpu"]
+
+
 def test_dry_run_touches_nothing(target: Target) -> None:
     provider = RunpodProvider()
     ref = provider.apply(target, None)

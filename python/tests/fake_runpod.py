@@ -108,7 +108,9 @@ class FakeRunpod:
             return problem(422, "Unprocessable Entity", f"unknown properties {unknown}")
         if body.get("type") == "LOAD_BALANCER" and body["scaling"]["type"] != "REQUEST_COUNT":
             return problem(422, "Unprocessable Entity", "load balancers scale on REQUEST_COUNT")
-        if not body.get("gpu", {}).get("pools"):
+        if ("gpu" in body) == ("cpu" in body):
+            return problem(400, "Bad Request", "set exactly one of gpu or cpu")
+        if "gpu" in body and not body["gpu"].get("pools"):
             return problem(422, "Unprocessable Entity", "gpu.pools needs at least one pool")
         endpoint_id = self.next_id("ep")
         self.endpoints[endpoint_id] = {**body, "id": endpoint_id, **self.urls(endpoint_id, body)}

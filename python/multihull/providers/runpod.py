@@ -34,6 +34,7 @@ RUNPOD_POOL: dict[GPU, str] = {
     GPU.H100: "ADA_80_PRO",
     GPU.H200: "HOPPER_141",
 }
+CPU_FLAVORS: tuple[dict[str, Any], ...] = ({"id": "cpu5c", "vcpuCount": 4},)
 ENDPOINT_TYPE = "LOAD_BALANCER"
 SCALER_TYPE = "REQUEST_COUNT"
 CONTAINER_DISK_GB = 20
@@ -101,6 +102,12 @@ def no_pool_message(gpus: Sequence[GPU]) -> str:
     return f"RunPod has no serverless GPU pool for {names}; resources.gpu needs one of {supported}"
 
 
+def compute(desired: Target) -> dict[str, Any]:
+    if not desired.gpus:
+        return {"cpu": [dict(flavor) for flavor in CPU_FLAVORS]}
+    return {"gpu": {"pools": gpu_pools(desired), "count": desired.service.resources.gpuCount}}
+
+
 def endpoint_env(desired: Target) -> dict[str, str]:
     container = desired.service.container
     env = dict(sorted(container.env.items()))
@@ -133,7 +140,7 @@ def render_endpoint(desired: Target) -> dict[str, Any]:
             "ports": [f"{container.port}/http"],
             "env": endpoint_env(desired),
             "disk": CONTAINER_DISK_GB,
-            "gpu": {"pools": gpu_pools(desired), "count": desired.service.resources.gpuCount},
+            **compute(desired),
             "workers": {
                 "min": replicas.min,
                 "max": replicas.max,
@@ -381,7 +388,7 @@ class RunpodProvider:
 
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
         body = render_endpoint(desired)
-        if not body["gpu"]["pools"]:
+        if desired.gpus and not gpu_pools(desired):
             raise ValueError(no_pool_message(unsupported_gpus(desired)))
         if self.dry_run:
             return ref_for(desired, None, body)

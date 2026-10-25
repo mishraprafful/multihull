@@ -17,7 +17,7 @@ PROVIDER_TYPES: tuple[ProviderType, ...] = (
     "replicate",
     "docker",
 )
-GPU_OPTIONAL_TYPES: tuple[ProviderType, ...] = ("docker", "kubernetes", "modal")
+GPU_OPTIONAL_TYPES: tuple[ProviderType, ...] = ("docker", "kubernetes", "modal", "runpod")
 ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
 
