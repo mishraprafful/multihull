@@ -58,7 +58,7 @@ jobs:
             --set router.snapshot.tls.secretName=multihull-router-discovery \
             --set router.snapshot.token.existingSecret=multihull-discovery-token \
             | kubectl apply --dry-run=server --namespace default -f -
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
           cache-dependency-glob: |
@@ -143,7 +143,7 @@ jobs:
           tags: ${{ env.ROUTER_IMAGE }}
           cache-from: type=gha,scope=router-amd64
       - run: docker build -t "$MOCK_IMAGE" testing/mock-server
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
           cache-dependency-glob: |
