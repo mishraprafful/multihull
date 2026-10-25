@@ -25,3 +25,6 @@ def test_deploy_waits_until_every_target_is_ready(
     assert {e["health"] for e in endpoints.values()} == {"ready"}
     if deployment.secondary_type == "modal":
         assert endpoints[deployment.secondary]["url"].endswith(".modal.run")
+    if deployment.secondary_type == "runpod":
+        assert endpoints[deployment.secondary]["url"].endswith(".api.runpod.ai")
+        assert endpoints[deployment.secondary]["inject_headers"].keys() == {"Authorization"}
