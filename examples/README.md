@@ -5,8 +5,9 @@
 | `demo/` | Local failover demo: three `docker` targets running the mock server, `make demo` (see `demo/README.md`) |
 | `demo-cloud/` | Cloud failover demo: kind primary and Modal secondary, `make demo-cloud`, plus a Modal L4 variant with a real model (see `demo-cloud/README.md` and `docs/runbooks/demo-cloud.md`) |
 | `llama-8b/` | Llama 3.1 8B on vLLM across Kubernetes (primary), Modal and RunPod with OpenAI-compatible routing |
+| `replicate-echo/` | A Cog echo model on Docker (primary) and a Replicate deployment, routed as Cog `POST /predictions` (see `replicate-echo/README.md`) |
 
-Each directory holds a `multihull.yaml` and, where the image is built locally, a `Dockerfile`.
+Each directory holds a `multihull.yaml` and, where the image is built locally, a `Dockerfile` or a Cog `cog.yaml`.
 
 ```sh
 cd examples/llama-8b
