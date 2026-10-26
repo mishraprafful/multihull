@@ -180,6 +180,19 @@ mod tests {
     }
 
     #[test]
+    fn upstream_uri_keeps_the_endpoint_base_path() {
+        let endpoint = Endpoint {
+            url: "https://model-abc.api.baseten.co/environments/production/sync".into(),
+            ..Default::default()
+        };
+        let uri = upstream_uri(&endpoint, "/v1/chat/completions").unwrap();
+        assert_eq!(
+            uri.to_string(),
+            "https://model-abc.api.baseten.co/environments/production/sync/v1/chat/completions"
+        );
+    }
+
+    #[test]
     fn hop_by_hop_host_and_authorization_are_stripped() {
         let mut headers = HeaderMap::new();
         headers.insert(
