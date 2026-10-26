@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from live import kubernetes_gpu
-from live.gpu import new_cost, restores_primary
+from live.gpu import BUDGET_USD, MODAL_HOURLY_USD, new_cost, restores_primary, worst_case_usd
 from live.harness import LIVE_ROOT, REPO_ROOT, SPECS, Settings, render_spec
 from live.kubernetes_gpu import (
     DELETE_KINDS,
@@ -37,7 +37,14 @@ from multihull.spec import ServiceSpec
 NAMESPACE = "multihull-gpu"
 SERVICE = "live-42"
 CALLER = "preflight-fixture-caller"
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "live-k8s-gpu.yml"
 RBAC = REPO_ROOT / "testing" / "live" / "kubernetes-gpu" / "rbac.yaml"
+CLEANUP_STEPS = (
+    "Destroy",
+    "Force-delete Kubernetes objects left by this run",
+    "Stop Modal apps left by this run",
+    "Assert nothing is left on Kubernetes or Modal",
+)
 
 
 def completed(stdout: str = "", returncode: int = 0, stderr: str = "") -> Any:
@@ -149,6 +156,10 @@ def spec_document(name: str = "gpu-kubernetes") -> dict[str, Any]:
     return yaml.safe_load((SPECS / f"{name}.yaml").read_text())
 
 
+def workflow() -> dict[str, Any]:
+    return yaml.safe_load(WORKFLOW.read_text())
+
+
 def test_the_spec_puts_llama_on_a_kubernetes_gpu_primary_with_a_modal_secondary() -> None:
     service = ServiceSpec.model_validate(spec_document())
     primary, secondary = sorted(service.targets, key=lambda t: t.priority)
@@ -195,6 +206,25 @@ def test_only_a_kubernetes_primary_gets_the_restore_scenario() -> None:
 def test_the_cost_line_prices_the_modal_secondary_at_its_gpu_class() -> None:
     cost = new_cost(1, 40, "A10G")
     assert (cost.gpu, cost.targets, cost.hourly_usd) == ("A10G", 1, 1.10)
+
+
+def test_the_workflow_is_manual_only_and_every_offered_gpu_fits_the_budget() -> None:
+    document = workflow()
+    triggers = document.get("on", document.get(True))
+    job = document["jobs"]["gpu"]
+    options = triggers["workflow_dispatch"]["inputs"]["gpu_class"]["options"]
+
+    assert list(triggers) == ["workflow_dispatch"]
+    for gpu in options:
+        assert worst_case_usd(1, job["timeout-minutes"], gpu) < BUDGET_USD, gpu
+        assert gpu in MODAL_HOURLY_USD
+
+
+def test_the_workflow_cleans_up_both_providers_whatever_happened() -> None:
+    steps = {step.get("name"): step for step in workflow()["jobs"]["gpu"]["steps"]}
+    for name in CLEANUP_STEPS:
+        assert "always()" in steps[name]["if"], name
+        assert steps[name]["timeout-minutes"] <= 10, name
 
 
 def rbac_grants(kind: str) -> set[tuple[str, str, str, str]]:
