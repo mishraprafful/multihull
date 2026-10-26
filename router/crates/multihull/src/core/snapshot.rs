@@ -224,7 +224,9 @@ fn default_max_concurrency() -> u32 {
 
 impl Endpoint {
     pub fn health_path(&self) -> Cow<'_, str> {
-        if self.health_path.is_empty() {
+        if self.kind == EndpointType::Replicate {
+            Cow::Borrowed("")
+        } else if self.health_path.is_empty() {
             Cow::Borrowed(DEFAULT_HEALTH_PATH)
         } else if self.health_path.starts_with('/') {
             Cow::Borrowed(&self.health_path)
@@ -401,6 +403,17 @@ mod tests {
         assert_eq!(endpoint.health_path(), "/healthz");
         endpoint.health_path = "/ready".into();
         assert_eq!(endpoint.health_path(), "/ready");
+    }
+
+    #[test]
+    fn replicate_endpoints_probe_the_deployment_url_itself() {
+        let endpoint = Endpoint {
+            kind: EndpointType::Replicate,
+            url: "https://api.replicate.com/v1/deployments/acme/echo".into(),
+            health_path: "/health-check".into(),
+            ..Default::default()
+        };
+        assert_eq!(endpoint.health_path(), "");
     }
 
     #[test]

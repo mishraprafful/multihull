@@ -1,6 +1,6 @@
 mod common;
 
-use common::{endpoint, get, single_route, start_proxy, start_proxy_configured};
+use common::{endpoint, get, post, single_route, start_proxy, start_proxy_configured};
 use http::StatusCode;
 use multihull::core::circuit::CircuitConfig;
 use multihull::core::probe::ProbeOutcome;
@@ -101,6 +101,45 @@ async fn runpod_auth_header_reaches_probes_and_replaces_the_client_authorization
         &proxy,
         "/v1/models",
         &[("authorization", "Bearer client-supplied")],
+    )
+    .await;
+    assert_eq!(reply.status, 200);
+}
+
+#[tokio::test]
+async fn replicate_probes_carry_the_provider_auth_and_predictions_replace_the_client_one() {
+    let provider_auth = "Bearer replicate-fixture";
+    let upstream = MockUpstream::start(
+        MockUpstreamConfig::default().with_required_authorization(provider_auth),
+    )
+    .await
+    .unwrap();
+    let deployment = format!("{}/v1/deployments/acme/echo", upstream.url());
+    let mut replicate = endpoint("a", "replicate", deployment, 1);
+    replicate.kind = EndpointType::Replicate;
+    replicate.health_path = "/health-check".into();
+    let timeout = Duration::from_secs(1);
+    let proxy = start_proxy(vec![replicate.clone()]).await;
+
+    let without = probe_once(&proxy.state.client, &replicate, timeout).await;
+    assert_eq!(without.outcome, ProbeOutcome::Failure);
+    assert_eq!(without.status, Some(401));
+
+    replicate
+        .inject_headers
+        .insert("Authorization".into(), provider_auth.into());
+    replicate
+        .inject_headers
+        .insert("Prefer".into(), "wait=60".into());
+    let probed = probe_once(&proxy.state.client, &replicate, timeout).await;
+    assert_eq!(probed.outcome, ProbeOutcome::Success);
+
+    let proxy = start_proxy(vec![replicate]).await;
+    let reply = post(
+        &proxy,
+        "/predictions",
+        &[("authorization", "Bearer client-supplied")],
+        br#"{"input":{"text":"hi"}}"#,
     )
     .await;
     assert_eq!(reply.status, 200);

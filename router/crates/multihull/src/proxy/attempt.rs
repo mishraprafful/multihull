@@ -167,6 +167,7 @@ pub async fn send(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::snapshot::EndpointType;
     use http::header::{HeaderName, HeaderValue};
 
     #[test]
@@ -177,6 +178,26 @@ mod tests {
         };
         let uri = upstream_uri(&endpoint, "/v1/chat?x=1").unwrap();
         assert_eq!(uri.to_string(), "http://10.0.0.1:8000/v1/chat?x=1");
+    }
+
+    #[test]
+    fn a_replicate_probe_targets_the_deployment_and_traffic_its_predictions() {
+        let endpoint = Endpoint {
+            kind: EndpointType::Replicate,
+            url: "https://api.replicate.com/v1/deployments/acme/echo".into(),
+            health_path: "/health-check".into(),
+            ..Default::default()
+        };
+        let probe = upstream_uri(&endpoint, &endpoint.health_path()).unwrap();
+        assert_eq!(
+            probe.to_string(),
+            "https://api.replicate.com/v1/deployments/acme/echo"
+        );
+        let traffic = upstream_uri(&endpoint, "/predictions").unwrap();
+        assert_eq!(
+            traffic.to_string(),
+            "https://api.replicate.com/v1/deployments/acme/echo/predictions"
+        );
     }
 
     #[test]
