@@ -14,7 +14,7 @@ Goal: an open-source framework that
 ## Principles
 
 1. **Robustness and reliability over cost.** Multihull exists to keep models serving. Defaults spend money to buy redundancy: at least two providers warm, fallbacks never scaled to zero, on-demand before spot, capacity over-provisioned by 1.4x (Envoy priority-spillover factor). Cost features (cheapest-GPU placement, spot, scale-to-zero fallbacks) are opt-in and can never lower redundancy below the configured floor. When the router must choose between a cheaper endpoint and a healthier one, health wins.
-2. **Native interfaces only.** One translator per provider, written against that provider's preferred SDK or API: Modal Python SDK, RunPod REST API, Baseten Truss, Replicate client and Cog, Kubernetes API with plain built-in resources. No CRDs, no operators, no shim processes.
+2. **Native interfaces only.** One translator per provider, written against that provider's preferred SDK or API: Modal Python SDK, RunPod REST API, Baseten Truss, Replicate HTTP API and Cog, Kubernetes API with plain built-in resources. No CRDs, no operators, no shim processes.
 3. **One spec, one URL.** `multihull.yaml` is the single description of a deployment. The router gives it one stable endpoint.
 4. **Fail loudly before deploy, quietly during.** `hull doctor` and `hull plan` catch credential, quota and GPU-availability problems up front; at runtime failover is invisible to callers.
 5. **Boring infrastructure.** Files in git, SQLite or object storage for state, gRPC or a JSON file between control plane and router. No message bus, no database cluster required.
@@ -133,17 +133,17 @@ GPU classes are a normalised enum (`L4, A10G, A100-40, A100-80, H100, H200, B200
 | Field | Kubernetes | Modal | RunPod | Baseten | Replicate |
 |---|---|---|---|---|---|
 | image | `Deployment.spec.template.containers[0].image` | `modal.Image.from_registry(ref@digest, secret=)` | endpoint `image` (RunPod binds a template) | truss `base_image.image` | Cog image pushed to `r8.im` |
-| command, port | container `command`, `containerPort` | `@modal.web_server(port, startup_timeout)` wrapping `subprocess.Popen(command)` | `entrypoint`, `ports`, `PORT`, `PORT_HEALTH` | `docker_server.start_command`, `server_port` | Cog `predict.py` shim only |
+| command, port | container `command`, `containerPort` | `@modal.web_server(port, startup_timeout)` wrapping `subprocess.Popen(command)` | `entrypoint`, `ports`, `PORT`, `PORT_HEALTH` | `docker_server.start_command`, `server_port` | ignored; the Cog image serves its predictor |
 | gpu | `nodeSelector` + `nvidia.com/gpu` limit + tolerations | `gpu="A10G"` or `"L4"` | `gpu.pools` (Serverless GPU pools) | `resources.accelerator` | deployment `hardware` |
 | replicas.min/max | Deployment replicas + HPA min/max (or KEDA when concurrency set) | `min_containers`, `max_containers`, `buffer_containers` | `workers.min`, `workers.max` | `min_replica`, `max_replica` | `min_instances`, `max_instances` |
 | concurrency | KEDA trigger target | `@modal.concurrent(max_inputs=)` | `scaling: {type: REQUEST_COUNT, requestCount}` | `concurrency_target` | n/a |
-| health | readiness/liveness probes | `startup_timeout`; router probes `web_url + path` | `HEALTH_CHECK_PATH` on `PORT_HEALTH` (204 warming, 200 ready) | `readiness_endpoint`, `liveness_endpoint` | provider-managed; router probes |
-| secrets | `Secret` + `envFrom` | `modal.Secret.from_dict`, named `multihull-<svc>` | RunPod secrets referenced from `env` | truss `secrets` | deployment env |
-| endpoint | `kubernetes.endpoint`, LoadBalancer Service address, NodePort or cluster DNS (Ingress or Gateway `HTTPRoute` planned, see #116) | `Function.web_url` + proxy-auth headers | `https://<id>.api.runpod.ai` + `Authorization: Bearer` | model predict URL | deployment predictions URL |
+| health | readiness/liveness probes | `startup_timeout`; router probes `web_url + path` | `HEALTH_CHECK_PATH` on `PORT_HEALTH` (204 warming, 200 ready) | `readiness_endpoint`, `liveness_endpoint` | not sent; router probes the deployment URL |
+| secrets | `Secret` + `envFrom` | `modal.Secret.from_dict`, named `multihull-<svc>` | RunPod secrets referenced from `env` | truss `secrets` | refused: deployments take no environment |
+| endpoint | `kubernetes.endpoint`, LoadBalancer Service address, NodePort or cluster DNS (Ingress or Gateway `HTTPRoute` planned, see #116) | `Function.web_url` + proxy-auth headers | `https://<id>.api.runpod.ai` + `Authorization: Bearer` | model predict URL | deployment URL (clients `POST /predictions`) + `Authorization: Bearer`, `Prefer: wait=60` |
 
 ## Control plane (Python)
 
-Package `multihull`, Python 3.11+, `uv`, pydantic v2, typer, httpx (also the RunPod REST client), `kubernetes` client, `modal`, `truss`, `replicate`, `grpcio` for the router stream.
+Package `multihull`, Python 3.11+, `uv`, pydantic v2, typer, httpx (also the RunPod and Replicate REST client), `kubernetes` client, `modal`, `truss`, `grpcio` for the router stream.
 
 **Modules**
 - `multihull.spec`: pydantic models, JSON Schema export, defaults, validation (for example Replicate requires `build.target: cog`).
@@ -179,7 +179,7 @@ Every resource a translator creates is tagged `multihull.dev/service=<name>` (la
 - **Modal**: build `modal.App` programmatically, `Image.from_registry` pinned by digest, class with `@modal.web_server` that execs the container command, `app.deploy(name=f"multihull-{svc}")` from the SDK. Endpoint from `web_url`; proxy-auth tokens as inject headers. Ref = app name + environment.
 - **RunPod**: REST API v2 (`api.runpod.io/v2`; v1 retires 2026-11-15 and cannot create load-balancing endpoints). One `LOAD_BALANCER` Serverless endpoint `multihull-<svc>-<provider>` created from the image, with its bound template, `workers.min/max`, `gpu.pools` (or `cpu` when no GPU class is set) and `dataCenterIds`; service secrets mirrored into RunPod secrets. Endpoint `https://<id>.api.runpod.ai`; the router injects `Authorization: Bearer` on traffic and probes. Ref = endpoint id, name, URL and applied-body digest.
 - **Baseten**: generate truss config (`base_image`, `docker_server`, `resources`, autoscaling), `truss.push` via library, promote via management API. Ref = model id + deployment id.
-- **Replicate**: requires Cog; `cog build` and push via subprocess only because Cog has no library API, then `replicate.deployments.create/update` with `min_instances`. Ref = owner/name + deployment.
+- **Replicate**: Cog images only, so a service with a Replicate target is a Cog model on every target. HTTP API (`api.replicate.com/v1`): private model `<account>/multihull-<svc>` created if missing, `cog push r8.im/...` via subprocess (Cog has no library API) when the build context hash changed, then deployment `multihull-<svc>-<provider>` created or patched with `version`, `hardware`, `min_instances`, `max_instances`. No passthrough exists, so the endpoint is the deployment URL and clients send Cog's own `POST /predictions`, which every other target's Cog server also serves; the router injects `Authorization: Bearer` and `Prefer: wait=60` (sync mode) and probes the deployment URL, since the API reports no instance health. `destroy` scales to zero, then deletes once Replicate allows (15 minutes offline). Ref = owner, model, deployment, version, context hash.
 
 **Plan and apply flow**: `hull plan` renders every translator's native payload (Kubernetes manifests, Modal app description, RunPod request bodies, truss config) into `.multihull/plan/` for review, then diffs against state. `hull deploy` applies all targets concurrently, isolates failures per target, writes refs, waits for readiness with per-provider timeouts, then publishes a snapshot. A target failing to deploy never blocks other targets; the run exits non-zero but the healthy targets serve.
 

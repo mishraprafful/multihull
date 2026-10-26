@@ -23,7 +23,7 @@ A provider edge error is a response the provider's front door sends for an endpo
 
 ## Probes
 
-The router probes every endpoint's health path (`container.health.path` from the spec, carried in the snapshot, default `/health`) every `probe.interval` (5 s, 20 percent jitter) with `probe.timeout` (2 s). 2xx is a success; 5xx, 4xx, connect failures and timeouts are failures; RunPod 204 (warming) and 429 count as neither. Probes can take an endpoint out quickly and let it be retried, but only real requests can close its circuit:
+The router probes every endpoint's health path (`container.health.path` from the spec, carried in the snapshot, default `/health`; Replicate endpoints are probed at the deployment URL itself) every `probe.interval` (5 s, 20 percent jitter) with `probe.timeout` (2 s). 2xx is a success; 5xx, 4xx, connect failures and timeouts are failures; RunPod 204 (warming) and 429 count as neither. Probes can take an endpoint out quickly and let it be retried, but only real requests can close its circuit:
 
 - Each failure counts as `Transient` in the endpoint circuit. The third consecutive failure marks the probe down and ejects the endpoint: its circuit opens (`router_failovers_total{reason="probe"}` increments) and is held open past every backoff while the probe reports down, so admission, selection, sticky placement and the provider circuit all treat it as open. An endpoint whose probe never recovers stays unavailable; the panic threshold still applies.
 - Three consecutive successes after an ejection mark the probe up and release the circuit into half-open. Real requests then decide: `circuit.probe_successes_to_close` (3) admitted-request successes close it, any failure reopens it with a doubled backoff.
