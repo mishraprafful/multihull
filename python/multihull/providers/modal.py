@@ -24,6 +24,7 @@ from multihull.providers.base import (
     Plan,
     Ref,
     Target,
+    redact_env,
     resolve_secret_values,
     secret_env_name,
 )
@@ -54,7 +55,6 @@ TOKEN_SECRET_ENV = "MODAL_TOKEN_SECRET"
 ENV_CREDENTIALS = f"{TOKEN_ID_ENV}/{TOKEN_SECRET_ENV}"
 CONFIG_CREDENTIALS = "~/.modal.toml"
 CREDENTIALS_TIMEOUT_SECONDS = 10.0
-REDACTED = "<redacted>"
 IMAGE_BUILDER_VERSION = "2025.06"
 IMAGE_BUILDER_VERSION_ENV = "MODAL_IMAGE_BUILDER_VERSION"
 RESET_ENTRYPOINT = "ENTRYPOINT []"
@@ -91,18 +91,8 @@ def credentials_source() -> str | None:
     return None
 
 
-def secret_fragments(env_names: Iterable[str]) -> list[str]:
-    fragments: set[str] = set()
-    for name in env_names:
-        value = os.environ.get(name, "")
-        fragments.update({value, value.strip(), repr(value)[1:-1], *value.split()})
-    return sorted((f for f in fragments if f), key=len, reverse=True)
-
-
 def redact(text: str, env_names: Iterable[str] = ()) -> str:
-    for fragment in secret_fragments([TOKEN_ID_ENV, TOKEN_SECRET_ENV, *env_names]):
-        text = text.replace(fragment, REDACTED)
-    return text
+    return redact_env(text, [TOKEN_ID_ENV, TOKEN_SECRET_ENV, *env_names])
 
 
 def secret_env_names(spec: dict[str, Any]) -> list[str]:

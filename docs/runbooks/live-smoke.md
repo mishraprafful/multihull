@@ -9,7 +9,8 @@ The GPU run on Modal has its own runbook: `docs/runbooks/live-gpu.md`.
 | `images.yml` | push to `main` or a `v*` tag, PRs touching `router/`, `proto/`, `python/`, `testing/mock-server/`, manual | Builds `ghcr.io/mishraprafful/multihull-mock-server`, `multihull-router` and `multihull-controller` for `linux/amd64` and `linux/arm64` on native runners and merges one manifest list per tag. Pushes `sha-<short>` and `main` from `main` and the version from `v*` tags; PRs build without pushing. Packages are public since 2026-10-09. |
 | `kind.yml` | PRs and `main` pushes touching `python/`, `router/`, `proto/`, `testing/`, `charts/` | Job `kind`: kind cluster, mock image loaded with `kind load`, release router, `testing/live` with spec `kind-docker` (kind primary, docker secondary), chart `kubectl apply --dry-run=server`. Job `in-cluster`: controller and router images built from their Dockerfiles, chart installed with the controller enabled, `testing/live/in_cluster`. Free. |
 | `live-smoke.yml` | manual, or a PR labelled `live-smoke` (on label and on each push) | Same kind setup with spec `kind-modal`: Modal secondary runs the GHCR mock image on CPU, `min_containers: 1`, app `multihull-live-<run id>-modal`. Skips when `MODAL_TOKEN_ID` or `MODAL_TOKEN_SECRET` is missing. One run at a time. |
-| `live-smoke.yml` (schedule) | daily 03:17 UTC | Stops every `multihull-live-` Modal app older than two hours. |
+| `live-smoke.yml` job `runpod-smoke` | same triggers | Same suite with spec `kind-runpod`: RunPod load-balancing endpoint `multihull-live-<run id>-runpod` on CPU workers (`cpu5c`, `workers.min: 1`) running the GHCR mock image. Skips when the `RUNPOD_API_KEY` secret is missing (it is not set yet, so this job has never run). |
+| `live-smoke.yml` (schedule) | daily 03:17 UTC | Stops every `multihull-live-` Modal app and deletes every `multihull-live-` RunPod endpoint older than two hours. |
 | `live-gpu.yml` | manual only | Two Modal L4 targets serving vLLM, failover by stopping the primary. 5 USD budget. See `live-gpu.md`. |
 
 Before any build, a credential preflight checks the Modal token's shape and makes one authenticated call (see below). The suite then runs, in order: `hull doctor`, `hull deploy --apply --wait`, `hull controller` over mTLS with a generated CA and bootstrap token and the router on its stream, baseline on kind, `kubectl scale --replicas=0` under load (asserts zero client 5xx and traffic on the secondary), scale back (asserts kind serves again), `hull logs -p` for both targets, `hull destroy` (asserts nothing left). The job summary, written by an `if: always()` step from `summary.json`, shows a per-scenario table, kind state after deploy, after failover and before destroy, the Modal app, links and cleanup result, and the router endpoints and counters. The same text is saved as `summary.md` and uploaded with the logs as the `live-smoke-logs` artifact on every run, green or red.
@@ -63,6 +64,7 @@ modal app stop multihull-live-<run id>-modal --env main --yes
 ```
 
 3. Otherwise the daily sweeper stops anything prefixed `multihull-live-` older than two hours. To sweep now: `cd testing/live && uv run python -m live.sweep --prefix multihull-live-`.
+4. RunPod: `Delete RunPod endpoints left by this run` is an `if: always()` step logging to `logs/runpod-backstop.log`. By hand, with `RUNPOD_API_KEY` set: `cd testing/live && uv run python -m live.runpod_sweep --prefix multihull-live-<run id>`.
 
 kind clusters live only on the runner and disappear with it.
 
@@ -76,4 +78,4 @@ make e2e-kind       # cargo build --release, then testing/live with LIVE_SPEC=ki
 make kind-down
 ```
 
-Env: `LIVE_SPEC` (`kind-docker` or `kind-modal`), `LIVE_MOCK_IMAGE` (skip the build and `kind load`), `LIVE_ROUTER_BIN`, `LIVE_WORKDIR` (keep state, logs and `summary.md`), `LIVE_SERVICE`, `LIVE_KIND_CLUSTER`. The Modal spec also needs `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `GHCR_USERNAME` and `GHCR_TOKEN`, and Python 3.12 to match the image.
+Env: `LIVE_SPEC` (`kind-docker`, `kind-modal` or `kind-runpod`), `LIVE_MOCK_IMAGE` (skip the build and `kind load`), `LIVE_ROUTER_BIN`, `LIVE_WORKDIR` (keep state, logs and `summary.md`), `LIVE_SERVICE`, `LIVE_KIND_CLUSTER`. The Modal spec also needs `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `GHCR_USERNAME` and `GHCR_TOKEN`, and Python 3.12 to match the image. The RunPod spec needs `RUNPOD_API_KEY`.

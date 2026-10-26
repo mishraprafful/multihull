@@ -1,0 +1,6 @@
+# 2026-10-25 RunPod translator (issue 63)
+
+- Branch `feat/runpod-provider`, PR 172. No RunPod credential was available: everything is tested against `python/tests/fake_runpod.py` (an `httpx.MockTransport` that rejects unknown create and update properties, as v2 does), never against RunPod.
+- API choice: REST v1 (`rest.runpod.io/v1`) has no endpoint type field and retires 2026-11-15 (release notes, 2026-08-18); GraphQL `saveEndpoint` takes `type: LB` but the key goes in the URL and the API retires in early 2027. v2 `POST /v2/serverless` takes `type: LOAD_BALANCER`, `workers`, `scaling: REQUEST_COUNT` and `gpu.pools`; `DELETE` removes the endpoint and its bound template.
+- GPU classes map to Serverless pools (`docs.runpod.io/references/gpu-types`): L4 `AMPERE_24`, A100-80 `AMPERE_80`, H100 `ADA_80_PRO`, H200 `HOPPER_141`; A10G, A100-40 and B200 have none. CPU workers (`cpu5c`, 4 vCPUs, from the create-endpoint example) let the live smoke run the mock server next to kind.
+- Unknowns for the first live run: whether a load-balancing endpoint accepts CPU workers, the status code of `{"error":"no workers available"}`, how the load balancer treats a worker whose health port refuses connections while the model loads, and whether the worker log stream ends on its own (`logs` stops at the first event after the call or after 3 s idle).

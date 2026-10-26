@@ -13,7 +13,12 @@ from live.harness import (
     LiveRouter,
     modal_app_states,
 )
-from multihull.providers.base import SERVICE_LABEL
+from multihull.providers.base import SERVICE_LABEL, Ref
+from multihull.providers.runpod import RunpodProvider
+
+
+def runpod_endpoint_gone(ref: Ref) -> bool:
+    return RunpodProvider(dry_run=False).status(ref).phase == "Failed"
 
 
 def test_destroy_leaves_nothing_behind(
@@ -54,4 +59,7 @@ def test_destroy_leaves_nothing_behind(
             "modal app stopped",
         )
         recorder.capture(AFTER_DESTROY, kind, deployment, kube=False)
+    if deployment.secondary_type == "runpod":
+        ref = refs[deployment.secondary]
+        wait_until(lambda: runpod_endpoint_gone(ref), 120, 5.0, "runpod endpoint deleted")
     scenario.note(f"nothing left in namespace {kind.namespace} or on {deployment.secondary}")

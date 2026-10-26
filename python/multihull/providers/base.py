@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
@@ -12,6 +12,7 @@ from multihull.spec import GPU, ProviderType, Replicas, ServiceSpec, TargetSpec
 SERVICE_LABEL = "multihull.dev/service"
 PROVIDER_LABEL = "multihull.dev/provider"
 GPU_CLASS_LABEL = "multihull.dev/gpu-class"
+REDACTED = "<redacted>"
 
 Phase = Literal["Pending", "Ready", "Degraded", "Draining", "Failed", "Unknown"]
 
@@ -164,6 +165,20 @@ def env_credential_health(var_name: str, provider: str) -> CredHealth:
     if os.environ.get(var_name):
         return CredHealth(ok=True, message=f"{var_name} is set", identity=None)
     return CredHealth(ok=False, message=f"{var_name} is not set; {provider} credentials missing")
+
+
+def secret_fragments(env_names: Iterable[str]) -> list[str]:
+    fragments: set[str] = set()
+    for name in env_names:
+        value = os.environ.get(name, "")
+        fragments.update({value, value.strip(), repr(value)[1:-1], *value.split()})
+    return sorted((f for f in fragments if f), key=len, reverse=True)
+
+
+def redact_env(text: str, env_names: Iterable[str]) -> str:
+    for fragment in secret_fragments(env_names):
+        text = text.replace(fragment, REDACTED)
+    return text
 
 
 def secret_env_name(secret: str) -> str:

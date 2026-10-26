@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       modal: ${{ steps.check.outputs.modal }}
+      runpod: ${{ steps.runpod.outputs.enabled }}
     steps:
       - id: check
         env:
@@ -41,6 +42,16 @@ jobs:
           else
             echo "modal=false" >> "$GITHUB_OUTPUT"
             echo "MODAL_TOKEN_ID or MODAL_TOKEN_SECRET is not available; skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - id: runpod
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+        run: |
+          if [ -n "$RUNPOD_API_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "RUNPOD_API_KEY is not available; the RunPod target was skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   smoke:
@@ -145,6 +156,93 @@ jobs:
             ${{ runner.temp }}/live/results.xml
           if-no-files-found: ignore
 
+  runpod-smoke:
+    needs: gate
+    if: needs.gate.outputs.runpod == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: live-smoke-runpod
+      cancel-in-progress: false
+    env:
+      MOCK_IMAGE: ${{ inputs.mock_image || 'ghcr.io/mishraprafful/multihull-mock-server:main' }}
+      LIVE_SPEC: kind-runpod
+      LIVE_SERVICE: live-${{ github.run_id }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER }}
+          config: testing/live/kind-config.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build --release -p multihull
+        working-directory: router
+      - run: docker build -t "$MOCK_IMAGE" testing/mock-server
+      - run: kind load docker-image "$MOCK_IMAGE" --name "$KIND_CLUSTER"
+      - name: Doctor, deploy, baseline, failover to RunPod, recovery, logs, destroy
+        timeout-minutes: 22
+        run: >
+          uv run --project testing/live pytest -q -x
+          -c testing/live/pyproject.toml testing/live/tests
+          --junitxml "$RUNNER_TEMP/live/results.xml"
+        env:
+          LIVE_MOCK_IMAGE: ${{ env.MOCK_IMAGE }}
+          LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
+          LIVE_WORKDIR: ${{ runner.temp }}/live
+      - name: Destroy
+        if: always()
+        run: |
+          workdir="$RUNNER_TEMP/live"
+          mkdir -p "$workdir/logs"
+          if [ -f "$workdir/multihull.yaml" ]; then
+            cd "$workdir"
+            uv run --project "$GITHUB_WORKSPACE/testing/live" hull destroy multihull.yaml --yes \
+              --state .multihull/state.db --snapshot-out .multihull/snapshot.json 2>&1 \
+              | tee logs/workflow-destroy.log
+          else
+            echo "no rendered spec; nothing to destroy" | tee "$workdir/logs/workflow-destroy.log"
+          fi
+      - name: Delete RunPod endpoints left by this run
+        if: always()
+        working-directory: testing/live
+        run: |
+          log="$RUNNER_TEMP/live/logs/runpod-backstop.log"
+          mkdir -p "$(dirname "$log")"
+          uv run python -m live.runpod_sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" | tee "$log"
+      - name: Job summary
+        if: always()
+        working-directory: testing/live
+        run: >
+          uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
+          --job-status "$JOB_STATUS" --artifact live-smoke-runpod-logs --spec kind-runpod
+        env:
+          JOB_STATUS: ${{ job.status }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: live-smoke-runpod-logs
+          path: |
+            ${{ runner.temp }}/live/logs
+            ${{ runner.temp }}/live/multihull.yaml
+            ${{ runner.temp }}/live/router.toml
+            ${{ runner.temp }}/live/summary.md
+            ${{ runner.temp }}/live/summary.json
+            ${{ runner.temp }}/live/results.xml
+          if-no-files-found: ignore
+
   sweep:
     needs: gate
     if: needs.gate.outputs.modal == 'true' && github.event_name == 'schedule'
@@ -178,3 +276,25 @@ jobs:
           fi
           uv run python -m live.sweep --prefix "$APP_PREFIX" --older-than 7200 \
             --env "$MODAL_ENVIRONMENT" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  runpod-sweep:
+    needs: gate
+    if: needs.gate.outputs.runpod == 'true' && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Delete live RunPod endpoints older than two hours
+        working-directory: testing/live
+        run: |
+          uv run python -m live.runpod_sweep --prefix "$APP_PREFIX" --older-than 7200 \
+            | tee -a "$GITHUB_STEP_SUMMARY"

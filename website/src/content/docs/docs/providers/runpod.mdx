@@ -1,9 +1,9 @@
 ---
 title: RunPod
-description: RunPod Serverless load-balancing endpoints via SDK and REST.
+description: RunPod Serverless load-balancing endpoints through the REST API v2.
 ---
 
-Uses the `runpod` SDK where it covers the call and REST otherwise. Creates a template (image, env, ports) and then a load-balancing endpoint.
+Calls RunPod's REST API v2 (`https://api.runpod.io/v2`) directly. `apply` creates one Serverless endpoint of type `LOAD_BALANCER`, named `multihull-<svc>-<provider>`, from the image; RunPod binds a template to it and deletes both together. On `main`, unreleased: tested against a mocked API, not yet run against RunPod.
 
 ```yaml
 - provider: runpod-eu
@@ -12,19 +12,34 @@ Uses the `runpod` SDK where it covers the call and REST otherwise. Creates a tem
   runpod: {dataCenters: [EU-RO-1, EU-SE-1]}
 ```
 
-Credentials: `RUNPOD_API_KEY`.
+Credentials: `RUNPOD_API_KEY`, sent as `Authorization: Bearer`. `hull doctor` lists endpoints with it and fails on 401 or 403. RunPod also requires a key on every inference request, so the router injects the same header from the snapshot, on traffic and probes. Set `RUNPOD_ENDPOINT_API_KEY` to a Restricted key with access to the endpoint to keep the deploy key out of the snapshot.
+
+Requirements:
+- The server listens on `0.0.0.0:<container.port>`. The translator sets `PORT` and `PORT_HEALTH` to that port and `HEALTH_CHECK_PATH` to `container.health.path`. RunPod's load balancer polls that path: 200 healthy, 204 initializing, anything else unhealthy.
+- `resources.gpu` maps to Serverless GPU pools, which RunPod schedules as a whole: L4 to `AMPERE_24` (shared with A5000 and 3090), A100-80 to `AMPERE_80`, H100 to `ADA_80_PRO`, H200 to `HOPPER_141`. A10G, A100-40 and B200 have no pool; `hull plan` notes them, and `apply` fails when no listed class has one. An empty list runs on CPU workers (`cpu5c`, 4 vCPUs).
+- The image must be public; private registry credentials are not wired yet.
+
+## Lifecycle
+
+- `apply` again with an unchanged spec sends no update unless `workers` or `scaling` drifted; a changed spec is one `PATCH`, and container changes roll out as workers cycle. With no state, `apply` adopts the endpoint by name instead of creating a second one.
+- `scale` patches `workers.min` and `workers.max`; a 400 or 422 is a permanent refusal.
+- `hull logs` streams the logs of each active worker from `--since` until now. Workers already scaled down are not listed.
+- `destroy` deletes the endpoint and the secrets it mirrored. A 404 counts as gone.
 
 ## Translation
 
 | Spec field | RunPod |
 |---|---|
-| `container.image` | template `imageName` |
-| `container.command`, `port` | template `dockerStartCmd`, LB endpoint port |
-| `resources.gpu` | `gpuIds` list |
-| `scaling.replicas` | `workersMin`, `workersMax` |
-| `scaling.concurrency` | LB endpoint, `scalerType: REQUEST_COUNT` |
-| `container.health` | `/ping` semantics on `PORT_HEALTH`: 204 warming, 200 ready |
-| `container.secrets` | template `env` |
-| endpoint | `https://api.runpod.ai/v2/<id>/` |
+| `container.image` | endpoint `image` |
+| `container.command`, `port` | `entrypoint` with `cmd: []`, `ports: ["<port>/http"]`, `PORT`, `PORT_HEALTH` |
+| `resources.gpu`, `gpuCount` | `gpu.pools`, `gpu.count`; `cpu` when empty |
+| `scaling.replicas` | `workers.min`, `workers.max`, `idleTimeout: 5` |
+| `scaling.concurrency` | `scaling: {type: REQUEST_COUNT, requestCount}` |
+| `container.health` | `HEALTH_CHECK_PATH`; `hull deploy --wait` and `hull status` report Ready only once a worker is running or idle and `<url><path>` answers 2xx, while 204 is warming; the router probes the same URL and counts 204 as neither up nor down |
+| `container.secrets` | RunPod secrets named `multihull_<svc>_<provider>_<secret>`, referenced as `{{ RUNPOD_SECRET_<name> }}`; new values reach workers when they restart |
+| `runpod.dataCenters` | `dataCenterIds` |
+| endpoint | `https://<id>.api.runpod.ai`, plus `Authorization: Bearer` injected by the router |
 
-The router treats a 204 probe response as warming, not down. Ref stored in state: template id plus endpoint id. Fallbacks stay warm because `fallbackScaleToZero` defaults to `false`, so `workersMin` is never 0 unless you opt in.
+No edge error signature yet: the load balancer answers `{"error":"no workers available"}` when no worker started in time, but RunPod documents no status code for it, so a live run has to record one first.
+
+Ref stored in state: endpoint id, name and URL, health path, a digest of the applied body and the mirrored secret names. Fallbacks stay warm because `fallbackScaleToZero` defaults to `false`, so `workers.min` is never 0 unless you opt in.

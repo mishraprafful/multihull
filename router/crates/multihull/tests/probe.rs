@@ -70,6 +70,43 @@ async fn health_path_without_a_leading_slash_probes_the_endpoint_host() {
 }
 
 #[tokio::test]
+async fn runpod_auth_header_reaches_probes_and_replaces_the_client_authorization() {
+    let provider_auth = "Bearer runpod-fixture";
+    let requiring_auth =
+        || MockUpstreamConfig::default().with_required_authorization(provider_auth);
+    let upstream = MockUpstream::start(requiring_auth()).await.unwrap();
+    let mut runpod = endpoint("a", "runpod-eu", upstream.url(), 1);
+    runpod.kind = EndpointType::Runpod;
+    let timeout = Duration::from_secs(1);
+    let proxy = start_proxy(vec![runpod.clone()]).await;
+
+    let without = probe_once(&proxy.state.client, &runpod, timeout).await;
+    assert_eq!(without.outcome, ProbeOutcome::Failure);
+    assert_eq!(without.status, Some(401));
+
+    runpod
+        .inject_headers
+        .insert("Authorization".into(), provider_auth.into());
+    let probed = probe_once(&proxy.state.client, &runpod, timeout).await;
+    assert_eq!(probed.outcome, ProbeOutcome::Success);
+
+    upstream.reconfigure(requiring_auth().with_status(StatusCode::NO_CONTENT));
+    let warming = probe_once(&proxy.state.client, &runpod, timeout).await;
+    assert_eq!(warming.outcome, ProbeOutcome::Warming);
+    assert_eq!(warming.status, Some(204));
+
+    upstream.reconfigure(requiring_auth());
+    let proxy = start_proxy(vec![runpod]).await;
+    let reply = get(
+        &proxy,
+        "/v1/models",
+        &[("authorization", "Bearer client-supplied")],
+    )
+    .await;
+    assert_eq!(reply.status, 200);
+}
+
+#[tokio::test]
 async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_allow_a_half_open_trial() {
     let upstream = MockUpstream::start(
         MockUpstreamConfig::default().with_status(StatusCode::SERVICE_UNAVAILABLE),

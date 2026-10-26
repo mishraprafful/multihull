@@ -13,7 +13,7 @@ A Python control plane translates the spec into each provider's native resources
 
 *`make demo` in five beats: one spec and `hull deploy`; streaming completions through one URL; `hull top` live; the primary stopped, traffic moves, errors stay at 0; the primary restored, traffic returns. Free, local, no GPUs: [examples/demo](examples/demo/README.md).*
 
-**Status (0.2.0):** Kubernetes and Modal deploy from one spec and fail over per request, proven with the mock model server on CPU and with a real model (Qwen2.5-1.5B-Instruct on vLLM) on two Modal L4 targets. RunPod, Baseten and Replicate render plans only. No Kubernetes GPU run yet. See [what is proven](docs/releases/0.2.0.md#what-is-proven).
+**Status (0.2.0):** Kubernetes and Modal deploy from one spec and fail over per request, proven with the mock model server on CPU and with a real model (Qwen2.5-1.5B-Instruct on vLLM) on two Modal L4 targets. RunPod deploys on `main` (unreleased, tested against a mocked API, not yet run live); Baseten and Replicate render plans only. No Kubernetes GPU run yet. See [what is proven](docs/releases/0.2.0.md#what-is-proven).
 
 ## Providers
 
@@ -22,7 +22,7 @@ A Python control plane translates the spec into each provider's native resources
 | Kubernetes | Working: deploy, status, scale, logs, destroy |
 | Modal | Working: deploy, status, scale, logs, destroy |
 | Docker | Working, for laptops and CI |
-| RunPod | Render-only: `hull plan` works, `apply` is not implemented |
+| RunPod | On `main`, unreleased: deploy, status, scale, logs, destroy; not yet run live |
 | Baseten | Render-only |
 | Replicate | Render-only |
 
