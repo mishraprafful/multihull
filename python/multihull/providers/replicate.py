@@ -88,6 +88,21 @@ def context_path(desired: Target) -> Path:
     return (desired.service.source_dir or Path.cwd()) / written
 
 
+def context_scan(desired: Target) -> ContextScan | None:
+    context = context_path(desired)
+    return scan_context(context) if context.is_dir() else None
+
+
+def context_notes(desired: Target, scan: ContextScan | None) -> list[str]:
+    context = context_path(desired)
+    if scan is None:
+        return [f"build.context {context} is not a directory; apply will fail"]
+    return [
+        f"build.context {context} {problem}; exclude it in .dockerignore"
+        for problem in scan.problems
+    ]
+
+
 def checked_scan(context: Path) -> ContextScan:
     if not context.is_dir():
         raise ValueError(f"build.context {context} is not a directory")
@@ -149,8 +164,8 @@ def refusals(desired: Target) -> list[str]:
     return found
 
 
-def plan_notes(desired: Target) -> list[str]:
-    notes = refusals(desired)
+def plan_notes(desired: Target, scan: ContextScan | None) -> list[str]:
+    notes = [*refusals(desired), *context_notes(desired, scan)]
     missing = unsupported_gpus(desired)
     if missing and hardware_choices(desired):
         names = ", ".join(gpu.value for gpu in missing)
@@ -176,7 +191,7 @@ def render_model(owner: str, name: str, hardware: str) -> dict[str, Any]:
     return {"owner": owner, "name": name, "visibility": MODEL_VISIBILITY, "hardware": hardware}
 
 
-def render_payload(desired: Target) -> dict[str, Any]:
+def render_payload(desired: Target, scan: ContextScan | None) -> dict[str, Any]:
     owner = replicate_block(desired).owner or OWNER_PLACEHOLDER
     hardware = next(iter(hardware_choices(desired)), "")
     return {
@@ -184,6 +199,7 @@ def render_payload(desired: Target) -> dict[str, Any]:
         "push": {
             "image": image_name(owner, model_name(desired)),
             "context": build_context(desired),
+            "digest": scan.digest if scan else None,
         },
         "deployment": render_deployment(desired, owner, VERSION_PLACEHOLDER, hardware),
     }
@@ -342,11 +358,12 @@ class ReplicateProvider:
         return ReplicateApi(self.http)
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
+        scan = context_scan(desired)
         return Plan(
             provider=desired.provider,
             type=self.type,
-            payload=render_payload(desired),
-            notes=plan_notes(desired),
+            payload=render_payload(desired, scan),
+            notes=plan_notes(desired, scan),
         )
 
     def apply(self, desired: Target, observed: Ref | None) -> Ref:

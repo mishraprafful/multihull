@@ -18,6 +18,7 @@ from multihull.providers.replicate import (
     CogCli,
     DeletionDeferred,
     ReplicateProvider,
+    context_scan,
     render_payload,
 )
 from multihull.sdk import Service
@@ -39,11 +40,15 @@ DEPLOYMENT = "multihull-replicate-echo-replicate"
 MODEL = "acme/multihull-replicate-echo"
 
 
+@pytest.fixture(autouse=True)
+def in_example(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(EXAMPLE)
+
+
 @pytest.fixture
 def replicate_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(API_TOKEN_ENV, CALLER)
     monkeypatch.setenv(CLI_AUTH_TOKEN_ENV, COG_LOGIN)
-    monkeypatch.chdir(EXAMPLE)
 
 
 @pytest.fixture
@@ -92,7 +97,8 @@ def cog_llama(llama_raw: dict[str, Any]) -> Target:
 
 
 def test_golden_payload(llama_raw: dict[str, Any]) -> None:
-    assert_golden("llama-8b.replicate.json", render_payload(cog_llama(llama_raw)))
+    target = cog_llama(llama_raw)
+    assert_golden("llama-8b.replicate.json", render_payload(target, context_scan(target)))
 
 
 def test_plan_notes_refusals_skipped_classes_and_the_ignored_command(
@@ -123,10 +129,14 @@ def test_apply_refuses_before_any_call(provider: ReplicateProvider, fake: FakeRe
 
 
 def test_empty_gpu_list_runs_on_cpu(target: Target) -> None:
-    payload = render_payload(target)
+    payload = render_payload(target, context_scan(target))
     assert payload["model"]["hardware"] == "cpu"
     assert payload["deployment"]["hardware"] == "cpu"
-    assert payload["push"] == {"image": "r8.im/{owner}/multihull-replicate-echo", "context": "."}
+    assert payload["push"] == {
+        "image": "r8.im/{owner}/multihull-replicate-echo",
+        "context": ".",
+        "digest": scan_context(EXAMPLE).digest,
+    }
     assert ReplicateProvider().plan(target, None).notes == []
 
 
@@ -508,3 +518,44 @@ def test_a_relative_context_resolves_against_the_spec_file(
     assert cog.pushes == [("r8.im/acme/multihull-replicate-echo", EXAMPLE)]
     service = Service.from_yaml(EXAMPLE / "multihull.yaml")
     assert service.validated().source_dir == EXAMPLE
+
+
+def test_the_plan_changes_when_the_build_context_does(
+    provider: ReplicateProvider, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    monkeypatch.chdir(context)
+    spec = ServiceSpec.model_validate(echo_raw())
+    state = LocalState(tmp_path / "state.db")
+    providers = {"replicate": provider}
+    engine.apply(spec, state, dry_run=False, providers=providers, only={"replicate"})
+
+    def change() -> str:
+        plans = engine.plan(spec, state, providers)
+        return {p.provider: p.change for p in plans}["replicate"]
+
+    assert change() == "unchanged"
+    (context / "predict.py").write_text((context / "predict.py").read_text() + "\n# v2\n")
+    assert change() == "changed"
+
+
+def test_the_plan_notes_a_missing_or_unsafe_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    missing = echo_target(container={"build": {"context": "missing", "target": "cog"}})
+    plan = ReplicateProvider().plan(missing, None)
+    assert plan.notes == [
+        f"build.context {tmp_path / 'missing'} is not a directory; apply will fail"
+    ]
+    assert plan.payload["push"]["digest"] is None
+    shutil.copytree(EXAMPLE, tmp_path / "echo")
+    (tmp_path / "echo" / ".dockerignore").unlink()
+    (tmp_path / "echo" / ".multihull").mkdir()
+    (tmp_path / "echo" / ".multihull" / "state.db").write_text("state")
+    unsafe = echo_target(container={"build": {"context": "echo", "target": "cog"}})
+    assert ReplicateProvider().plan(unsafe, None).notes == [
+        f"build.context {tmp_path / 'echo'} ships .multihull/ (Multihull state, plans and "
+        "snapshots); exclude it in .dockerignore"
+    ]
