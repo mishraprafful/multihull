@@ -9,6 +9,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - RunPod translator deploys for real through RunPod's REST API v2: `apply` creates or updates one `LOAD_BALANCER` Serverless endpoint (`workers.min`/`workers.max`, GPU pools, CPU workers when `resources.gpu` is empty) and mirrors service secrets into RunPod secrets; `status`, `scale`, `logs`, `destroy`, `rediscover` and an authenticated `hull doctor` check. `status` is Ready only once a worker is up and the health path answers 2xx; 204 is warming. The router injects `Authorization: Bearer` from `RUNPOD_ENDPOINT_API_KEY` or `RUNPOD_API_KEY` on traffic and probes. Not yet run against RunPod (#63).
 - Translator conformance suite, starting with RunPod: golden payload, idempotent apply and destroy, rediscover, ready and not ready, no secret values in plan, state or snapshot (#66).
 - `live-smoke.yml` job `runpod-smoke` (spec `kind-runpod`) and a daily RunPod endpoint sweep, both skipped without the `RUNPOD_API_KEY` secret (#63).
+- Per-target credential overrides: `credentials: env:NAME` or `credentials: file:PATH` replaces the provider's native location for Kubernetes (kubeconfig), Modal (`.modal.toml`), RunPod, Baseten and Replicate (API key) and Docker (registry `config.json`). Values never reach logs, state or plans; `hull doctor` names a missing variable or unreadable file. Spec validation errors no longer echo the input value (#67).
 
 ## [0.2.0] - 2026-10-12
 
