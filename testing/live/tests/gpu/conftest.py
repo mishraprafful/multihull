@@ -19,15 +19,19 @@ from live.gpu import (
     Budget,
     BudgetExceeded,
     capture_modal_apps,
+    gpu_class,
     max_minutes_from_env,
     new_api_key,
     new_cost,
+    restores_primary,
     served_model,
 )
-from live.harness import LiveDeployment, LiveRouter, Settings
+from live.harness import LOG_DIR, Kind, LiveDeployment, LiveRouter, Settings
 
 if not os.environ.get("LIVE_SPEC", "").startswith("gpu"):
     collect_ignore_glob = ["test_*.py"]
+elif not restores_primary(Settings.from_env().source_spec()):
+    collect_ignore = ["test_04_restore.py"]
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -73,10 +77,29 @@ def gpu(budget: Budget) -> Budget:
 
 
 @pytest.fixture(scope="session")
+def cluster(settings: Settings, workdir: Path, document: dict[str, Any]) -> Kind | None:
+    target = next((t for t in document["targets"] if t["type"] == "kubernetes"), None)
+    if target is None:
+        return None
+    namespace = str(target["kubernetes"]["namespace"])
+    kube = Kind(settings, namespace, workdir / LOG_DIR / "kubectl.log")
+    if not kube.reachable():
+        pytest.fail(f"Kubernetes context {settings.context} unreachable; check the kubeconfig")
+    if not kube.namespace_exists():
+        pytest.fail(
+            f"namespace {namespace} not found in context {settings.context}; "
+            "apply testing/live/kubernetes-gpu/rbac.yaml"
+        )
+    return kube
+
+
+@pytest.fixture(scope="session")
 def deployment(
-    live: LiveDeployment, recorder: Recorder, budget: Budget
+    live: LiveDeployment, cluster: Kind | None, recorder: Recorder, budget: Budget
 ) -> Iterator[LiveDeployment]:
-    cost = new_cost(len(live.providers_of_type("modal")), budget.max_minutes)
+    cost = new_cost(
+        len(live.providers_of_type("modal")), budget.max_minutes, gpu_class(live.document)
+    )
     recorder.summary.cost = cost
     recorder.save()
     try:
@@ -86,14 +109,20 @@ def deployment(
         try:
             live.deploy(ready_timeout=f"{max(ready, 1)}s", timeout=budget.remaining() + 120)
         except Exception:
-            live.capture_logs(live.providers_of_type("modal"))
+            live.capture_logs(live.providers)
+            if cluster is not None:
+                recorder.capture_kube(AFTER_DEPLOY, cluster, live)
             raise
         capture_modal_apps(recorder.summary, live, AFTER_DEPLOY)
+        if cluster is not None:
+            recorder.capture_kube(AFTER_DEPLOY, cluster, live)
         recorder.save()
         yield live
     finally:
         recorder.capture_image_builds(live)
         capture_modal_apps(recorder.summary, live, BEFORE_DESTROY)
+        if cluster is not None:
+            recorder.capture_kube(BEFORE_DESTROY, cluster, live)
         result = live.destroy()
         cost.stopped_at = time.time()
         if not recorder.summary.destroy:
@@ -101,6 +130,8 @@ def deployment(
             recorder.summary.destroy = (
                 f"hull destroy exit {result.returncode}, state records left: {left or 'none'}"
             )
+        if cluster is not None:
+            cluster.sweep(live.service)
         capture_modal_apps(recorder.summary, live, AFTER_DESTROY)
         recorder.save()
 
