@@ -5,8 +5,9 @@ import time
 from e2e.harness import Controller
 from e2e.waiting import wait_until
 from live.capture import AFTER_DESTROY, BEFORE_DESTROY, Recorder, ScenarioProbe, router_state
-from live.gpu import Budget, capture_modal_apps, running_apps
+from live.gpu import Budget, capture_modal_apps
 from live.harness import LiveDeployment, LiveRouter
+from live.sweep import running_apps
 
 STOP_SECONDS = 120
 

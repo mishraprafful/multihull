@@ -4,14 +4,13 @@ import os
 import secrets
 import time
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from e2e.client import Outcome
 from live.capture import modal_dashboard_url, modal_state
 from live.harness import LiveDeployment
 from live.summary import GpuCost, ModalInfo, RunSummary
-from live.sweep import list_apps, stale_apps
+from live.sweep import list_apps
 
 GPU = "L4"
 L4_HOURLY_USD = 0.80
@@ -129,16 +128,6 @@ def capture_modal_apps(
         state, app_id = modal_state(info.app_name, info.environment, label, lister)
         info.states.append(state)
         info.app_id = info.app_id or app_id
-
-
-def running_apps(
-    prefix: str, environment: str, lister: Callable[[str], list[dict[str, Any]]] = list_apps
-) -> list[str]:
-    now = datetime.now(UTC) + timedelta(seconds=1)
-    return sorted(
-        str(app["description"])
-        for app in stale_apps(lister(environment), prefix, timedelta(0), now)
-    )
 
 
 def edge_not_found(outcomes: Sequence[Outcome]) -> list[str]:

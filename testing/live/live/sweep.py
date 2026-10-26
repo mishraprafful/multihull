@@ -4,7 +4,7 @@ import argparse
 import json
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -40,6 +40,16 @@ def stale_apps(
         and app.get("created_at")
         and created_at(app) <= now - older_than
     ]
+
+
+def running_apps(
+    prefix: str, environment: str, lister: Callable[[str], list[dict[str, Any]]] = list_apps
+) -> list[str]:
+    now = datetime.now(UTC) + timedelta(seconds=1)
+    return sorted(
+        str(app["description"])
+        for app in stale_apps(lister(environment), prefix, timedelta(0), now)
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
