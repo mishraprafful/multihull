@@ -390,6 +390,17 @@ def test_credentials_health_makes_an_authenticated_call(
     assert fake.calls == [("GET", "/v1/users/me")]
 
 
+def test_doctor_warns_while_the_router_would_carry_the_deploy_key(
+    provider: BasetenProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert provider.credentials_health().message.endswith(
+        "BASETEN_INFERENCE_API_KEY is unset, so the router injects this workspace key: set an "
+        "inference-only team key scoped to the production environment and this model"
+    )
+    monkeypatch.setenv(INFERENCE_API_KEY_ENV, TRAFFIC_CALLER)
+    assert provider.credentials_health().message == "Baseten accepted BASETEN_API_KEY"
+
+
 def test_credentials_health_without_a_key_skips_the_call(
     fake: FakeBaseten, monkeypatch: pytest.MonkeyPatch
 ) -> None:

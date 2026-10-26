@@ -74,6 +74,10 @@ URL_KEY = "url"
 HEALTH_PATH_KEY = "health_path"
 DIGEST_KEY = "spec"
 SECRETS_KEY = "secrets"
+DEPLOY_KEY_IN_SNAPSHOT = (
+    f"{INFERENCE_API_KEY_ENV} is unset, so the router injects this workspace key: set an "
+    "inference-only team key scoped to the production environment and this model"
+)
 NO_COMMAND = (
     "Baseten needs container.command: docker_server.start_command replaces the image "
     "entrypoint and is required for custom servers"
@@ -679,7 +683,10 @@ class BasetenProvider:
                 ok=False, message=redact(f"could not reach Baseten: {type(exc).__name__}: {exc}")
             )
         identity = str((user or {}).get("email") or (user or {}).get("name") or "") or None
-        return CredHealth(ok=True, message=f"Baseten accepted {API_KEY_ENV}", identity=identity)
+        message = f"Baseten accepted {API_KEY_ENV}"
+        if not os.environ.get(INFERENCE_API_KEY_ENV, "").strip():
+            message += f"; {DEPLOY_KEY_IN_SNAPSHOT}"
+        return CredHealth(ok=True, message=message, identity=identity)
 
     def rediscover(self, service: str) -> Ref | None:
         if self.dry_run:
