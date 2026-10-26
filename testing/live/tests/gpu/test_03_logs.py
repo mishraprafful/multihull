@@ -8,7 +8,7 @@ from live.harness import LiveDeployment
 
 
 @pytest.mark.parametrize("role", ["primary", "secondary"])
-def test_hull_logs_reads_each_modal_target(
+def test_hull_logs_reads_each_target(
     deployment: LiveDeployment, scenario: ScenarioProbe, gpu: Budget, role: str
 ) -> None:
     provider = deployment.primary if role == "primary" else deployment.secondary

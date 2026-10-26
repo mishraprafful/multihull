@@ -19,6 +19,8 @@ CELL_LIMIT = 120
 WORKFLOW_DESTROY_LOG = Path("logs") / "workflow-destroy.log"
 BACKSTOP_LOG = Path("logs") / "backstop.log"
 BACKSTOP_RESULT = re.compile(r"(\d+) app\(s\) matched (\S+), (\d+) failed")
+KUBE_BACKSTOP_LOG = Path("logs") / "kube-backstop.log"
+KUBE_SWEEP_RESULT = re.compile(r"swept (\d+) object\(s\) labelled (\S+) in (\S+), (\d+) left")
 OUTCOME_LABELS = {"passed": "pass", "failed": "fail", "skipped": "skipped", "error": "error"}
 
 
@@ -118,6 +120,7 @@ class RouterState(BaseModel):
 class RunSummary(BaseModel):
     spec: str
     service: str
+    cluster: str = "kind"
     started_at: float = Field(default_factory=time.time)
     finished_at: float | None = None
     exit_status: int | None = None
@@ -425,7 +428,7 @@ def render(
     if summary.cost is not None:
         lines.extend(render_cost(summary.cost, now or time.time()))
     if summary.kube or summary.cost is None:
-        lines.extend(["### Kubernetes (kind)", ""])
+        lines.extend([f"### Kubernetes ({summary.cluster})", ""])
         for snapshot in summary.kube:
             lines.extend(render_kube(snapshot))
         if not summary.kube:
@@ -470,6 +473,20 @@ def backstop_line(text: str) -> str:
     return f"had to act: stopped {matched - failed} of {matched} app(s) matching {prefix}"
 
 
+def kube_backstop_line(text: str) -> str:
+    if text.startswith("skipped"):
+        return text.strip()
+    match = KUBE_SWEEP_RESULT.search(text)
+    if match is None:
+        return "did not report a result; see logs/kube-backstop.log"
+    deleted, selector, namespace, left = int(match[1]), match[2], match[3], int(match[4])
+    if left:
+        return f"FAILED, {left} object(s) labelled {selector} still in {namespace}"
+    if deleted == 0:
+        return f"not needed, nothing labelled {selector} was left in {namespace}"
+    return f"had to act: deleted {deleted} object(s) labelled {selector} in {namespace}, none left"
+
+
 def workflow_cleanup(workdir: Path) -> list[str]:
     lines: list[str] = []
     destroyed = log_text(workdir / WORKFLOW_DESTROY_LOG)
@@ -478,6 +495,9 @@ def workflow_cleanup(workdir: Path) -> list[str]:
     backstop = log_text(workdir / BACKSTOP_LOG)
     if backstop is not None:
         lines.append(f"Backstop `modal app stop`: {backstop_line(backstop)}")
+    swept = log_text(workdir / KUBE_BACKSTOP_LOG)
+    if swept is not None:
+        lines.append(f"Backstop `kubectl delete`: {kube_backstop_line(swept)}")
     return lines
 
 

@@ -5,8 +5,15 @@ import time
 from e2e.client import RouterClient, failures, fresh_keys, load, providers_of, server_errors
 from e2e.waiting import wait_until
 from live.capture import AFTER_FAILOVER, Recorder, ScenarioProbe
-from live.gpu import EJECTION_SECONDS, Budget, capture_modal_apps, edge_not_found, ejected
-from live.harness import LiveDeployment, LiveRouter
+from live.gpu import (
+    EJECTION_SECONDS,
+    Budget,
+    capture_modal_apps,
+    edge_not_found,
+    ejected,
+    stop_primary,
+)
+from live.harness import Kind, LiveDeployment, LiveRouter
 
 
 def test_primary_stopped_fails_over_to_the_secondary_without_client_errors(
@@ -15,12 +22,13 @@ def test_primary_stopped_fails_over_to_the_secondary_without_client_errors(
     client: RouterClient,
     scenario: ScenarioProbe,
     recorder: Recorder,
+    cluster: Kind | None,
     gpu: Budget,
 ) -> None:
     scenario.watch(router)
     primary = deployment.primary
     stopped_at = time.monotonic()
-    app = deployment.stop_modal_app(primary)
+    stopped = stop_primary(deployment, cluster)
     try:
         before_ejection = load(
             client,
@@ -59,7 +67,7 @@ def test_primary_stopped_fails_over_to_the_secondary_without_client_errors(
         entry = router.endpoint(primary)
         not_found = len(edge_not_found(before_ejection))
         scenario.note(
-            f"modal app stop {app}; {len(before_ejection)} requests sent right after the stop"
+            f"{stopped}; {len(before_ejection)} requests sent right after the stop"
             f" served by {providers_of(before_ejection)} with {not_found} 404s;"
             f" router took {primary} out {ejected_at - stopped_at:.0f} s later"
             f" (health {entry.get('health')}, probe {(entry.get('probe') or {}).get('state')},"
@@ -68,6 +76,8 @@ def test_primary_stopped_fails_over_to_the_secondary_without_client_errors(
         )
     finally:
         capture_modal_apps(recorder.summary, deployment, AFTER_FAILOVER)
+        if cluster is not None:
+            recorder.capture_kube(AFTER_FAILOVER, cluster, deployment)
         recorder.save()
 
     assert edge_not_found(before_ejection) == []

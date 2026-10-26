@@ -10,6 +10,11 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Translator conformance suite, starting with RunPod: golden payload, idempotent apply and destroy, rediscover, ready and not ready, no secret values in plan, state or snapshot (#66).
 - `live-smoke.yml` job `runpod-smoke` (spec `kind-runpod`) and a daily RunPod endpoint sweep, both skipped without the `RUNPOD_API_KEY` secret (#63).
 - Per-target credential overrides: `credentials: env:NAME` or `credentials: file:PATH` replaces the provider's native location for Kubernetes (kubeconfig), Modal (`.modal.toml`), RunPod, Baseten and Replicate (API key) and Docker (registry `config.json`). Values never reach logs, state or plans; `hull doctor` names a missing variable or unreadable file. Spec validation errors no longer echo the input value (#67).
+- `live-k8s-gpu.yml`: a manual run of Llama 3.1 8B on a real GPU Kubernetes cluster (priority 1) with Modal (priority 2): cluster preflight, failover to Modal and back with zero client errors, forced cleanup of both providers and a final check that nothing is left. A least-privilege `rbac.yaml`, a kubeconfig script and the runbook at `docs/testing/kubernetes-gpu`. Skipped without `GPU_KUBECONFIG`; not yet run (#68).
+
+### Changed
+
+- Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
 
 ## [0.2.0] - 2026-10-12
 

@@ -1,0 +1,205 @@
+name: Live Kubernetes GPU
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: Namespace for the workloads; it must exist and match testing/live/kubernetes-gpu/rbac.yaml
+        default: multihull-gpu
+        type: string
+      gpu_class:
+        description: GPU class of the node pool (nodes labelled multihull.dev/gpu-class=<class>); the Modal secondary uses the same class
+        default: L4
+        type: choice
+        options:
+          - L4
+          - A10G
+          - A100-40
+          - A100-80
+      max_minutes:
+        description: Abort and destroy once the suite has run this many minutes (1 to 45)
+        default: '40'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  MODAL_ENVIRONMENT: main
+  APP_PREFIX: multihull-live-
+  MODAL_IMAGE_BUILDER_VERSION: '2025.06'
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - name: Check the repository secrets the run needs
+        id: check
+        env:
+          GPU_KUBECONFIG: ${{ secrets.GPU_KUBECONFIG }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          missing=""
+          [ -n "$GPU_KUBECONFIG" ] || missing="$missing GPU_KUBECONFIG"
+          [ -n "$MODAL_TOKEN_ID" ] || missing="$missing MODAL_TOKEN_ID"
+          [ -n "$MODAL_TOKEN_SECRET" ] || missing="$missing MODAL_TOKEN_SECRET"
+          [ -n "$HF_TOKEN" ] || missing="$missing HF_TOKEN"
+          if [ -z "$missing" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          message="Skipped: repository secret(s)${missing} not set. Owner steps: https://multihull.pages.dev/docs/testing/kubernetes-gpu/"
+          echo "::notice title=Live Kubernetes GPU skipped::$message"
+          echo "$message" >> "$GITHUB_STEP_SUMMARY"
+
+  gpu:
+    needs: gate
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 105
+    concurrency:
+      group: live-k8s-gpu
+      cancel-in-progress: false
+    env:
+      LIVE_SPEC: gpu-kubernetes
+      LIVE_SERVICE: live-${{ github.run_id }}
+      LIVE_MAX_MINUTES: ${{ inputs.max_minutes }}
+      LIVE_KUBE_NAMESPACE: ${{ inputs.namespace }}
+      LIVE_GPU_CLASS: ${{ inputs.gpu_class }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Check max_minutes and namespace
+        run: |
+          case "$LIVE_MAX_MINUTES" in
+            ''|*[!0-9]*) echo "::error::max_minutes must be a whole number of minutes"; exit 1 ;;
+          esac
+          if [ "$LIVE_MAX_MINUTES" -lt 1 ] || [ "$LIVE_MAX_MINUTES" -gt 45 ]; then
+            echo "::error::max_minutes must be between 1 and 45 (the suite step times out at 55 minutes)"
+            exit 1
+          fi
+          if ! printf '%s' "$LIVE_KUBE_NAMESPACE" | grep -Eq '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'; then
+            echo "::error::namespace must be a DNS-1123 label"
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: azure/setup-kubectl@v5
+        with:
+          version: v1.36.5
+      - name: Write the kubeconfig from GPU_KUBECONFIG
+        id: kubeconfig
+        env:
+          GPU_KUBECONFIG: ${{ secrets.GPU_KUBECONFIG }}
+        run: |
+          kubeconfig="$RUNNER_TEMP/kubeconfig"
+          (umask 077 && printf '%s\n' "$GPU_KUBECONFIG" > "$kubeconfig")
+          context=$(KUBECONFIG="$kubeconfig" kubectl config current-context)
+          echo "KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
+          echo "LIVE_KUBE_CONTEXT=$context" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Cluster preflight (API, namespace, RBAC, GPU nodes, model access)
+        working-directory: testing/live
+        timeout-minutes: 5
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: >
+          uv run python -m live.kubernetes_gpu preflight
+          --namespace "$LIVE_KUBE_NAMESPACE" --gpu-class "$LIVE_GPU_CLASS" --spec "$LIVE_SPEC"
+      - name: Modal credential preflight
+        id: preflight
+        working-directory: testing/live
+        run: uv run python -m live.preflight
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build --release -p multihull
+        working-directory: router
+      - name: Doctor, deploy, inference, logs, fail over to Modal, restore Kubernetes, destroy
+        timeout-minutes: 55
+        run: >
+          uv run --project testing/live pytest -q -x
+          -c testing/live/pyproject.toml testing/live/tests/gpu
+          --junitxml "$RUNNER_TEMP/live/results.xml"
+        env:
+          LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
+          LIVE_WORKDIR: ${{ runner.temp }}/live
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      - name: Destroy
+        if: always()
+        timeout-minutes: 10
+        working-directory: testing/live
+        run: uv run python -m live.kubernetes_gpu destroy --workdir "$RUNNER_TEMP/live"
+      - name: Force-delete Kubernetes objects left by this run
+        if: always() && steps.kubeconfig.outcome == 'success'
+        timeout-minutes: 8
+        working-directory: testing/live
+        run: |
+          log="$RUNNER_TEMP/live/logs/kube-backstop.log"
+          mkdir -p "$(dirname "$log")"
+          uv run python -m live.kubernetes_gpu sweep --namespace "$LIVE_KUBE_NAMESPACE" \
+            --service "$LIVE_SERVICE" | tee "$log"
+      - name: Stop Modal apps left by this run
+        if: always()
+        timeout-minutes: 5
+        working-directory: testing/live
+        env:
+          CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
+        run: |
+          log="$RUNNER_TEMP/live/logs/backstop.log"
+          mkdir -p "$(dirname "$log")"
+          if [ "$CREDENTIALS" != accepted ]; then
+            echo "skipped, credentials ${CREDENTIALS:-unchecked}" | tee "$log"
+            exit 0
+          fi
+          uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" \
+            --env "$MODAL_ENVIRONMENT" | tee "$log"
+      - name: Assert nothing is left on Kubernetes or Modal
+        if: always() && steps.kubeconfig.outcome == 'success'
+        timeout-minutes: 5
+        working-directory: testing/live
+        env:
+          CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
+        run: |
+          modal=""
+          if [ "$CREDENTIALS" = accepted ]; then
+            modal="${APP_PREFIX}${GITHUB_RUN_ID}"
+          fi
+          uv run python -m live.kubernetes_gpu check --namespace "$LIVE_KUBE_NAMESPACE" \
+            --service "$LIVE_SERVICE" --modal-prefix "$modal" --modal-env "$MODAL_ENVIRONMENT"
+      - name: Remove the kubeconfig
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig"
+      - name: Job summary
+        if: always()
+        working-directory: testing/live
+        run: >
+          uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
+          --job-status "$JOB_STATUS" --artifact live-k8s-gpu-logs --spec "$LIVE_SPEC"
+          --service "$LIVE_SERVICE"
+        env:
+          JOB_STATUS: ${{ job.status }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: live-k8s-gpu-logs
+          path: |
+            ${{ runner.temp }}/live/logs
+            ${{ runner.temp }}/live/multihull.yaml
+            ${{ runner.temp }}/live/router.toml
+            ${{ runner.temp }}/live/summary.md
+            ${{ runner.temp }}/live/summary.json
+            ${{ runner.temp }}/live/results.xml
+          if-no-files-found: ignore
