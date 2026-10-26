@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import subprocess
@@ -11,6 +10,7 @@ from typing import Any, ClassVar
 
 import httpx
 
+from multihull.build_context import ContextScan, scan_context
 from multihull.providers.base import (
     CredHealth,
     Endpoint,
@@ -45,8 +45,6 @@ PUSH_TIMEOUT_SECONDS = 3600.0
 LOGIN_TIMEOUT_SECONDS = 60.0
 PERMANENT_SCALE_STATUSES = frozenset({400, 422})
 DEPLOYMENT_FIELDS = ("version", "hardware", "min_instances", "max_instances")
-IGNORED_CONTEXT_DIRS = frozenset({".git", ".cog", "__pycache__"})
-READ_CHUNK = 1 << 20
 OWNER_PLACEHOLDER = "{owner}"
 VERSION_PLACEHOLDER = "{version}"
 OWNER_KEY = "owner"
@@ -81,6 +79,25 @@ def deployment_name(desired: Target) -> str:
 def build_context(desired: Target) -> str:
     build = desired.service.container.build
     return build.context if build else "."
+
+
+def context_path(desired: Target) -> Path:
+    written = Path(build_context(desired))
+    if written.is_absolute():
+        return written
+    return (desired.service.source_dir or Path.cwd()) / written
+
+
+def checked_scan(context: Path) -> ContextScan:
+    if not context.is_dir():
+        raise ValueError(f"build.context {context} is not a directory")
+    scan = scan_context(context)
+    if scan.problems:
+        raise ValueError(
+            f"build.context {context} " + "; ".join(scan.problems) + "; exclude them in "
+            ".dockerignore or move the build context"
+        )
+    return scan
 
 
 def image_name(owner: str, model: str) -> str:
@@ -170,24 +187,6 @@ def render_payload(desired: Target) -> dict[str, Any]:
         },
         "deployment": render_deployment(desired, owner, VERSION_PLACEHOLDER, hardware),
     }
-
-
-def context_digest(root: Path) -> str:
-    digest = hashlib.sha256()
-    for directory, subdirs, files in os.walk(root):
-        subdirs[:] = sorted(d for d in subdirs if d not in IGNORED_CONTEXT_DIRS)
-        linked = [d for d in subdirs if (Path(directory) / d).is_symlink()]
-        for name in sorted([*files, *linked]):
-            path = Path(directory) / name
-            relative = path.relative_to(root).as_posix()
-            if path.is_symlink():
-                digest.update(f"L {relative} {os.readlink(path)}\n".encode())
-                continue
-            digest.update(f"F {relative}\n".encode())
-            with path.open("rb") as handle:
-                while chunk := handle.read(READ_CHUNK):
-                    digest.update(chunk)
-    return digest.hexdigest()[:16]
 
 
 def release_of(deployment: Mapping[str, Any]) -> dict[str, Any]:
@@ -357,16 +356,16 @@ class ReplicateProvider:
         if self.dry_run:
             owner = replicate_block(desired).owner or OWNER_PLACEHOLDER
             return self.ref(desired, owner, {})
+        context = context_path(desired)
+        scan = checked_scan(context)
         owner = self.owner(desired)
         hardware = self.pick_hardware(desired)
         name = model_name(desired)
         if self.api.model(owner, name) is None:
             self.api.call("POST", "/models", render_model(owner, name, hardware))
-        context = Path(build_context(desired))
-        digest = context_digest(context)
-        version = self.version(observed, owner, name, context, digest)
+        version = self.version(observed, owner, name, context, scan.digest)
         self.ensure_deployment(render_deployment(desired, owner, version, hardware), owner)
-        return self.ref(desired, owner, {VERSION_KEY: version, CONTEXT_KEY: digest})
+        return self.ref(desired, owner, {VERSION_KEY: version, CONTEXT_KEY: scan.digest})
 
     def ref(self, desired: Target, owner: str, extra: Mapping[str, str]) -> Ref:
         ids = {

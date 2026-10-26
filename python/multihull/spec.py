@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 ProviderType = Literal["kubernetes", "modal", "runpod", "baseten", "replicate", "docker"]
 PROVIDER_TYPES: tuple[ProviderType, ...] = (
@@ -227,6 +227,20 @@ class ServiceSpec(SpecModel):
     reliability: Reliability = Reliability()
     targets: list[TargetSpec] = Field(min_length=1)
     route: Route
+    _source_dir: Path | None = PrivateAttr(default=None)
+
+    @property
+    def source_dir(self) -> Path | None:
+        return self._source_dir
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ServiceSpec):
+            return NotImplemented
+        return self.__dict__ == other.__dict__
+
+    def located_in(self, directory: Path | None) -> ServiceSpec:
+        self._source_dir = directory
+        return self
 
     def effective_replicas(self, target: TargetSpec) -> Replicas:
         base = self.scaling.replicas
@@ -310,7 +324,7 @@ def load(path: str | Path) -> ServiceSpec:
     raw = yaml.safe_load(Path(path).read_text())
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected a mapping at top level")
-    return ServiceSpec.model_validate(raw)
+    return ServiceSpec.model_validate(raw).located_in(Path(path).resolve().parent)
 
 
 def dump(spec: ServiceSpec) -> dict[str, Any]:

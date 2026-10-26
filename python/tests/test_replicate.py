@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 
-from multihull import engine
+from multihull import discovery, engine
+from multihull import spec as specmod
+from multihull.build_context import scan_context
 from multihull.providers.base import Ref, ScaleRefused, Target
 from multihull.providers.replicate import (
     API_TOKEN_ENV,
@@ -16,9 +18,9 @@ from multihull.providers.replicate import (
     CogCli,
     DeletionDeferred,
     ReplicateProvider,
-    context_digest,
     render_payload,
 )
+from multihull.sdk import Service
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState
 from tests.conftest import assert_golden
@@ -152,7 +154,7 @@ def test_apply_creates_the_model_pushes_and_creates_the_deployment(
         "model": MODEL,
         "deployment": DEPLOYMENT,
         "version": version,
-        "context": context_digest(EXAMPLE),
+        "context": scan_context(EXAMPLE).digest,
     }
     assert fake.models[MODEL]["visibility"] == "private"
     assert fake.deployment_settings(DEPLOYMENT) == {
@@ -162,7 +164,7 @@ def test_apply_creates_the_model_pushes_and_creates_the_deployment(
         "max_instances": 2,
     }
     assert cog.logins == [COG_LOGIN]
-    assert cog.pushes == [("r8.im/acme/multihull-replicate-echo", Path("."))]
+    assert cog.pushes == [("r8.im/acme/multihull-replicate-echo", EXAMPLE)]
     assert fake.calls_of("POST") == ["/v1/models", "/v1/deployments"]
 
 
@@ -205,21 +207,6 @@ def test_a_changed_build_context_pushes_a_new_version_and_rolls_the_deployment(
     assert second.ids["version"] != first.ids["version"]
     assert fake.deployment_settings(DEPLOYMENT)["version"] == second.ids["version"]
     assert fake.calls_of("PATCH") == [f"/v1/deployments/acme/{DEPLOYMENT}"]
-
-
-def test_context_digest_ignores_build_output_and_tracks_sources(tmp_path: Path) -> None:
-    shutil.copytree(EXAMPLE, tmp_path / "echo")
-    root = tmp_path / "echo"
-    before = context_digest(root)
-    for ignored in (".git", ".cog", "__pycache__"):
-        (root / ignored).mkdir()
-        (root / ignored / "noise").write_text("changes on every build")
-    assert context_digest(root) == before
-    (root / "weights.txt").write_text("new file")
-    with_file = context_digest(root)
-    assert with_file != before
-    (root / "weights").symlink_to(tmp_path, target_is_directory=True)
-    assert context_digest(root) != with_file
 
 
 def test_apply_restores_drifted_scaling_only(
@@ -461,3 +448,63 @@ def test_engine_builds_live_replicate_providers_from_targets_and_refs() -> None:
     from_ref = engine.provider_for_ref(Ref("replicate-b", "replicate", "replicate-echo"))
     assert isinstance(from_ref, ReplicateProvider)
     assert (from_ref.dry_run, from_ref.provider_name) == (False, "replicate-b")
+
+
+def test_apply_refuses_a_context_that_would_ship_local_state(
+    provider: ReplicateProvider,
+    fake: FakeReplicate,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    (context / ".dockerignore").unlink()
+    (context / ".multihull").mkdir()
+    (context / ".multihull" / "plan.json").write_text("{}")
+    monkeypatch.chdir(context)
+    with pytest.raises(ValueError, match=r"ships \.multihull/ .*exclude them in \.dockerignore"):
+        provider.apply(echo_target(), None)
+    assert fake.calls == []
+
+
+def test_deploying_from_the_context_pushes_once_and_never_ships_the_snapshot(
+    provider: ReplicateProvider,
+    fake: FakeReplicate,
+    cog: FakeCog,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    monkeypatch.chdir(context)
+    spec = ServiceSpec.model_validate(echo_raw())
+    state = LocalState(Path(".multihull/state.db"))
+    providers = {"replicate": provider}
+    snapshot_path = Path(".multihull/snapshot.json")
+    for _ in range(3):
+        [result] = [
+            r
+            for r in engine.apply(
+                spec, state, dry_run=False, providers=providers, only={"replicate"}
+            )
+            if r.provider == "replicate"
+        ]
+        assert result.ok, result.message
+        snapshot = discovery.file_snapshot(spec, state, providers, snapshot_path)
+        discovery.write_snapshot(snapshot, snapshot_path)
+    assert CALLER in snapshot_path.read_text()
+    assert len(cog.pushes) == 1
+    assert len(fake.versions[MODEL]) == 1
+    assert len(fake.deployments[f"acme/{DEPLOYMENT}"].releases) == 1
+
+
+def test_a_relative_context_resolves_against_the_spec_file(
+    provider: ReplicateProvider, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    spec = specmod.load(EXAMPLE / "multihull.yaml")
+    assert spec.source_dir == EXAMPLE
+    provider.apply(Target(spec, spec.target("replicate")), None)
+    assert cog.pushes == [("r8.im/acme/multihull-replicate-echo", EXAMPLE)]
+    service = Service.from_yaml(EXAMPLE / "multihull.yaml")
+    assert service.validated().source_dir == EXAMPLE
