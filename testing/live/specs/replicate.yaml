@@ -1,0 +1,26 @@
+apiVersion: multihull/v1
+name: live-replicate
+
+container:
+  build: {context: examples/replicate-echo, target: cog}
+  port: 5000
+  health: {path: /health-check, initialDelaySeconds: 5}
+
+resources:
+  gpu: []
+
+scaling:
+  replicas: {min: 1, max: 1}
+
+reliability:
+  minWarmProviders: 1
+
+targets:
+  - provider: replicate
+    type: replicate
+    priority: 1
+
+route:
+  hostname: echo.local
+  protocol: http
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 1}
