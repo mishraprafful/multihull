@@ -69,6 +69,7 @@ class FakeReplicate:
         self.hardware = [dict(item) for item in HARDWARE]
         self.calls: list[tuple[str, str]] = []
         self.page_size = 100
+        self.next_base = f"https://{API_HOST}"
         self.failure: httpx.Response | None = None
         self.delete_failure: httpx.Response | None = None
 
@@ -228,7 +229,7 @@ class FakeReplicate:
         offset = int(request.url.params.get("cursor", "0"))
         page = everything[offset : offset + self.page_size]
         more = offset + self.page_size < len(everything)
-        next_url = f"https://{API_HOST}/v1/deployments?cursor={offset + self.page_size}"
+        next_url = f"{self.next_base}/v1/deployments?cursor={offset + self.page_size}"
         return httpx.Response(
             200,
             json={"next": next_url if more else None, "previous": None, "results": page},

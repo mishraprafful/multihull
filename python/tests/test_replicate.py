@@ -6,6 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from multihull import discovery, engine
@@ -579,3 +580,32 @@ def test_destroy_surfaces_delete_errors_other_than_a_refusal(
         provider.destroy(ref)
     assert not isinstance(raised.value, DeletionDeferred)
     assert raised.value.status == status
+
+
+def test_pagination_stays_on_the_api_host_over_https(
+    provider: ReplicateProvider, fake: FakeReplicate, target: Target
+) -> None:
+    provider.apply(target, None)
+    release = dict(fake.deployments[f"acme/{DEPLOYMENT}"].releases[-1])
+    fake.deployments["acme/unrelated"] = Deployment("acme", "unrelated", "acme/other", [release])
+    fake.page_size = 1
+    fake.next_base = "http://api.replicate.com:80"
+    seen: list[str] = []
+
+    def recording(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return fake(request)
+
+    paged = ReplicateProvider(
+        dry_run=False,
+        provider_name="replicate",
+        http_client=httpx.Client(transport=httpx.MockTransport(recording)),
+    )
+    assert paged.rediscover("replicate-echo") is not None
+    assert seen[-1] == "https://api.replicate.com/v1/deployments?cursor=1"
+
+    fake.next_base = "https://collector.example"
+    seen.clear()
+    with pytest.raises(RuntimeError, match="refusing to follow a Replicate link to collector"):
+        paged.rediscover("missing")
+    assert all(url.startswith("https://api.replicate.com/") for url in seen)

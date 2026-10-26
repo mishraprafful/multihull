@@ -26,7 +26,8 @@ from multihull.providers.base import (
 )
 from multihull.spec import GPU, ReplicateBlock
 
-API_URL = "https://api.replicate.com/v1"
+API_HOST = "api.replicate.com"
+API_URL = f"https://{API_HOST}/v1"
 REGISTRY = "r8.im"
 API_TOKEN_ENV = "REPLICATE_API_TOKEN"
 CLI_AUTH_TOKEN_ENV = "REPLICATE_CLI_AUTH_TOKEN"
@@ -241,6 +242,15 @@ def traffic_headers() -> dict[str, str]:
     return bearer(value) if value else {}
 
 
+def api_url(path: str) -> str:
+    if not path.startswith(("http://", "https://")):
+        return f"{API_URL}{path}"
+    url = httpx.URL(path)
+    if url.host != API_HOST:
+        raise RuntimeError(f"refusing to follow a Replicate link to {url.host or path}")
+    return str(url.copy_with(scheme="https", port=None))
+
+
 def problem_detail(response: httpx.Response) -> str:
     try:
         problem = response.json()
@@ -303,8 +313,7 @@ class ReplicateApi:
         body: Mapping[str, Any] | None = None,
         missing_ok: bool = False,
     ) -> Any:
-        url = path if path.startswith("https://") else f"{API_URL}{path}"
-        response = self.http.request(method, url, json=body, headers=bearer(api_token()))
+        response = self.http.request(method, api_url(path), json=body, headers=bearer(api_token()))
         if missing_ok and response.status_code == 404:
             return None
         if response.is_error:
