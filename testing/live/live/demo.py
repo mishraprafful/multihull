@@ -20,7 +20,7 @@ from e2e.harness import Controller
 from e2e.stream import generate_credentials
 from live import sweep
 from live.gpu import ROUTER_TUNING as GPU_ROUTER_TUNING
-from live.gpu import running_apps, served_model
+from live.gpu import served_model
 from live.harness import (
     LOG_DIR,
     REPO_ROOT,
@@ -572,7 +572,7 @@ class CloudDemo:
                 problems.append(f"kind resources left: {left}")
         if self.deployment is not None and self.deployment.providers_of_type("modal"):
             try:
-                apps = running_apps(self.app_prefix, modal_environment(self.document))
+                apps = sweep.running_apps(self.app_prefix, modal_environment(self.document))
             except RuntimeError as exc:
                 apps = [str(exc)]
             if apps:

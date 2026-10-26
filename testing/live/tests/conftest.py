@@ -83,7 +83,10 @@ def workdir(settings: Settings, tmp_path_factory: pytest.TempPathFactory) -> Pat
 
 @pytest.fixture(scope="session", autouse=True)
 def recorder(request: pytest.FixtureRequest, settings: Settings, workdir: Path) -> Recorder:
-    created = Recorder(RunSummary(spec=settings.spec, service=settings.service), workdir)
+    summary = RunSummary(
+        spec=settings.spec, service=settings.service, cluster=settings.kube_context or "kind"
+    )
+    created = Recorder(summary, workdir)
     request.config.stash[RECORDER_KEY] = created
     created.save()
     return created
