@@ -1,0 +1,121 @@
+---
+title: Kubernetes GPU live run
+description: Owner runbook for live-k8s-gpu.yml, Llama 3.1 8B on a real GPU cluster as primary and Modal as secondary, with failover, restore and forced cleanup.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+`live-k8s-gpu.yml` deploys [`testing/live/specs/gpu-kubernetes.yaml`](https://github.com/mishraprafful/multihull/blob/main/testing/live/specs/gpu-kubernetes.yaml): Llama 3.1 8B Instruct on vLLM (`vllm/vllm-openai` v0.11.0, pinned by digest) on a Kubernetes GPU node at priority 1 and on Modal, same GPU class, at priority 2, with the router in front. Manual only (`workflow_dispatch`), one run at a time, issue [#68](https://github.com/mishraprafful/multihull/issues/68). kind has no GPUs, so this needs a cluster you provide.
+
+## What a run does
+
+1. Skips with a notice naming each missing repository secret: `GPU_KUBECONFIG`, `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `HF_TOKEN`.
+2. Cluster preflight, before anything is deployed: API server, namespace, every permission below through `kubectl auth can-i`, a node labelled `multihull.dev/gpu-class=<class>` with allocatable `nvidia.com/gpu`, no untolerated taint and 24Gi allocatable memory, and a `HEAD` on the model's `config.json` with `HF_TOKEN`. Then the Modal credential preflight.
+3. `hull doctor`, then `hull deploy --apply --wait` on both targets.
+4. One raw streaming completion, then 5 plain and 3 streamed requests, all served by Kubernetes.
+5. `hull logs` for both targets.
+6. Failover: `kubectl scale --replicas=0` on the Deployment, 10 requests straight away, a wait until the router ejects the endpoint, then 10 plain and 3 streamed requests: all on Modal, zero client errors.
+7. Restore: `kubectl scale --replicas=1`, a wait for the rollout, one request a second until the router routes to Kubernetes again (probe up, circuit closed, health ready), then 10 requests: at least 8 on Kubernetes, zero client errors.
+8. `hull destroy`, then nothing labelled `multihull.dev/service=live-<run id>` in the namespace and no running Modal app.
+
+## Time cap and cleanup
+
+`max_minutes` (default 40, at most 45) is the suite budget: every wait is bounded by what is left, and once it is spent the next test fails so the teardown runs `hull destroy`. The suite step times out at 55 minutes, the job at 105. These steps run whatever happened, each with its own timeout:
+
+| Step | What it does |
+|---|---|
+| `Destroy` | `hull destroy` on the rendered spec |
+| `Force-delete Kubernetes objects left by this run` | deletes Deployments, ReplicaSets, HPAs, Services and Secrets labelled with the run's service, force-deletes their pods (`--grace-period=0 --force`) and waits up to 5 minutes for LoadBalancer finalizers |
+| `Stop Modal apps left by this run` | `modal app stop` on every running `multihull-live-<run id>*` app |
+| `Assert nothing is left on Kubernetes or Modal` | fails the job if a labelled object or a running app remains |
+
+The workflow never touches nodes, node pools or the namespace.
+
+## Cluster requirements
+
+- An API server reachable from GitHub-hosted runners.
+- `LoadBalancer` Services that get an internet-reachable address. The router runs on the runner and calls the Service over HTTP on port 80.
+- A GPU node with the NVIDIA driver and device plugin (allocatable `nvidia.com/gpu`), the label `multihull.dev/gpu-class=<class>` (`L4`, `A10G`, `A100-40` or `A100-80`), at least 24Gi allocatable memory and room for the image and 16 GB of weights. A taint is optional; the pod tolerates only `nvidia.com/gpu` with `NoSchedule`.
+
+<Aside type="caution" title="Public endpoint for the run">
+The Service is a public `LoadBalancer` in front of vLLM, which has no authentication, from deploy until cleanup. Point the run at a test cluster.
+</Aside>
+
+## Owner steps
+
+<Steps>
+
+1. Create a GPU node pool. On GKE:
+
+   ```sh
+   gcloud container node-pools create multihull-l4 \
+     --cluster <cluster> --location <zone> \
+     --machine-type g2-standard-8 \
+     --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
+     --num-nodes 1 --enable-autoscaling --min-nodes 0 --max-nodes 1 \
+     --node-labels multihull.dev/gpu-class=L4
+   ```
+
+   GKE installs the driver and device plugin and taints GPU nodes `nvidia.com/gpu=present:NoSchedule`. On other clusters, install the NVIDIA GPU Operator or device plugin and label the nodes: `kubectl label nodes <node> multihull.dev/gpu-class=L4`.
+
+2. Create the namespace, service account and RBAC:
+
+   ```sh
+   kubectl --context <admin-context> apply -f testing/live/kubernetes-gpu/rbac.yaml
+   ```
+
+   [`rbac.yaml`](https://github.com/mishraprafful/multihull/blob/main/testing/live/kubernetes-gpu/rbac.yaml) creates the namespace `multihull-gpu`, the service account `multihull-live` with a token Secret, a Role with what the translator, the suite and the cleanup use, and a ClusterRole with `get` on that one namespace and `list` on nodes. For another namespace, replace every `multihull-gpu` in a copy and pass the name as the `namespace` input.
+
+3. Store a kubeconfig for that service account without printing it:
+
+   ```sh
+   testing/live/kubernetes-gpu/kubeconfig.sh <admin-context> /tmp/multihull-gpu.kubeconfig
+   gh secret set GPU_KUBECONFIG < /tmp/multihull-gpu.kubeconfig
+   rm /tmp/multihull-gpu.kubeconfig
+   ```
+
+   The script reads the token and cluster CA from the token Secret, writes the file with mode 600 and context `multihull-gpu`, and checks the account can create Deployments.
+
+4. Accept the Llama 3.1 license at [huggingface.co/meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct), create a read token, then run `gh secret set HF_TOKEN` and paste it at the hidden prompt. `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` already exist for the other live runs.
+
+5. Run it and follow it:
+
+   ```sh
+   gh workflow run live-k8s-gpu.yml -f namespace=multihull-gpu -f gpu_class=L4 -f max_minutes=40
+   gh run watch "$(gh run list --workflow live-k8s-gpu.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+   ```
+
+</Steps>
+
+## What to check in the summary
+
+- `Kubernetes GPU preflight`: every row `pass`.
+- `Result at a glance`: every scenario `pass`, `Client errors` 0, `Served by` `kubernetes` before the scale-down, `modal` after it, `kubernetes` again after the restore.
+- `Kubernetes (multihull-gpu)`: the pod on a GPU node, its events, and the LoadBalancer URL the router used.
+- The cleanup lines (`Suite destroy`, `Workflow destroy step`, `Backstop kubectl delete`, `Backstop modal app stop`) and a green `Assert nothing is left` step.
+- Artifact `live-k8s-gpu-logs`: `hull.log`, `kubectl.log`, `router.log`, `controller.log`, `summary.md`, `results.xml`.
+
+The run time is not measured yet. The vLLM image pull, the weight download and the readiness delay dominate: the spec's `health.initialDelaySeconds: 480` delays the readiness probe and the liveness probe alike, because the translator renders no startup probe, so the pod is Ready 8 minutes after its container starts at the earliest.
+
+## Cost
+
+The summary's cost line covers Modal only: one container of the chosen class from deploy to destroy, L4 at 0.80 USD per hour ([modal.com/pricing](https://modal.com/pricing), read 2026-10-26). The worst case, an A100-80 for the whole 105-minute job, is 4.38 USD, under the 5 USD cap. Your cloud bills the GPU node while it runs; scale the node pool to zero afterwards unless the autoscaler does.
+
+## If the job dies
+
+```sh
+kubectl --context <admin-context> --namespace multihull-gpu delete \
+  deployments,services,horizontalpodautoscalers,secrets -l multihull.dev/service=live-<run id>
+cd testing/live && uv run python -m live.sweep --prefix multihull-live-<run id>
+```
+
+The daily sweep in `live-smoke.yml` stops `multihull-live-` Modal apps older than two hours. Nothing sweeps the cluster on a schedule.
+
+## Revoke access
+
+```sh
+kubectl --context <admin-context> --namespace multihull-gpu delete secret multihull-live-token
+gh secret delete GPU_KUBECONFIG
+```
+
+Deleting the token Secret invalidates the stored kubeconfig. `kubectl delete -f testing/live/kubernetes-gpu/rbac.yaml` removes the namespace and everything in it.
