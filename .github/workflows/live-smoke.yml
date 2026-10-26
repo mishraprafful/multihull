@@ -31,6 +31,7 @@ jobs:
     outputs:
       modal: ${{ steps.check.outputs.modal }}
       runpod: ${{ steps.runpod.outputs.enabled }}
+      replicate: ${{ steps.replicate.outputs.enabled }}
     steps:
       - id: check
         env:
@@ -52,6 +53,17 @@ jobs:
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "RUNPOD_API_KEY is not available; the RunPod target was skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - id: replicate
+        env:
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+          REPLICATE_CLI_AUTH_TOKEN: ${{ secrets.REPLICATE_CLI_AUTH_TOKEN }}
+        run: |
+          if [ -n "$REPLICATE_API_TOKEN" ] && [ -n "$REPLICATE_CLI_AUTH_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "REPLICATE_API_TOKEN or REPLICATE_CLI_AUTH_TOKEN is not available; the Replicate smoke was skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   smoke:
@@ -243,6 +255,62 @@ jobs:
             ${{ runner.temp }}/live/results.xml
           if-no-files-found: ignore
 
+  replicate-smoke:
+    needs: gate
+    if: needs.gate.outputs.replicate == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    concurrency:
+      group: live-smoke-replicate
+      cancel-in-progress: false
+    env:
+      REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+      REPLICATE_CLI_AUTH_TOKEN: ${{ secrets.REPLICATE_CLI_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - uses: replicate/setup-cog@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build --release -p multihull
+        working-directory: router
+      - name: Doctor, cog push and deploy, prediction through the router, destroy
+        timeout-minutes: 35
+        run: >
+          uv run --project testing/live pytest -q -x
+          -c testing/live/pyproject.toml testing/live/replicate
+          --junitxml "$RUNNER_TEMP/live/results.xml"
+        env:
+          LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
+          LIVE_WORKDIR: ${{ runner.temp }}/live
+      - name: Scale down and delete the live Replicate deployment
+        if: always()
+        working-directory: testing/live
+        run: |
+          log="$RUNNER_TEMP/live/logs/replicate-backstop.log"
+          mkdir -p "$(dirname "$log")"
+          uv run python -m live.replicate_sweep --prefix "${APP_PREFIX}replicate" | tee "$log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: live-smoke-replicate-logs
+          path: |
+            ${{ runner.temp }}/live/logs
+            ${{ runner.temp }}/live/multihull.yaml
+            ${{ runner.temp }}/live/router.toml
+            ${{ runner.temp }}/live/results.xml
+          if-no-files-found: ignore
+
   sweep:
     needs: gate
     if: needs.gate.outputs.modal == 'true' && github.event_name == 'schedule'
@@ -297,4 +365,26 @@ jobs:
         working-directory: testing/live
         run: |
           uv run python -m live.runpod_sweep --prefix "$APP_PREFIX" --older-than 7200 \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  replicate-sweep:
+    needs: gate
+    if: needs.gate.outputs.replicate == 'true' && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Scale down, then delete, live Replicate deployments released two hours ago
+        working-directory: testing/live
+        run: |
+          uv run python -m live.replicate_sweep --prefix "$APP_PREFIX" --older-than 7200 \
             | tee -a "$GITHUB_STEP_SUMMARY"
