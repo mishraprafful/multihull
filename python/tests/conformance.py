@@ -34,15 +34,19 @@ class Case:
         return Target(self.spec, self.spec.target(self.target))
 
     def eventually(self, condition: Callable[[], bool]) -> bool:
-        deadline = time.monotonic() + self.timeout_seconds
-        while not condition():
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(POLL_SECONDS)
-        return True
+        return until(self.timeout_seconds, condition)
 
 
 CaseBuilder = Callable[[pytest.MonkeyPatch, ServiceSpec], Case]
+
+
+def until(timeout_seconds: float, condition: Callable[[], bool]) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while not condition():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(POLL_SECONDS)
+    return True
 
 
 class Health:

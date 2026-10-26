@@ -35,6 +35,7 @@ from tests.conformance import (
     mirror_secrets,
     sentinel,
 )
+from tests.conformance_live import LIVE_CASES, live_types
 from tests.conftest import assert_golden, llama_with_docker
 from tests.fake_docker import FakeDockerClient
 from tests.fake_kubernetes import FakeKubeClient
@@ -156,13 +157,15 @@ CASES: dict[str, CaseBuilder] = {
     "replicate": render_only("replicate", issue=65),
     "runpod": runpod_case,
 }
+LIVE = live_types()
+BUILDERS = LIVE_CASES if LIVE else CASES
 
 
-@pytest.fixture(params=sorted(CASES))
+@pytest.fixture(params=LIVE or sorted(CASES))
 def case(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, llama_spec: ServiceSpec
 ) -> Iterator[Case]:
-    built = CASES[request.param](monkeypatch, llama_spec)
+    built = BUILDERS[request.param](monkeypatch, llama_spec)
     yield built
     for ref in reversed(built.applied):
         built.provider.destroy(ref)
@@ -223,6 +226,7 @@ def test_every_registry_provider_has_a_case() -> None:
     assert sorted(CASES) == sorted(PROVIDERS)
 
 
+@pytest.mark.skipif(bool(LIVE), reason="goldens are checked against fakes")
 def test_plan_matches_the_golden_payload(case: Case) -> None:
     payload = case.provider.plan(case.desired, None).payload
     assert_golden(case.golden, json.loads(json.dumps(payload)))
