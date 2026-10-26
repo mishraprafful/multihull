@@ -1,4 +1,4 @@
-# 2026-10-26: Kubernetes GPU live run prepared (issue 68)
+# 2026-10-26: Kubernetes GPU live run prepared (issue 68, PR 178)
 
 - `live-k8s-gpu.yml` (manual) runs the GPU suite with spec `gpu-kubernetes`: Llama 3.1 8B, Kubernetes primary from the `GPU_KUBECONFIG` secret, Modal secondary, failover by `kubectl scale --replicas=0`, restore by scaling back. Never run; it waits for an owner cluster.
 - Cleanup does not rely on the suite: `Destroy`, a forced `kubectl delete` by the run's service label, the Modal sweep, then `live.kubernetes_gpu check` fails the job if anything is left.

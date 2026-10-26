@@ -66,7 +66,7 @@ State, decisions, next steps, verification commands and lessons for sessions wor
 
 0.2.0 shipped on 2026-10-12; issue 141 and milestone "0.2.0 - Stable launch" are closed.
 
-0.3.0, more providers (active milestone): RunPod `apply` is in PR 172; verify it live (owner: add a Restricted `RUNPOD_API_KEY` repository secret, then `gh workflow run live-smoke.yml`) and record the status code of the load balancer's `{"error":"no workers available"}` answer, which RunPod does not document, before giving RunPod an `edge_error` signature. Baseten and Replicate `apply` (issues 64, 65), Modal, Kubernetes and Docker in the conformance suite (issue 66), credential overrides (issue 67), Kubernetes GPU run on a real cluster (issue 68: `live-k8s-gpu.yml` is ready and waits for the owner's cluster; close the issue after a green run).
+0.3.0, more providers (active milestone): RunPod `apply` is in PR 172; verify it live (owner: add a Restricted `RUNPOD_API_KEY` repository secret, then `gh workflow run live-smoke.yml`) and record the status code of the load balancer's `{"error":"no workers available"}` answer, which RunPod does not document, before giving RunPod an `edge_error` signature. Baseten and Replicate `apply` (issues 64, 65), Modal, Kubernetes and Docker in the conformance suite (issue 66), credential overrides (issue 67), Kubernetes GPU run on a real cluster (issue 68: `live-k8s-gpu.yml` from PR 178 waits for the owner's cluster; close the issue after a green run).
 
 0.4.0, efficiency and scale: issues 69 to 77 (hedging, cost-aware placement, autoscaling, spot, warm check, Redis rate limits, `SO_REUSEPORT`, flapping scenario, nightly load) and Kubernetes Ingress or HTTPRoute (issue 116).
 
