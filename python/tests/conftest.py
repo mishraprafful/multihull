@@ -130,3 +130,16 @@ def assert_golden(name: str, actual: Any) -> None:
     else:
         expected = json.loads(path.read_text())
     assert actual == expected
+
+
+def llama_with_docker(llama_spec: ServiceSpec) -> ServiceSpec:
+    raw = llama_spec.model_dump(by_alias=True, exclude_none=True)
+    raw["targets"].append(
+        {
+            "provider": "docker-local",
+            "type": "docker",
+            "priority": 4,
+            "docker": {"hostPort": 18080, "network": "multihull", "env": {"MOCK": "1"}},
+        }
+    )
+    return ServiceSpec.model_validate(raw)
