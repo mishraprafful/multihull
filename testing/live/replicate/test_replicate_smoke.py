@@ -37,7 +37,7 @@ def test_deploy_pushes_the_model_and_waits_until_ready(deployment: ReplicateRun)
     assert endpoint["url"] == (
         f"https://api.replicate.com/v1/deployments/{ref.ids['owner']}/{ref.ids['deployment']}"
     )
-    assert endpoint["inject_headers"].keys() == {"Authorization", "Prefer"}
+    assert endpoint["inject_headers"].keys() == {"Authorization"}
 
 
 def test_a_prediction_through_the_router_returns_the_echo(

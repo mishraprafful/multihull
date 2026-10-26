@@ -40,7 +40,6 @@ CPU_HARDWARE = "cpu"
 MODEL_VISIBILITY = "private"
 MAX_MIN_INSTANCES = 5
 MAX_MAX_INSTANCES = 20
-SYNC_PREFERENCE = "wait=60"
 HTTP_TIMEOUT_SECONDS = 15.0
 PUSH_TIMEOUT_SECONDS = 3600.0
 LOGIN_TIMEOUT_SECONDS = 60.0
@@ -222,7 +221,7 @@ def bearer(value: str) -> dict[str, str]:
 
 def traffic_headers() -> dict[str, str]:
     value = os.environ.get(API_TOKEN_ENV, "").strip()
-    return {**(bearer(value) if value else {}), "Prefer": SYNC_PREFERENCE}
+    return bearer(value) if value else {}
 
 
 def problem_detail(response: httpx.Response) -> str:

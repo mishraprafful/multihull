@@ -400,7 +400,7 @@ def test_scale_patches_instances_and_refuses_what_replicate_cannot_do(
         provider.scale(Ref("replicate", "replicate", "replicate-echo"), 1, 2)
 
 
-def test_endpoint_is_the_deployment_with_bearer_auth_and_sync_mode(
+def test_endpoint_is_the_deployment_with_bearer_auth_and_the_router_owns_the_wait(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ref = Ref(
@@ -409,10 +409,10 @@ def test_endpoint_is_the_deployment_with_bearer_auth_and_sync_mode(
     monkeypatch.setenv(API_TOKEN_ENV, CALLER)
     endpoint = ReplicateProvider().endpoint(ref)
     assert endpoint.url == f"https://api.replicate.com/v1/deployments/acme/{DEPLOYMENT}"
-    assert endpoint.inject_headers == {"Authorization": f"Bearer {CALLER}", "Prefer": "wait=60"}
+    assert endpoint.inject_headers == {"Authorization": f"Bearer {CALLER}"}
     assert endpoint.edge_error is None
     monkeypatch.delenv(API_TOKEN_ENV)
-    assert ReplicateProvider().endpoint(ref).inject_headers == {"Prefer": "wait=60"}
+    assert ReplicateProvider().endpoint(ref).inject_headers == {}
 
 
 def test_credentials_health(

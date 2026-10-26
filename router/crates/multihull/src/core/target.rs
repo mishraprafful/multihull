@@ -1,3 +1,16 @@
+use std::time::Duration;
+
+pub const SYNC_WAIT_MARGIN: Duration = Duration::from_secs(5);
+pub const MAX_SYNC_WAIT_SECONDS: u64 = 60;
+
+pub fn sync_wait_preference(first_byte: Duration) -> String {
+    let seconds = first_byte
+        .saturating_sub(SYNC_WAIT_MARGIN)
+        .as_secs()
+        .clamp(1, MAX_SYNC_WAIT_SECONDS);
+    format!("wait={seconds}")
+}
+
 pub fn safe_request_target(path_and_query: &str) -> bool {
     if !path_and_query.starts_with('/') {
         return false;
@@ -82,6 +95,20 @@ mod tests {
         ] {
             assert!(!safe_request_target(target), "{target}");
         }
+    }
+
+    #[test]
+    fn the_sync_wait_ends_before_the_first_byte_timeout() {
+        let wait = |seconds| sync_wait_preference(Duration::from_secs(seconds));
+        assert_eq!(wait(30), "wait=25");
+        assert_eq!(wait(65), "wait=60");
+        assert_eq!(wait(600), "wait=60");
+        assert_eq!(wait(6), "wait=1");
+        assert_eq!(wait(2), "wait=1");
+        assert_eq!(
+            sync_wait_preference(Duration::from_millis(29_900)),
+            "wait=24"
+        );
     }
 
     #[test]

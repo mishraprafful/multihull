@@ -1,5 +1,6 @@
 use crate::core::outcome::AttemptError;
-use crate::core::snapshot::Endpoint;
+use crate::core::snapshot::{Endpoint, EndpointType};
+use crate::core::target::sync_wait_preference;
 use crate::tls::TlsError;
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, Uri};
@@ -135,6 +136,13 @@ pub async fn send(
                 map.insert(name, value);
             }
         }
+        if endpoint.kind == EndpointType::Replicate {
+            if let Ok(value) =
+                http::header::HeaderValue::from_str(&sync_wait_preference(first_byte_timeout))
+            {
+                map.insert(http::header::HeaderName::from_static("prefer"), value);
+            }
+        }
     }
     let request = match builder.body(Full::new(body)) {
         Ok(request) => request,
@@ -167,7 +175,6 @@ pub async fn send(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::snapshot::EndpointType;
     use http::header::{HeaderName, HeaderValue};
 
     #[test]
