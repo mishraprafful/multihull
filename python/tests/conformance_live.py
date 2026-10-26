@@ -124,29 +124,26 @@ def docker_case(monkeypatch: pytest.MonkeyPatch, _: ServiceSpec) -> Case:
     )
 
 
-def pod_control(api_client: Any, namespace: str, pod: str, body: dict[str, int]) -> bool:
+def pod_control(context: str, namespace: str, pod: str, body: dict[str, int]) -> bool:
+    path = f"/api/v1/namespaces/{namespace}/pods/{pod}:{MOCK_PORT}/proxy/__control"
     try:
-        api_client.call_api(
-            f"/api/v1/namespaces/{namespace}/pods/{pod}:{MOCK_PORT}/proxy/__control",
-            "POST",
-            header_params={"Content-Type": "application/json", "Accept": "application/json"},
-            body=body,
-            auth_settings=["BearerToken"],
-            _preload_content=False,
-            _request_timeout=REQUEST_TIMEOUT_SECONDS,
+        result = subprocess.run(
+            ["kubectl", "--context", context, "create", "--raw", path, "-f", "-"],
+            input=json.dumps(body),
+            capture_output=True,
+            text=True,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            check=False,
         )
-    except Exception:
+    except subprocess.TimeoutExpired:
         return False
-    return True
+    return result.returncode == 0
 
 
 def kubernetes_case(monkeypatch: pytest.MonkeyPatch, _: ServiceSpec) -> Case:
     namespace = os.environ.get(NAMESPACE_ENV) or "multihull-conformance"
-    block = {
-        "context": os.environ.get(KUBE_CONTEXT_ENV) or "kind-multihull-live",
-        "namespace": namespace,
-        "serviceType": "ClusterIP",
-    }
+    context = os.environ.get(KUBE_CONTEXT_ENV) or "kind-multihull-live"
+    block = {"context": context, "namespace": namespace, "serviceType": "ClusterIP"}
     spec = live_spec({"provider": "kind", "type": "kubernetes", "kubernetes": block})
     provider: Any = engine.live_provider_for(spec.targets[0])
     client = provider.client
@@ -165,7 +162,7 @@ def kubernetes_case(monkeypatch: pytest.MonkeyPatch, _: ServiceSpec) -> Case:
                 if pod.status.phase == "Running" and pod.metadata.deletion_timestamp is None
             ]
             return bool(running) and all(
-                pod_control(client.api_client, namespace, pod, knobs(serving)) for pod in running
+                pod_control(context, namespace, pod, knobs(serving)) for pod in running
             )
 
         assert until(timeout, accepted), f"no pod of {selector} accepted {knobs(serving)}"
