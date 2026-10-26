@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -41,6 +42,10 @@ class FakeInvalidError(Exception):
     pass
 
 
+class FakeNotFoundError(Exception):
+    pass
+
+
 class FakeModalClient:
     def __init__(self) -> None:
         self.error: BaseException | None = None
@@ -68,16 +73,31 @@ class FakeModal:
         self.log_since: datetime | None = None
         self.lookups: list[tuple[str, str | None]] = []
         self.deploy_error: BaseException | None = None
+        self.stopped: set[str] = set()
         self.App = self._app_type()
         self.Image = SimpleNamespace(from_registry=self._from_registry)
         self.Secret = SimpleNamespace(from_dict=FakeSecret)
         self.Cls = SimpleNamespace(from_name=self._cls_from_name)
         self.client = FakeModalClient()
         self.Client = SimpleNamespace(from_env=SimpleNamespace(aio=self._client_from_env))
-        self.exception = SimpleNamespace(AuthError=FakeAuthError, InvalidError=FakeInvalidError)
+        self.exception = SimpleNamespace(
+            AuthError=FakeAuthError, InvalidError=FakeInvalidError, NotFoundError=FakeNotFoundError
+        )
 
     async def _client_from_env(self) -> FakeModalClient:
         return self.client
+
+    def live_apps(self) -> set[str]:
+        return {name for name, _ in self.deployed} - self.stopped
+
+    def cli(self, command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if command[3:5] != ["app", "stop"]:
+            return subprocess.CompletedProcess(command, 2, "", f"unsupported: {command[3:]}")
+        name = command[5]
+        if name not in self.live_apps():
+            return subprocess.CompletedProcess(command, 1, "", f"No App with name '{name}' found")
+        self.stopped.add(name)
+        return subprocess.CompletedProcess(command, 0, "", "")
 
     def _from_registry(
         self,
@@ -105,11 +125,14 @@ class FakeModal:
                 if fake.deploy_error is not None:
                     raise fake.deploy_error
                 fake.deployed.append((name, environment_name))
+                fake.stopped.discard(name)
                 fake.builder_versions.append(os.environ.get("MODAL_IMAGE_BUILDER_VERSION"))
 
             @staticmethod
             def lookup(name: str, environment_name: str | None = None) -> Any:
                 fake.lookups.append((name, environment_name))
+                if name in fake.stopped:
+                    raise FakeNotFoundError(f"App '{name}' not found")
                 return SimpleNamespace(logs=SimpleNamespace(fetch=fake._fetch_logs))
 
         return App
