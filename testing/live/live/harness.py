@@ -45,6 +45,9 @@ class Settings:
     workdir: Path | None
     router_bin: Path | None
     spec_file: Path | None = None
+    kube_context: str | None = None
+    namespace: str | None = None
+    gpu_class: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -59,11 +62,14 @@ class Settings:
             image=os.environ.get("LIVE_MOCK_IMAGE"),
             workdir=Path(workdir).resolve() if workdir else None,
             router_bin=Path(router_bin).resolve() if router_bin else None,
+            kube_context=os.environ.get("LIVE_KUBE_CONTEXT") or None,
+            namespace=os.environ.get("LIVE_KUBE_NAMESPACE") or None,
+            gpu_class=os.environ.get("LIVE_GPU_CLASS") or None,
         )
 
     @property
     def context(self) -> str:
-        return f"kind-{self.cluster}"
+        return self.kube_context or f"kind-{self.cluster}"
 
     @property
     def spec_path(self) -> Path:
@@ -80,9 +86,13 @@ def render_spec(settings: Settings, workdir: Path) -> dict[str, Any]:
     document = settings.source_spec()
     document["name"] = settings.service
     document["container"]["image"] = settings.image_ref()
+    if settings.gpu_class:
+        document["resources"]["gpu"] = [settings.gpu_class]
     for target in document["targets"]:
         if target["type"] == "kubernetes":
             target["kubernetes"]["context"] = settings.context
+            if settings.namespace:
+                target["kubernetes"]["namespace"] = settings.namespace
     workdir.mkdir(parents=True, exist_ok=True)
     (workdir / ".multihull").mkdir(exist_ok=True)
     (workdir / LOG_DIR).mkdir(exist_ok=True)
@@ -128,8 +138,11 @@ class Kind:
     def reachable(self) -> bool:
         return self.kubectl("get", "nodes", "-o", "name", timeout=30).returncode == 0
 
+    def namespace_exists(self) -> bool:
+        return self.kubectl("get", "namespace", self.namespace, "-o", "name").returncode == 0
+
     def ensure_namespace(self) -> None:
-        if self.kubectl("get", "namespace", self.namespace).returncode != 0:
+        if not self.namespace_exists():
             result = self.kubectl("create", "namespace", self.namespace)
             if result.returncode != 0:
                 raise RuntimeError(f"cannot create namespace {self.namespace}: {result.stderr}")
@@ -146,9 +159,13 @@ class Kind:
         if result.returncode != 0:
             raise RuntimeError(f"kubectl scale failed: {result.stderr}")
 
-    def rollout_status(self, deployment: str, timeout: str = "180s") -> None:
+    def rollout_status(self, deployment: str, seconds: float = 180) -> None:
         result = self.kubectl(
-            "rollout", "status", f"deployment/{deployment}", f"--timeout={timeout}", timeout=240
+            "rollout",
+            "status",
+            f"deployment/{deployment}",
+            f"--timeout={max(int(seconds), 1)}s",
+            timeout=seconds + 60,
         )
         if result.returncode != 0:
             raise RuntimeError(f"rollout of {deployment} not complete: {result.stderr}")
@@ -187,6 +204,10 @@ class LiveDeployment:
         self.secondary_type = str(ordered[1]["type"])
         kube = next((t for t in document["targets"] if t["type"] == "kubernetes"), None)
         self.namespace = str(kube["kubernetes"]["namespace"]) if kube else ""
+
+    @property
+    def providers(self) -> list[str]:
+        return [str(t["provider"]) for t in self.document["targets"]]
 
     def providers_of_type(self, provider_type: str) -> list[str]:
         return [str(t["provider"]) for t in self.document["targets"] if t["type"] == provider_type]

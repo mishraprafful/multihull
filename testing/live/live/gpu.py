@@ -4,25 +4,28 @@ import os
 import secrets
 import time
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from e2e.client import Outcome
 from live.capture import modal_dashboard_url, modal_state
-from live.harness import LiveDeployment
+from live.harness import Kind, LiveDeployment
 from live.summary import GpuCost, ModalInfo, RunSummary
-from live.sweep import list_apps, stale_apps
+from live.sweep import list_apps
 
 GPU = "L4"
-L4_HOURLY_USD = 0.80
-PRICE_DATE = "2026-10-08"
+MODAL_HOURLY_USD = {"L4": 0.80, "A10G": 1.10, "A100-40": 2.10, "A100-80": 2.50, "H100": 3.95}
+PRICE_DATE = "2026-10-26"
 PRICE_SOURCE = "https://modal.com/pricing"
 BUDGET_USD = 5.0
 DEFAULT_MAX_MINUTES = 20
 MAX_MINUTES_ENV = "LIVE_MAX_MINUTES"
 API_KEYS_ENV = "LIVE_API_KEYS"
-DEPLOY_READY_SECONDS = 15 * 60
+DEPLOY_READY_SECONDS = 20 * 60
 EJECTION_SECONDS = 180
+ROLLOUT_SECONDS = 15 * 60
+CIRCUIT_CLOSE_SECONDS = 180
+MODAL_URL_SUFFIX = ".modal.run"
+CLUSTER_DNS_SUFFIX = ".svc.cluster.local"
 ROUTER_TUNING: dict[str, dict[str, bool | int | float | str]] = {"timeouts": {"first_byte": 30}}
 READY_HEALTH = "ready"
 ROUTABLE_HEALTH = frozenset({READY_HEALTH, "degraded", "draining", "unspecified"})
@@ -83,11 +86,11 @@ def served_model(document: dict[str, Any]) -> str:
     raise ValueError("container.command names no model")
 
 
-def new_cost(targets: int, max_minutes: int) -> GpuCost:
+def new_cost(targets: int, max_minutes: int, gpu: str = GPU) -> GpuCost:
     return GpuCost(
-        gpu=GPU,
+        gpu=gpu,
         targets=targets,
-        hourly_usd=L4_HOURLY_USD,
+        hourly_usd=MODAL_HOURLY_USD[gpu],
         price_date=PRICE_DATE,
         price_source=PRICE_SOURCE,
         budget_usd=BUDGET_USD,
@@ -95,8 +98,37 @@ def new_cost(targets: int, max_minutes: int) -> GpuCost:
     )
 
 
-def worst_case_usd(targets: int, job_minutes: int) -> float:
-    return targets * job_minutes / 60 * L4_HOURLY_USD
+def worst_case_usd(targets: int, job_minutes: int, gpu: str = GPU) -> float:
+    return targets * job_minutes / 60 * MODAL_HOURLY_USD[gpu]
+
+
+def gpu_class(document: dict[str, Any]) -> str:
+    classes = document["resources"].get("gpu") or [GPU]
+    return str(classes[0])
+
+
+def primary_type(document: dict[str, Any]) -> str:
+    primary = min(document["targets"], key=lambda t: int(t.get("priority", 0)))
+    return str(primary["type"])
+
+
+def restores_primary(document: dict[str, Any]) -> bool:
+    return primary_type(document) == "kubernetes"
+
+
+def stop_primary(deployment: LiveDeployment, cluster: Kind | None) -> str:
+    if deployment.primary_type == "modal":
+        return f"modal app stop {deployment.stop_modal_app(deployment.primary)}"
+    if deployment.primary_type == "kubernetes" and cluster is not None:
+        cluster.scale(deployment.service, 0)
+        return f"kubectl scale deployment/{deployment.service} --replicas=0"
+    raise ValueError(f"cannot stop a {deployment.primary_type} primary")
+
+
+def reachable_from_runner(provider_type: str, url: str) -> bool:
+    if provider_type == "modal":
+        return url.endswith(MODAL_URL_SUFFIX)
+    return url.startswith(("http://", "https://")) and CLUSTER_DNS_SUFFIX not in url
 
 
 def modal_info(deployment: LiveDeployment, provider: str) -> ModalInfo:
@@ -131,18 +163,17 @@ def capture_modal_apps(
         info.app_id = info.app_id or app_id
 
 
-def running_apps(
-    prefix: str, environment: str, lister: Callable[[str], list[dict[str, Any]]] = list_apps
-) -> list[str]:
-    now = datetime.now(UTC) + timedelta(seconds=1)
-    return sorted(
-        str(app["description"])
-        for app in stale_apps(lister(environment), prefix, timedelta(0), now)
-    )
-
-
 def edge_not_found(outcomes: Sequence[Outcome]) -> list[str]:
     return [outcome.describe() for outcome in outcomes if outcome.status == 404]
+
+
+def taking_traffic(entry: dict[str, Any]) -> bool:
+    probe = entry.get("probe") or {}
+    return (
+        entry.get("health") == READY_HEALTH
+        and entry.get("circuit") in (None, "closed")
+        and probe.get("state") == "up"
+    )
 
 
 def ejected(entry: dict[str, Any]) -> bool:

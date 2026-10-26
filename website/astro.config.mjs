@@ -54,6 +54,10 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Testing',
+          items: [{ label: 'Kubernetes GPU live run', slug: 'docs/testing/kubernetes-gpu' }],
+        },
+        {
           label: 'Reference',
           items: [
             { label: 'CLI', slug: 'docs/reference/cli' },
