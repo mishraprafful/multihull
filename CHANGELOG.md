@@ -11,6 +11,10 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - `live-smoke.yml` job `runpod-smoke` (spec `kind-runpod`) and a daily RunPod endpoint sweep, both skipped without the `RUNPOD_API_KEY` secret (#63).
 - `live-k8s-gpu.yml`: a manual run of Llama 3.1 8B on a real GPU Kubernetes cluster (priority 1) with Modal (priority 2): cluster preflight, failover to Modal and back with zero client errors, forced cleanup of both providers and a final check that nothing is left. A least-privilege `rbac.yaml`, a kubeconfig script and the runbook at `docs/testing/kubernetes-gpu`. Skipped without `GPU_KUBECONFIG`; not yet run (#68).
 
+### Changed
+
+- Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
+
 ## [0.2.0] - 2026-10-12
 
 Stable launch. Human-facing notes: [docs/releases/0.2.0.md](docs/releases/0.2.0.md).
