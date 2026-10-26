@@ -67,5 +67,4 @@ def test_destroy_scales_to_zero_and_defers_deletion(
     assert result.returncode != 0, output
     assert "offline and unused for 15 minutes" in output
     observed = ReplicateProvider(dry_run=False).status(ref)
-    assert observed.phase == "Pending", observed.message
-    assert observed.message == "min_instances is 0; no instance is kept warm"
+    assert observed.phase == "Draining", observed.message

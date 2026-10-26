@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from multihull.providers.replicate import (
+    DEFERRED_DELETE_STATUSES,
     HTTP_TIMEOUT_SECONDS,
     ReplicateApi,
     ReplicateApiError,
@@ -56,6 +57,8 @@ def sweep(api: ReplicateApi, deployment: Mapping[str, Any]) -> str:
     try:
         api.call("DELETE", path, missing_ok=True)
     except ReplicateApiError as exc:
+        if exc.status not in DEFERRED_DELETE_STATUSES:
+            raise
         return f"delete deferred: {exc}"
     return "deleted"
 

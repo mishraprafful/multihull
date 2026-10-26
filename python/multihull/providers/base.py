@@ -136,6 +136,10 @@ class ScaleRefused(ValueError):
     pass
 
 
+class DestroyDeferred(RuntimeError):
+    pass
+
+
 @runtime_checkable
 class Provider(Protocol):
     type: ClassVar[ProviderType]

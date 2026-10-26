@@ -4,14 +4,22 @@ import hashlib
 import json
 from collections.abc import Callable, Collection, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 
 from multihull.providers import create
-from multihull.providers.base import Observed, Plan, Provider, Ref, Target, error_reason
+from multihull.providers.base import (
+    DestroyDeferred,
+    Observed,
+    Plan,
+    Provider,
+    Ref,
+    Target,
+    error_reason,
+)
 from multihull.spec import ServiceSpec, TargetSpec
 from multihull.state.base import StateBackend, StateRecord
 
@@ -48,6 +56,7 @@ class DestroyResult:
     type: str
     ok: bool
     message: str = ""
+    draining: bool = False
 
 
 @dataclass
@@ -260,6 +269,8 @@ def destroy(
                 else factory(ref)
             )
             provider.destroy(ref)
+        except DestroyDeferred as exc:
+            return DestroyResult(record.provider, ref.type, False, error_reason(exc), True)
         except Exception as exc:
             return DestroyResult(record.provider, ref.type, False, error_reason(exc))
         return DestroyResult(record.provider, ref.type, True, "destroyed")
@@ -268,9 +279,11 @@ def destroy(
         results = list(pool.map(run, records))
 
     with state.lock():
-        for result in results:
+        for result, record in zip(results, records, strict=True):
             if result.ok:
                 state.delete(service, result.provider)
+            elif result.draining:
+                state.put(replace(record, last_status="Draining"))
     return results
 
 

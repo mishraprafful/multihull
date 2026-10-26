@@ -58,6 +58,7 @@ def test_sweeper_scales_warm_deployments_down_and_deletes_offline_ones(
         deployment("multihull-live-warm-replicate", "2026-10-26T09:00:00Z", warm=1),
         deployment("multihull-live-idle-replicate", "2026-10-26T09:00:00Z"),
         deployment("multihull-live-busy-replicate", "2026-10-26T09:00:00Z"),
+        deployment("multihull-live-down-replicate", "2026-10-26T09:00:00Z"),
     ]
     writes: list[tuple[str, str, Any]] = []
 
@@ -66,12 +67,14 @@ def test_sweeper_scales_warm_deployments_down_and_deletes_offline_ones(
             return httpx.Response(200, json={"next": None, "previous": None, "results": listed})
         body = json.loads(request.content) if request.content else None
         writes.append((request.method, request.url.path, body))
+        if request.url.path.endswith("down-replicate"):
+            return httpx.Response(503, json={"title": "Unavailable"})
         if request.url.path.endswith("busy-replicate"):
             return httpx.Response(409, json={"title": "Conflict", "detail": "used recently"})
         return httpx.Response(204 if request.method == "DELETE" else 200, json={})
 
     api = api_answering(httpx.MockTransport(answer))
-    assert main(["--prefix", "multihull-live-"], api) == 0
+    assert main(["--prefix", "multihull-live-"], api) == 1
     assert writes == [
         (
             "PATCH",
@@ -80,13 +83,15 @@ def test_sweeper_scales_warm_deployments_down_and_deletes_offline_ones(
         ),
         ("DELETE", "/v1/deployments/acme/multihull-live-idle-replicate", None),
         ("DELETE", "/v1/deployments/acme/multihull-live-busy-replicate", None),
+        ("DELETE", "/v1/deployments/acme/multihull-live-down-replicate", None),
     ]
     assert capsys.readouterr().out.splitlines() == [
         "acme/multihull-live-warm-replicate scaled to zero; a later sweep deletes it",
         "acme/multihull-live-idle-replicate deleted",
         "acme/multihull-live-busy-replicate delete deferred: "
         "Replicate API 409: Conflict: used recently",
-        "3 deployment(s) matched multihull-live-, 0 failed",
+        "acme/multihull-live-down-replicate failed: Replicate API 503: Unavailable",
+        "4 deployment(s) matched multihull-live-, 1 failed",
     ]
 
 

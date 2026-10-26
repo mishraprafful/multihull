@@ -70,6 +70,7 @@ class FakeReplicate:
         self.calls: list[tuple[str, str]] = []
         self.page_size = 100
         self.failure: httpx.Response | None = None
+        self.delete_failure: httpx.Response | None = None
 
     def client(self) -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(self))
@@ -210,6 +211,8 @@ class FakeReplicate:
         return httpx.Response(200, json=deployment.view())
 
     def delete(self, key: str, deployment: Deployment) -> httpx.Response:
+        if self.delete_failure is not None:
+            return self.delete_failure
         quiet_since = max(
             filter(None, [deployment.offline_since, deployment.last_used]), default=None
         )

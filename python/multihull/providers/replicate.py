@@ -13,6 +13,7 @@ import httpx
 from multihull.build_context import ContextScan, scan_context
 from multihull.providers.base import (
     CredHealth,
+    DestroyDeferred,
     Endpoint,
     GPUOffer,
     Observed,
@@ -44,6 +45,7 @@ HTTP_TIMEOUT_SECONDS = 15.0
 PUSH_TIMEOUT_SECONDS = 3600.0
 LOGIN_TIMEOUT_SECONDS = 60.0
 PERMANENT_SCALE_STATUSES = frozenset({400, 422})
+DEFERRED_DELETE_STATUSES = frozenset({400, 409, 422})
 DEPLOYMENT_FIELDS = ("version", "hardware", "min_instances", "max_instances")
 OWNER_PLACEHOLDER = "{owner}"
 VERSION_PLACEHOLDER = "{version}"
@@ -60,7 +62,7 @@ class ReplicateApiError(RuntimeError):
         self.status = status
 
 
-class DeletionDeferred(RuntimeError):
+class DeletionDeferred(DestroyDeferred):
     pass
 
 
@@ -472,6 +474,8 @@ class ReplicateProvider:
         try:
             self.api.call("DELETE", f"/deployments/{owner}/{name}", missing_ok=True)
         except ReplicateApiError as exc:
+            if exc.status not in DEFERRED_DELETE_STATUSES:
+                raise
             raise DeletionDeferred(
                 f"Replicate deployment {owner}/{name} is scaled to zero; Replicate deletes a "
                 "deployment only after it has been offline and unused for 15 minutes, so run "
@@ -496,6 +500,10 @@ class ReplicateProvider:
         release = release_of(current)
         settings = live_settings(current)
         warm = int(settings.get("min_instances") or 0)
+        if int(settings.get("max_instances") or 0) == 0:
+            return Observed(
+                "Draining", 0, 0, "max_instances is 0; waiting for Replicate to allow deletion"
+            )
         running = str(settings.get("version") or "")
         applied = ref.ids.get(VERSION_KEY)
         if applied and running != applied:

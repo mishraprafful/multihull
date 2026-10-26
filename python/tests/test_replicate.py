@@ -17,6 +17,7 @@ from multihull.providers.replicate import (
     CLI_AUTH_TOKEN_ENV,
     CogCli,
     DeletionDeferred,
+    ReplicateApiError,
     ReplicateProvider,
     context_scan,
     render_payload,
@@ -345,6 +346,8 @@ def test_destroy_scales_to_zero_then_deletes_once_offline_for_15_minutes(
         provider.destroy(ref)
     settings = fake.deployment_settings(DEPLOYMENT)
     assert (settings["min_instances"], settings["max_instances"]) == (0, 0)
+    observed = provider.status(ref)
+    assert (observed.phase, observed.ready_replicas) == ("Draining", 0)
     fake.advance(timedelta(minutes=14))
     with pytest.raises(DeletionDeferred):
         provider.destroy(ref)
@@ -371,7 +374,12 @@ def test_engine_destroy_keeps_the_state_record_while_deletion_is_deferred(
     [deferred] = engine.destroy(spec.name, state, providers=providers)
     assert not deferred.ok
     assert "run destroy again" in deferred.message
-    assert state.get(spec.name, "replicate") is not None
+    record = state.get(spec.name, "replicate")
+    assert record is not None
+    assert record.last_status == "Draining"
+    snapshot = discovery.snapshot_after_destroy(spec, state, providers, None)
+    [endpoint] = snapshot["routes"][0]["endpoints"]
+    assert endpoint["health"] == "draining"
     fake.advance(timedelta(minutes=15))
     [done] = engine.destroy(spec.name, state, providers=providers)
     assert done.ok
@@ -559,3 +567,15 @@ def test_the_plan_notes_a_missing_or_unsafe_context(
         f"build.context {tmp_path / 'echo'} ships .multihull/ (Multihull state, plans and "
         "snapshots); exclude it in .dockerignore"
     ]
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
+def test_destroy_surfaces_delete_errors_other_than_a_refusal(
+    provider: ReplicateProvider, fake: FakeReplicate, target: Target, status: int
+) -> None:
+    ref = provider.apply(target, None)
+    fake.delete_failure = problem(status, "Failure", "not a deletion refusal")
+    with pytest.raises(ReplicateApiError) as raised:
+        provider.destroy(ref)
+    assert not isinstance(raised.value, DeletionDeferred)
+    assert raised.value.status == status
