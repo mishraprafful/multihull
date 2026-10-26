@@ -289,6 +289,7 @@ def test_rediscover_pages_through_endpoints_by_name(
         "name": "multihull-llama-8b-runpod-eu",
         "url": created.ids["url"],
         "health_path": "/health",
+        "secrets": "multihull_llama_8b_runpod_eu_hf_token",
     }
     assert RunpodProvider(False, "runpod-us", fake.client()).rediscover("llama-8b") is None
 
@@ -360,3 +361,13 @@ def test_plan_payload_names_secrets_without_values(target: Target, runpod_env: N
         for name in target.service.container.secrets
     ]
     assert MIRRORED not in json.dumps(payload)
+
+
+def test_a_rediscovered_ref_destroys_the_mirrored_secrets(
+    provider: RunpodProvider, fake: FakeRunpod, target: Target
+) -> None:
+    provider.apply(target, None)
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert (fake.endpoints, fake.secrets) == ({}, {})

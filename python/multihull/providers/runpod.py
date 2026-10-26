@@ -55,6 +55,7 @@ HEALTH_PATH_KEY = "health_path"
 DIGEST_KEY = "spec"
 SECRETS_KEY = "secrets"
 UNSAFE_SECRET_CHARS = re.compile(r"[^A-Za-z0-9_]")
+SECRET_REFERENCE = re.compile(r"\{\{ RUNPOD_SECRET_([A-Za-z0-9_]+) \}\}")
 
 
 class RunpodApiError(RuntimeError):
@@ -86,6 +87,11 @@ def secret_store_name(desired: Target, secret: str) -> str:
 
 def secret_reference(store_name: str) -> str:
     return "{{ RUNPOD_SECRET_" + store_name + " }}"
+
+
+def referenced_secrets(env: Mapping[str, Any]) -> list[str]:
+    found = (SECRET_REFERENCE.fullmatch(str(value)) for value in env.values())
+    return [match.group(1) for match in found if match]
 
 
 def gpu_pools(desired: Target) -> list[str]:
@@ -554,4 +560,7 @@ class RunpodProvider:
             URL_KEY: base_url(found),
             HEALTH_PATH_KEY: str(env.get(HEALTH_CHECK_PATH_ENV) or DEFAULT_HEALTH_PATH),
         }
+        stored = referenced_secrets(env)
+        if stored:
+            ids[SECRETS_KEY] = ",".join(stored)
         return Ref(provider=self.provider_name, type="runpod", service=service, ids=ids)
