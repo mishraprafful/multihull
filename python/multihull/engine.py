@@ -78,8 +78,12 @@ def provider_kwargs(target: TargetSpec, live: bool) -> dict[str, Any]:
     return {}
 
 
+def credential_kwargs(target: TargetSpec) -> dict[str, str]:
+    return {} if target.credentials is None else {"credentials": target.credentials}
+
+
 def provider_for(target: TargetSpec, live: bool = False) -> Provider:
-    return create(target.type, **provider_kwargs(target, live))
+    return create(target.type, **provider_kwargs(target, live), **credential_kwargs(target))
 
 
 def live_provider_for(target: TargetSpec) -> Provider:

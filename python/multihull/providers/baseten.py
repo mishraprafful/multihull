@@ -14,7 +14,7 @@ from multihull.providers.base import (
     Plan,
     Ref,
     Target,
-    env_credential_health,
+    credential_health,
 )
 from multihull.spec import GPU
 
@@ -77,6 +77,9 @@ def render_truss_config(desired: Target) -> dict[str, Any]:
 class BasetenProvider:
     type: ClassVar = "baseten"
 
+    def __init__(self, credentials: str | None = None) -> None:
+        self.credentials = credentials
+
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         return Plan(provider=desired.provider, type=self.type, payload=render_truss_config(desired))
 
@@ -103,7 +106,7 @@ class BasetenProvider:
         return [GPUOffer(gpu=gpu, available=True) for gpu in BASETEN_ACCELERATOR]
 
     def credentials_health(self) -> CredHealth:
-        return env_credential_health(API_KEY_ENV, self.type)
+        return credential_health(self.credentials, API_KEY_ENV, self.type)
 
     def rediscover(self, service: str) -> Ref | None:
         return None

@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 
 import httpx
 
+from multihull.credentials import CredentialError, read_token, token_origin
 from multihull.providers.base import (
     CredHealth,
     Endpoint,
@@ -19,8 +20,9 @@ from multihull.providers.base import (
     Ref,
     ScaleRefused,
     Target,
-    env_credential_health,
+    credential_health,
     redact_env,
+    redact_token,
     resolve_secret_values,
 )
 from multihull.spec import GPU, RunpodBlock
@@ -212,24 +214,26 @@ def ref_for(
     return Ref(provider=desired.provider, type="runpod", service=desired.name, ids=ids)
 
 
-def redact(text: str) -> str:
-    return redact_env(text, [API_KEY_ENV, ENDPOINT_API_KEY_ENV])
+def redact(text: str, credentials: str | None = None) -> str:
+    return redact_token(redact_env(text, [API_KEY_ENV, ENDPOINT_API_KEY_ENV]), credentials)
 
 
-def api_key() -> str:
-    value = os.environ.get(API_KEY_ENV, "").strip()
-    if not value:
-        raise RuntimeError(f"{API_KEY_ENV} is not set; RunPod credentials missing")
-    return value
+def api_key(credentials: str | None = None) -> str:
+    return read_token(credentials, API_KEY_ENV)
 
 
 def bearer(value: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {value}"}
 
 
-def traffic_headers() -> dict[str, str]:
-    value = (os.environ.get(ENDPOINT_API_KEY_ENV) or os.environ.get(API_KEY_ENV) or "").strip()
-    return bearer(value) if value else {}
+def traffic_headers(credentials: str | None = None) -> dict[str, str]:
+    value = os.environ.get(ENDPOINT_API_KEY_ENV, "").strip()
+    if not value:
+        try:
+            value = api_key(credentials)
+        except CredentialError:
+            return {}
+    return bearer(value)
 
 
 def problem_detail(response: httpx.Response) -> str:
@@ -275,8 +279,9 @@ def waiting_message(summary: Mapping[str, Any]) -> str:
 
 
 class RunpodApi:
-    def __init__(self, http: httpx.Client) -> None:
+    def __init__(self, http: httpx.Client, credentials: str | None = None) -> None:
         self.http = http
+        self.credentials = credentials
 
     def call(
         self,
@@ -287,12 +292,18 @@ class RunpodApi:
         missing_ok: bool = False,
     ) -> Any:
         response = self.http.request(
-            method, f"{API_URL}{path}", json=body, params=params, headers=bearer(api_key())
+            method,
+            f"{API_URL}{path}",
+            json=body,
+            params=params,
+            headers=bearer(api_key(self.credentials)),
         )
         if missing_ok and response.status_code == 404:
             return None
         if response.is_error:
-            raise RunpodApiError(response.status_code, redact(problem_detail(response)))
+            raise RunpodApiError(
+                response.status_code, redact(problem_detail(response), self.credentials)
+            )
         return response.json() if response.content else None
 
     def endpoints(self) -> Iterator[dict[str, Any]]:
@@ -339,11 +350,17 @@ class RunpodApi:
         timeout = httpx.Timeout(HTTP_TIMEOUT_SECONDS, read=LOG_IDLE_SECONDS)
         try:
             with self.http.stream(
-                "GET", url, params={"since": start}, headers=bearer(api_key()), timeout=timeout
+                "GET",
+                url,
+                params={"since": start},
+                headers=bearer(api_key(self.credentials)),
+                timeout=timeout,
             ) as response:
                 if response.is_error:
                     response.read()
-                    raise RunpodApiError(response.status_code, redact(problem_detail(response)))
+                    raise RunpodApiError(
+                        response.status_code, redact(problem_detail(response), self.credentials)
+                    )
                 for raw in response.iter_lines():
                     event = log_event(raw)
                     if event is None:
@@ -363,10 +380,12 @@ class RunpodProvider:
         dry_run: bool = True,
         provider_name: str = "runpod",
         http_client: httpx.Client | None = None,
+        credentials: str | None = None,
     ) -> None:
         self.dry_run = dry_run
         self.provider_name = provider_name
         self._http = http_client
+        self.credentials = credentials
 
     @property
     def http(self) -> httpx.Client:
@@ -376,7 +395,7 @@ class RunpodProvider:
 
     @property
     def api(self) -> RunpodApi:
-        return RunpodApi(self.http)
+        return RunpodApi(self.http, self.credentials)
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         return Plan(
@@ -462,7 +481,7 @@ class RunpodProvider:
                 return Observed(phase="Failed", message=f"RunPod endpoint {endpoint_id} not found")
             listing = self.api.call("GET", f"/serverless/{endpoint_id}/workers")
         except (httpx.HTTPError, RuntimeError) as exc:
-            return Observed(phase="Unknown", message=redact(str(exc)))
+            return Observed(phase="Unknown", message=redact(str(exc), self.credentials))
         summary = listing.get("summary") or {}
         ready = int(summary.get("running", 0)) + int(summary.get("idle", 0))
         minimum = int((endpoint.get("workers") or {}).get("min", 0))
@@ -474,7 +493,9 @@ class RunpodProvider:
 
     def probe(self, url: str, ready: int, desired: int) -> Observed:
         try:
-            response = self.http.get(url, headers=traffic_headers(), timeout=HEALTH_TIMEOUT_SECONDS)
+            response = self.http.get(
+                url, headers=traffic_headers(self.credentials), timeout=HEALTH_TIMEOUT_SECONDS
+            )
         except httpx.HTTPError as exc:
             return Observed(
                 "Pending", 0, desired, f"{ready} worker(s) up, health probe {type(exc).__name__}"
@@ -518,27 +539,30 @@ class RunpodProvider:
 
     def endpoint(self, ref: Ref) -> Endpoint:
         url = ref.ids.get(URL_KEY) or endpoint_url(ref.ids.get(ENDPOINT_KEY, "{endpointId}"))
-        return Endpoint(url=url, inject_headers=traffic_headers(), region=ref.ids.get("region"))
+        return Endpoint(
+            url=url, inject_headers=traffic_headers(self.credentials), region=ref.ids.get("region")
+        )
 
     def gpu_inventory(self) -> list[GPUOffer]:
         return [GPUOffer(gpu=gpu, available=True) for gpu in RUNPOD_POOL]
 
     def credentials_health(self) -> CredHealth:
-        if not os.environ.get(API_KEY_ENV, "").strip():
-            return env_credential_health(API_KEY_ENV, self.type)
+        present = credential_health(self.credentials, API_KEY_ENV, self.type)
+        if not present.ok:
+            return present
+        origin = token_origin(self.credentials, API_KEY_ENV)
         try:
             self.api.call("GET", "/serverless", params={"limit": 1})
         except RunpodApiError as exc:
             if exc.status == 401:
-                return CredHealth(ok=False, message=f"RunPod rejected {API_KEY_ENV}: {exc}")
+                return CredHealth(ok=False, message=f"RunPod rejected {origin}: {exc}")
             if exc.status == 403:
-                return CredHealth(ok=False, message=f"{API_KEY_ENV} lacks Serverless access: {exc}")
-            return CredHealth(ok=False, message=f"could not verify {API_KEY_ENV}: {exc}")
+                return CredHealth(ok=False, message=f"{origin} lacks Serverless access: {exc}")
+            return CredHealth(ok=False, message=f"could not verify {origin}: {exc}")
         except httpx.HTTPError as exc:
-            return CredHealth(
-                ok=False, message=redact(f"could not reach RunPod: {type(exc).__name__}: {exc}")
-            )
-        return CredHealth(ok=True, message=f"RunPod accepted {API_KEY_ENV}")
+            reason = f"could not reach RunPod: {type(exc).__name__}: {exc}"
+            return CredHealth(ok=False, message=redact(reason, self.credentials))
+        return CredHealth(ok=True, message=f"RunPod accepted {origin}")
 
     def rediscover(self, service: str) -> Ref | None:
         if self.dry_run:

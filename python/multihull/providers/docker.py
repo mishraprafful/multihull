@@ -7,8 +7,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 import httpx
-from docker.errors import NotFound
+from docker.errors import DockerException, NotFound
 
+from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers.base import (
     PROVIDER_LABEL,
     SERVICE_LABEL,
@@ -168,6 +169,29 @@ def ref_from_container(
     )
 
 
+def registry_config(credentials: str) -> Any:
+    from docker import auth
+
+    source = CredentialSource.parse(credentials)
+    try:
+        document = json.loads(source.read())
+    except ValueError:
+        raise CredentialError(f"credentials {source} is not Docker config.json JSON") from None
+    if not isinstance(document, dict) or not document:
+        raise CredentialError(f"credentials {source} is not a Docker config.json object")
+    try:
+        return auth.load_config(config_dict=document)
+    except DockerException as exc:
+        raise CredentialError(f"credentials {source}: {type(exc).__name__}") from None
+
+
+def registry_auth(credentials: str, image: str) -> dict[str, Any] | None:
+    from docker import auth
+
+    registry, _ = auth.resolve_repository_name(image)
+    return registry_config(credentials).resolve_authconfig(registry)
+
+
 def default_client() -> Any:
     import docker
 
@@ -187,11 +211,19 @@ class DockerProvider:
         http_client: httpx.Client | None = None,
         client_factory: Callable[[], Any] | None = None,
         provider_name: str | None = None,
+        credentials: str | None = None,
     ) -> None:
         self._client = client
         self._http = http_client
         self._client_factory = client_factory
         self.provider_name = provider_name
+        self.credentials = credentials
+
+    def pull_auth(self, image: str) -> dict[str, Any]:
+        if self.credentials is None:
+            return {}
+        auth = registry_auth(self.credentials, image)
+        return {"auth_config": auth} if auth else {}
 
     @property
     def client(self) -> Any:
@@ -231,7 +263,7 @@ class DockerProvider:
                 )
             existing.remove(force=True)
         if block.pull:
-            self.client.images.pull(kwargs["image"])
+            self.client.images.pull(kwargs["image"], **self.pull_auth(kwargs["image"]))
         run_kwargs = dict(kwargs)
         run_kwargs["labels"] = {**kwargs["labels"], CONFIG_HASH_LABEL: digest}
         if secrets:
@@ -297,12 +329,20 @@ class DockerProvider:
         return []
 
     def credentials_health(self) -> CredHealth:
+        registry = ""
+        if self.credentials is not None:
+            try:
+                registry_config(self.credentials)
+            except CredentialError as exc:
+                return CredHealth(ok=False, message=str(exc))
+            registry = f", registry auth from {CredentialSource.parse(self.credentials)}"
         try:
             self.client.ping()
             version = str(self.client.version().get("Version", "unknown"))
         except Exception as exc:
             return CredHealth(ok=False, message=f"docker daemon unreachable: {exc}")
-        return CredHealth(ok=True, message=f"docker daemon {version} reachable", identity=version)
+        message = f"docker daemon {version} reachable{registry}"
+        return CredHealth(ok=True, message=message, identity=version)
 
     def rediscover(self, service: str) -> Ref | None:
         selectors = [f"{SERVICE_LABEL}={service}", f"{OWNER_LABEL}={OWNER}"]
