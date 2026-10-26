@@ -275,6 +275,14 @@ def server_instance(app_name: str, environment: str | None) -> Any:
     return modal.Cls.from_name(app_name, SERVER_CLASS_NAME, environment_name=environment)()
 
 
+def deployed_web_url(app_name: str, environment: str | None) -> str | None:
+    try:
+        url = server_instance(app_name, environment).serve.get_web_url()
+    except Exception:
+        return None
+    return str(url) if url else None
+
+
 def stop_app(app_name: str, environment: str) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "modal", "app", "stop", app_name, "--env", environment, "--yes"],
@@ -417,7 +425,11 @@ class ModalProvider:
             modal.App.lookup(name)
         except Exception:
             return None
-        return Ref(provider=self.provider_name, type="modal", service=service, ids={"app": name})
+        ids = {"app": name}
+        web_url = deployed_web_url(name, None)
+        if web_url:
+            ids["web_url"] = web_url
+        return Ref(provider=self.provider_name, type="modal", service=service, ids=ids)
 
 
 def fetch_logs_with_sdk(app_name: str, environment: str | None, since: timedelta) -> Iterator[str]:

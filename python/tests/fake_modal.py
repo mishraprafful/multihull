@@ -126,7 +126,8 @@ class FakeModal:
             fake.autoscaler = kwargs
 
         stats = SimpleNamespace(
-            get_current_stats=lambda: SimpleNamespace(num_total_runners=fake.runners)
+            get_current_stats=lambda: SimpleNamespace(num_total_runners=fake.runners),
+            get_web_url=lambda: f"https://ws--{app_name}.modal.run",
         )
         instance = SimpleNamespace(update_autoscaler=update_autoscaler, serve=stats)
         return lambda: instance

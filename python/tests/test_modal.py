@@ -409,3 +409,14 @@ def test_destroy_stops_the_app_with_the_modal_cli(
     else:
         ModalProvider(dry_run=False).destroy(ref)
     assert calls[0][1:] == ["-m", "modal", "app", "stop", "multihull-x", "--env", "main", "--yes"]
+
+
+def test_rediscover_reads_the_deployed_web_url(
+    fake_modal: FakeModal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MODAL_WORKSPACE", raising=False)
+    provider = ModalProvider(dry_run=False, provider_name="modal-us")
+    ref = provider.rediscover("llama-8b")
+    assert ref is not None
+    assert provider.endpoint(ref).url == "https://ws--multihull-llama-8b-modal-us.modal.run"
+    assert ("multihull-llama-8b-modal-us/Server", None) in fake_modal.lookups
