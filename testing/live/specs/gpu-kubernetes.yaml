@@ -1,0 +1,57 @@
+apiVersion: multihull/v1
+name: live-k8s-gpu
+
+container:
+  image: vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c
+  command:
+    - python3
+    - -m
+    - vllm.entrypoints.openai.api_server
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+    - --model
+    - meta-llama/Llama-3.1-8B-Instruct
+    - --served-model-name
+    - llama-3.1-8b-instruct
+    - --max-model-len
+    - "8192"
+    - --gpu-memory-utilization
+    - "0.9"
+    - --max-num-seqs
+    - "16"
+    - --enforce-eager
+  port: 8000
+  health: {path: /health, initialDelaySeconds: 480}
+  env: {VLLM_LOGGING_LEVEL: INFO}
+  secrets: [HF_TOKEN]
+
+resources:
+  gpu: [L4]
+  gpuCount: 1
+  memory: 24Gi
+
+scaling:
+  concurrency: 8
+  replicas: {min: 1, max: 1}
+
+targets:
+  - provider: kubernetes
+    type: kubernetes
+    priority: 1
+    kubernetes:
+      namespace: multihull-gpu
+      serviceType: LoadBalancer
+  - provider: modal
+    type: modal
+    priority: 2
+    modal:
+      environment: main
+      setupDockerfileCommands: ["RUN ln -s /usr/bin/python3 /usr/local/bin/python"]
+
+route:
+  hostname: llama.local
+  protocol: openai
+  failover: {policy: priority, retryOn: [5xx, timeout, capacity], maxRetries: 2}
+  auth: {apiKeys: {from: env:LIVE_API_KEYS}}

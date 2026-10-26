@@ -8,7 +8,7 @@ from typing import Any
 
 from e2e.client import Outcome
 from e2e.harness import Router
-from live.harness import PRIMARY, Kind, LiveDeployment
+from live.harness import Kind, LiveDeployment
 from live.summary import (
     ImageBuild,
     KubeSnapshot,
@@ -217,14 +217,19 @@ class Recorder:
         router: Router | None = None,
         kube: bool = True,
     ) -> None:
-        if kube and not self.summary.has_kube(label):
-            self.summary.kube.append(
-                kube_snapshot(kind, deployment.service, label, primary_url(deployment))
-            )
+        if kube:
+            self.capture_kube(label, kind, deployment)
         if deployment.secondary_type == "modal" and not self.summary.has_modal_state(label):
             self.capture_modal(label, deployment)
         if router is not None:
             self.summary.router = router_state(router, label)
+        self.save()
+
+    def capture_kube(self, label: str, kind: Kind, deployment: LiveDeployment) -> None:
+        if not self.summary.has_kube(label):
+            self.summary.kube.append(
+                kube_snapshot(kind, deployment.service, label, primary_url(deployment))
+            )
         self.save()
 
     def capture_modal(self, label: str, deployment: LiveDeployment) -> None:
@@ -268,7 +273,7 @@ class Recorder:
 
 def primary_url(deployment: LiveDeployment) -> str | None:
     try:
-        return str(deployment.snapshot_endpoints()[PRIMARY]["url"])
+        return str(deployment.snapshot_endpoints()[deployment.primary]["url"])
     except Exception:
         return None
 
