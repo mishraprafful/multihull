@@ -19,22 +19,32 @@ targets:
 
 Credentials: `REPLICATE_API_TOKEN`, sent as `Authorization: Bearer`. `hull doctor` reads the token's account and fails on 401 or when `cog` is not on `PATH`. `cog push` needs a Cog login: set `REPLICATE_CLI_AUTH_TOKEN` (from replicate.com/auth/token) and `apply` runs `cog login --token-stdin` with it, or run `cog login` once yourself. `replicate.owner` is optional; when set it must be the token's account, since Replicate creates models and deployments only there.
 
+## Build context
+
+A relative `build.context` resolves against the directory of `multihull.yaml`. `cog push` copies the whole context into the image except what `.dockerignore` excludes, so Multihull reads the context the same way:
+
+- `hull plan` hashes the files Docker would copy (skipping `.git`, `.cog` and `__pycache__`) and shows the hash as `push.digest`; a changed hash plans as `changed`, and `apply` pushes only then.
+- `apply` refuses a context that would ship `.multihull/` (state, plans and snapshots), a Multihull snapshot (it carries provider credentials) or a Multihull state database, and `hull plan` notes it. Running `hull` from the context directory is fine once `.dockerignore` lists `.multihull`; also list `multihull.yaml` so editing the spec does not push a new image. [`examples/replicate-echo/.dockerignore`](https://github.com/mishraprafful/multihull/tree/main/examples/replicate-echo) has both.
+- Two Replicate targets with the same account share the model; their pushes run one at a time.
+
 ## Routing
 
 Replicate has no HTTP passthrough: a deployment answers `POST /v1/deployments/<owner>/<name>/predictions` with a Cog prediction body. The endpoint in the snapshot is the deployment URL, so a client calling `POST /predictions` with `{"input": {...}}` reaches the predictions URL on Replicate and the Cog server's own `/predictions` on every other target. Routes for Cog services use `protocol: http`; an OpenAI-compatible request has no Replicate equivalent.
 
-The router injects `Authorization: Bearer` and `Prefer: wait=60` on traffic and probes. `Prefer: wait` makes Replicate hold the response until the prediction finishes, like a Cog server does; a prediction still running after 60 s comes back with status `starting` or `processing` and no output, and its polling URL is on Replicate, not the router. Keep predictions under 60 s or call Replicate directly for long ones. The route's `timeouts.first_byte` must exceed the prediction time on every target.
+The router forwards only `POST /predictions` to a Replicate endpoint, so a router client can never reach Replicate's management API with the injected token. Other requests, such as `GET /health-check`, go to the route's other targets; a route with only Replicate targets answers them `404` `not_forwarded`.
 
-The router probes the deployment URL itself (`GET`), not `container.health.path`, because Replicate does not expose the container. A 2xx means the deployment exists and the token works; it says nothing about instances.
+The router injects `Authorization: Bearer` and sets `Prefer: wait=<n>` with `n` five seconds below its first-byte timeout, between 1 and 60. The first-byte timeout is router-wide, `[timeouts] first_byte` in `router.toml` (30 s by default, so `wait=25`). `Prefer: wait` makes Replicate hold the response until the prediction finishes, like a Cog server does; a prediction still running at `n` seconds comes back as a success with status `starting` or `processing` and no output, and its polling URL is on Replicate, not the router. That avoids a first-byte timeout, which the router would retry on another target while Replicate keeps running and billing the first prediction. Keep predictions shorter than the wait or call Replicate directly for long ones.
+
+Health: the router probes the deployment URL itself (`GET`), not `container.health.path`, because Replicate does not expose the container. A passing probe means only that the deployment exists and the token works. Replicate's API reports no instance state, so a deployment whose instances are down or still booting passes the probe; only request outcomes (timeouts, 5xx) take it out of rotation.
 
 ## Lifecycle
 
-- `apply` hashes `build.context` (ignoring `.git`, `.cog` and `__pycache__`) and pushes only when the hash or the model changed since the state's ref. It then sends one `PATCH` with the fields that differ from the deployment's current release (version, hardware, instances), or nothing; every `PATCH` creates a new release. With no state, `apply` pushes and adopts the deployment by name.
-- `apply` fails before any call when `container.env` or `container.secrets` is set (the deployments API takes no environment; build configuration into the image), when `scaling.replicas` exceeds Replicate's limits (`min_instances` 5, `max_instances` 20), or when no GPU class maps to hardware. It checks the chosen hardware against `GET /v1/hardware` before pushing.
-- `hull deploy --wait` and `hull status` report Ready once the deployment's current release runs the applied version with `min_instances` of at least 1. Replicate's API reports no instance state, so the first predictions may wait for an instance to boot.
+- `apply` sends one `PATCH` with the fields that differ from the deployment's current release (version, hardware, instances), or nothing; every `PATCH` creates a new release. With no state, `apply` pushes and adopts the deployment by name.
+- `apply` fails before any call when `container.env` or `container.secrets` is set (the deployments API takes no environment; build configuration into the image), when `scaling.replicas` exceeds Replicate's limits (`min_instances` 5, `max_instances` 20), when no GPU class maps to hardware, or when the build context is unsafe (above). It checks the chosen hardware against `GET /v1/hardware` before pushing.
+- `hull deploy --wait` and `hull status` report Ready once the deployment's current release runs the applied version with `min_instances` of at least 1. That is configuration, not instance health (see Health above).
 - `scale` patches `min_instances` and `max_instances`; values above the limits, a 400 or a 422 are permanent refusals.
 - `hull logs` prints nothing: Replicate has logs per prediction, not per deployment.
-- `destroy` sets `min_instances` and `max_instances` to 0, then deletes the deployment. Replicate deletes only deployments offline and unused for 15 minutes, so the first `destroy` usually fails with that reason and keeps the state record; run it again later. A 404 counts as gone. The model and its versions stay, like images in a registry.
+- `destroy` sets `min_instances` and `max_instances` to 0, then deletes the deployment. Replicate deletes only deployments offline and unused for 15 minutes; when it refuses (400, 409 or 422, assumed since Replicate documents no status), `destroy` keeps the state record marked Draining, the snapshot takes the endpoint out of rotation, and you run `destroy` again later. 401, 403, 429 and 5xx are errors. A 404 counts as gone. The model and its versions stay, like images in a registry.
 
 ## Translation
 
@@ -47,7 +57,7 @@ The router probes the deployment URL itself (`GET`), not `container.health.path`
 | `scaling.concurrency` | not applicable |
 | `container.health` | not sent; the router probes the deployment URL |
 | `container.env`, `secrets` | refused |
-| endpoint | `https://api.replicate.com/v1/deployments/<owner>/<name>`, plus `Authorization: Bearer` and `Prefer: wait=60` injected by the router |
+| endpoint | `https://api.replicate.com/v1/deployments/<owner>/<name>`, plus `Authorization: Bearer` from the snapshot and `Prefer: wait=<n>` from the router |
 
 Ref stored in state: owner, model, deployment name, pushed version and the build context hash. Fallbacks stay warm because `fallbackScaleToZero` defaults to `false`, so `min_instances` is never 0 unless you opt in.
 
