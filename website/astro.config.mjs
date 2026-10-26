@@ -14,7 +14,7 @@ export default defineConfig({
         }),
       ],
       description: 'Deploy hot GPU containers to many providers. One URL. Automatic failover.',
-      logo: { src: './src/assets/mark.svg', alt: 'Multihull' },
+      logo: { light: './src/assets/mark-light.svg', dark: './src/assets/mark.svg', alt: 'Multihull' },
       favicon: '/favicon.svg',
       customCss: ['@fontsource-variable/jetbrains-mono/wght.css', './src/styles/theme.css'],
       components: {
