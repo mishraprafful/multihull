@@ -1,0 +1,5 @@
+# 2026-10-26 Base images from mirror.gcr.io (branch `ci/base-image-mirror`, issue 139)
+
+- Every image job on `main` and on open PRs failed for hours, reruns included: `429 Too Many Requests - Server message: toomanyrequests: Data limit exceeded` from `public.ecr.aws/v2/docker/library/python` and `.../rust` (CI run 40322343847 e2e, Kind run 40322343863 in-cluster, images run 40313466773). AWS quota page (read 2026-10-26): unauthenticated clients get 500 GB per month, not adjustable. The 2026-10-12 429 was a different, transient one.
+- Checked before switching: `mirror.gcr.io/library/python@sha256:05cda977...` and `mirror.gcr.io/library/rust@sha256:2c3a22f0...` return the same index (sha256 of the body equals the digest), with `linux/amd64` and `linux/arm64` manifests whose config and layer blobs all answer 200. The `python:3.12.15-slim-trixie` tag has since moved to a newer digest; the pinned one still resolves.
+- Dependabot has no `docker` ecosystem in `.github/dependabot.yml`, so base image digests were never bumped by it. `mirror.gcr.io/v2/library/<image>/tags/list` answers anonymously, which Dependabot's Docker updater needs.

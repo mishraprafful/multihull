@@ -12,6 +12,11 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Replicate translator deploys Cog models through Replicate's HTTP API: `apply` creates the private model if missing, runs `cog push` when the build context changed (`cog login --token-stdin` from `REPLICATE_CLI_AUTH_TOKEN` when set) and creates or patches the deployment `multihull-<svc>-<provider>` (`min_instances`, `max_instances`, `hardware`, `cpu` when `resources.gpu` is empty); `status`, `scale`, `destroy` (scale to zero, then delete once Replicate allows after 15 minutes offline), `rediscover` and an authenticated `hull doctor` check. Refuses `container.env` and `secrets`, which deployments cannot take. The router injects `Authorization: Bearer` and `Prefer: wait=60` and probes Replicate endpoints at the deployment URL; clients call Cog's `POST /predictions` (#65).
 - Replicate in the translator conformance suite, and `examples/replicate-echo`, a Cog echo model on Docker and Replicate (#65).
 - `live-smoke.yml` job `replicate-smoke` (suite `testing/live/replicate`) and a daily Replicate deployment sweep, both skipped without the `REPLICATE_API_TOKEN` and `REPLICATE_CLI_AUTH_TOKEN` secrets (#65).
+- `live-k8s-gpu.yml`: a manual run of Llama 3.1 8B on a real GPU Kubernetes cluster (priority 1) with Modal (priority 2): cluster preflight, failover to Modal and back with zero client errors, forced cleanup of both providers and a final check that nothing is left. A least-privilege `rbac.yaml`, a kubeconfig script and the runbook at `docs/testing/kubernetes-gpu`. Skipped without `GPU_KUBECONFIG`; not yet run (#68).
+
+### Changed
+
+- Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
 
 ## [0.2.0] - 2026-10-12
 

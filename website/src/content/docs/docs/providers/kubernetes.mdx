@@ -40,6 +40,10 @@ kubernetes:
 
 An empty `resources.gpu` runs the pod on CPU: no `nvidia.com/gpu` limit, toleration or GPU node selector.
 
+## Permissions
+
+[`testing/live/kubernetes-gpu/rbac.yaml`](https://github.com/mishraprafful/multihull/blob/main/testing/live/kubernetes-gpu/rbac.yaml) is a least-privilege service account for one namespace, used by the [Kubernetes GPU live run](/docs/testing/kubernetes-gpu/): server-side apply and delete of the four kinds, `deployments/scale`, pod logs, `get` on the namespace and `list` on nodes for GPU inventory. `rediscover` lists Deployments in every namespace, which it does not grant.
+
 ## Translation
 
 | Spec field | Kubernetes |

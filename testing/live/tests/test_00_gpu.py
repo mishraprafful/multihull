@@ -17,11 +17,11 @@ from live.gpu import (
     max_minutes_from_env,
     new_api_key,
     new_cost,
-    running_apps,
     served_model,
     worst_case_usd,
 )
 from live.summary import ModalInfo, ModalState, RunSummary, publish, render
+from live.sweep import running_apps
 from multihull.apikeys import API_KEY_PATTERN
 
 RUNNING_APPS: list[dict[str, Any]] = [
