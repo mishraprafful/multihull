@@ -5,6 +5,7 @@ use crate::core::retry::{decide, RetryContext, RetryDecision};
 use crate::core::score::{select, Candidate, Preset};
 use crate::core::snapshot::{Endpoint, EndpointId, FailoverPolicy, Health, Route, Sticky};
 use crate::core::sticky::{hash_key, owner, owner_in_provider, rank, KeyHash};
+use crate::core::target::safe_request_target;
 use http::header::HeaderName;
 use http::{header, HeaderValue, Method, Request, Response};
 use http_body_util::{BodyExt, Limited};
@@ -45,6 +46,10 @@ async fn proxy(
 ) -> Result<Response<ProxyBody>, (ProxyError, u32)> {
     let started = Instant::now();
     let (parts, body) = request.into_parts();
+    let target = parts.uri.path_and_query().map_or("/", |pq| pq.as_str());
+    if !safe_request_target(target) {
+        return Err((ProxyError::BadRequestTarget, 0));
+    }
     let host = parts
         .headers
         .get(header::HOST)
