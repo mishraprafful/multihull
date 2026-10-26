@@ -228,7 +228,9 @@ h1#_top:not([data-page-title]),
 .sl-markdown-content .mh-section + .mh-section,
 .sl-markdown-content .mh-horizon + .mh-section,
 .sl-markdown-content .mh-section + .mh-horizon,
-.sl-markdown-content .mh-demo + .mh-section {
+.sl-markdown-content .mh-demo + .mh-section,
+.sl-markdown-content .mh-section + .mh-demo,
+.sl-markdown-content .mh-demo + .mh-horizon {
   margin-top: var(--mh-section-gap);
 }
 
@@ -237,7 +239,8 @@ h1#_top:not([data-page-title]),
   margin: 0 auto;
 }
 
-.sl-markdown-content .mh-demo img {
+.sl-markdown-content .mh-demo img,
+.sl-markdown-content .mh-demo video {
   display: block;
   width: 100%;
   max-width: 100%;
