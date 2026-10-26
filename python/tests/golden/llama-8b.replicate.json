@@ -1,20 +1,20 @@
 {
-  "image": {
-    "push": "r8.im/acme/multihull-llama-8b",
-    "build": "cog"
+  "model": {
+    "owner": "acme",
+    "name": "multihull-llama-8b",
+    "visibility": "private",
+    "hardware": "gpu-l40s"
+  },
+  "push": {
+    "image": "r8.im/acme/multihull-llama-8b",
+    "context": "."
   },
   "deployment": {
-    "name": "multihull-llama-8b",
+    "name": "multihull-llama-8b-replicate-x",
     "model": "acme/multihull-llama-8b",
     "version": "{version}",
     "hardware": "gpu-l40s",
     "min_instances": 1,
     "max_instances": 8
-  },
-  "env": {
-    "VLLM_LOGGING_LEVEL": "INFO"
-  },
-  "secrets": [
-    "hf-token"
-  ]
+  }
 }

@@ -5,8 +5,6 @@ import pytest
 from multihull.providers import PROVIDERS, create
 from multihull.providers.base import Provider, Ref, Target
 from multihull.providers.baseten import BasetenProvider, render_truss_config
-from multihull.providers.replicate import ReplicateProvider
-from multihull.providers.replicate import render_payload as replicate_payload
 from multihull.spec import ServiceSpec
 from tests.conftest import assert_golden
 
@@ -34,15 +32,7 @@ def test_golden_baseten(llama_spec: ServiceSpec) -> None:
     )
 
 
-def test_golden_replicate(llama_spec: ServiceSpec) -> None:
-    spec = cog_spec(llama_spec, "replicate")
-    payload = replicate_payload(Target(spec, spec.target("replicate-x")))
-    assert_golden("llama-8b.replicate.json", payload)
-    assert payload["deployment"]["model"] == "acme/multihull-llama-8b"
-    assert payload["deployment"]["hardware"] == "gpu-l40s"
-
-
-@pytest.mark.parametrize("cls", [BasetenProvider, ReplicateProvider])
+@pytest.mark.parametrize("cls", [BasetenProvider])
 def test_apply_not_implemented(cls, target_for) -> None:
     with pytest.raises(NotImplementedError, match="v0.2"):
         cls().apply(target_for("runpod-eu"), None)
@@ -51,8 +41,6 @@ def test_apply_not_implemented(cls, target_for) -> None:
 def test_endpoints_from_refs() -> None:
     baseten = BasetenProvider().endpoint(Ref("b", "baseten", "svc", {"model": "m1"}))
     assert baseten.url == "https://model-m1.api.baseten.co/production/predict"
-    replicate = ReplicateProvider().endpoint(Ref("x", "replicate", "svc", {"owner": "acme"}))
-    assert replicate.url.endswith("/deployments/acme/multihull-svc/predictions")
 
 
 def test_registry_covers_all_types() -> None:
