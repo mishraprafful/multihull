@@ -8,6 +8,7 @@ use crate::proxy::body::ProxyBody;
 pub enum ProxyError {
     NoRoute,
     BadRequestTarget,
+    NotForwarded,
     Unauthorized,
     BodyTooLarge,
     BodyRead,
@@ -24,6 +25,7 @@ impl ProxyError {
         match self {
             ProxyError::NoRoute => StatusCode::NOT_FOUND,
             ProxyError::BadRequestTarget => StatusCode::BAD_REQUEST,
+            ProxyError::NotForwarded => StatusCode::NOT_FOUND,
             ProxyError::Unauthorized => StatusCode::UNAUTHORIZED,
             ProxyError::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             ProxyError::BodyRead => StatusCode::BAD_REQUEST,
@@ -40,6 +42,7 @@ impl ProxyError {
         match self {
             ProxyError::NoRoute => "no_route",
             ProxyError::BadRequestTarget => "bad_request_target",
+            ProxyError::NotForwarded => "not_forwarded",
             ProxyError::Unauthorized => "unauthorized",
             ProxyError::BodyTooLarge => "body_too_large",
             ProxyError::BodyRead => "body_read_failed",

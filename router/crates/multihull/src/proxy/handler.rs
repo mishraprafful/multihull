@@ -80,6 +80,7 @@ async fn proxy_route(
     let deadline = started + state.config.timeouts.total;
     let error_trailers = accepts_error_trailers(parts.version, &parts.headers);
     authorize(&route, &parts.headers)?;
+    let route = forwarding(&route, &parts).ok_or((ProxyError::NotForwarded, 0))?;
 
     let limit = state.config.max_buffered_body_bytes;
     let body = Limited::new(body, limit)
@@ -511,6 +512,27 @@ fn take_preferred(
     runtime
         .try_admit(now, rng)
         .map(|guard| (endpoint.clone(), guard))
+}
+
+fn forwarding(route: &Arc<Route>, parts: &http::request::Parts) -> Option<Arc<Route>> {
+    let method = parts.method.as_str();
+    let target = parts.uri.path_and_query().map_or("/", |pq| pq.as_str());
+    if route.endpoints.iter().all(|e| e.forwards(method, target)) {
+        return Some(route.clone());
+    }
+    let endpoints: Vec<Endpoint> = route
+        .endpoints
+        .iter()
+        .filter(|e| e.forwards(method, target))
+        .cloned()
+        .collect();
+    if endpoints.is_empty() {
+        return None;
+    }
+    Some(Arc::new(Route {
+        endpoints,
+        ..(**route).clone()
+    }))
 }
 
 fn authorize(route: &Route, headers: &http::HeaderMap) -> Result<(), (ProxyError, u32)> {

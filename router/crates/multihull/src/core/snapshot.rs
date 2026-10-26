@@ -213,6 +213,7 @@ impl EdgeError {
 }
 
 pub const DEFAULT_HEALTH_PATH: &str = "/health";
+pub const REPLICATE_PREDICTIONS: (&str, &str) = ("POST", "/predictions");
 
 fn default_weight() -> u32 {
     1
@@ -233,6 +234,10 @@ impl Endpoint {
         } else {
             Cow::Owned(format!("/{}", self.health_path))
         }
+    }
+
+    pub fn forwards(&self, method: &str, path_and_query: &str) -> bool {
+        self.kind != EndpointType::Replicate || (method, path_and_query) == REPLICATE_PREDICTIONS
     }
 
     pub fn accepts_traffic(&self) -> bool {
@@ -403,6 +408,27 @@ mod tests {
         assert_eq!(endpoint.health_path(), "/healthz");
         endpoint.health_path = "/ready".into();
         assert_eq!(endpoint.health_path(), "/ready");
+    }
+
+    #[test]
+    fn replicate_endpoints_forward_only_prediction_posts() {
+        let mut endpoint = Endpoint {
+            url: "https://api.replicate.com/v1/deployments/acme/echo".into(),
+            ..Default::default()
+        };
+        assert!(endpoint.forwards("PATCH", "/anything"));
+        endpoint.kind = EndpointType::Replicate;
+        assert!(endpoint.forwards("POST", "/predictions"));
+        for (method, target) in [
+            ("PATCH", "/"),
+            ("DELETE", "/"),
+            ("GET", "/predictions"),
+            ("POST", "/predictions/abc/cancel"),
+            ("POST", "/predictions?x=1"),
+            ("GET", "/health-check"),
+        ] {
+            assert!(!endpoint.forwards(method, target), "{method} {target}");
+        }
     }
 
     #[test]
