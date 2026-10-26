@@ -46,6 +46,23 @@ import SpecToProviders from '../../components/SpecToProviders.astro';
   </div>
 </section>
 
+<figure class="mh-demo not-content">
+  <video
+    controls
+    playsinline
+    preload="none"
+    poster="/launch/multihull-0.2.0.jpg"
+    width="1920"
+    height="1080"
+    aria-label="Launch video: one provider goes down and callers get a 503; three hulls fold into the Multihull logo; one multihull.yaml fans out to five native payloads; Kubernetes, then Modal, go down while requests land on the next provider with zero errors; the 0.2.0 cloud demo numbers; the install command"
+  >
+    <source src="/launch/multihull-0.2.0.mp4" type="video/mp4" />
+  </video>
+  <figcaption>
+    Multihull in 23 seconds. The numbers come from the <a href="/docs/reference/release-notes/#what-is-proven">0.2.0 cloud demo</a>.
+  </figcaption>
+</figure>
+
 <Horizon />
 
 <section class="mh-section mh-spec">
