@@ -487,6 +487,7 @@ site-search button[data-open-modal]:hover {
 }
 
 .sl-markdown-content a:not(:where(.not-content *)),
+.mh-demo figcaption a,
 .mh-closing a {
   color: var(--sl-color-text-accent);
   text-decoration: underline;
@@ -497,6 +498,7 @@ site-search button[data-open-modal]:hover {
 }
 
 .sl-markdown-content a:hover:not(:where(.not-content *)),
+.mh-demo figcaption a:hover,
 .mh-closing a:hover {
   color: var(--sl-color-text-accent);
   text-decoration-color: currentColor;
