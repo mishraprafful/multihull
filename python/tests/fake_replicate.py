@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -248,6 +250,10 @@ class FakeCog(CogCli):
         self.logins: list[str] = []
         self.pushes: list[tuple[str, Path]] = []
         self.failure: str | None = None
+        self.duration = 0.0
+        self.active = 0
+        self.peak = 0
+        self.counter = threading.Lock()
 
     def available(self) -> bool:
         return self.installed
@@ -260,7 +266,13 @@ class FakeCog(CogCli):
             raise RuntimeError(self.failure)
         if not (context / "cog.yaml").is_file():
             raise RuntimeError(f"no cog.yaml in {context}")
-        self.pushes.append((image, context))
+        with self.counter:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+        time.sleep(self.duration)
+        with self.counter:
+            self.active -= 1
+            self.pushes.append((image, context))
         _, owner, name = image.split("/")
         self.api.push(owner, name)
 

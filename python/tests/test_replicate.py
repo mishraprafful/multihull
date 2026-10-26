@@ -609,3 +609,48 @@ def test_pagination_stays_on_the_api_host_over_https(
     with pytest.raises(RuntimeError, match="refusing to follow a Replicate link to collector"):
         paged.rediscover("missing")
     assert all(url.startswith("https://api.replicate.com/") for url in seen)
+
+
+def test_a_model_created_concurrently_counts_as_existing(
+    fake: FakeReplicate, cog: FakeCog, target: Target
+) -> None:
+    def racing(request: httpx.Request) -> httpx.Response:
+        if (request.method, request.url.path) == ("POST", "/v1/models"):
+            fake(request)
+            return problem(409, "Conflict", "model exists")
+        return fake(request)
+
+    provider = ReplicateProvider(
+        dry_run=False,
+        provider_name="replicate",
+        http_client=httpx.Client(transport=httpx.MockTransport(racing)),
+        cog=cog,
+    )
+    ref = provider.apply(target, None)
+    assert ref.ids["version"] == fake.versions[MODEL][0]
+
+
+def test_two_replicate_targets_push_the_shared_model_one_at_a_time(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path
+) -> None:
+    raw = echo_raw()
+    raw["targets"].append({"provider": "replicate-b", "type": "replicate", "priority": 3})
+    spec = ServiceSpec.model_validate(raw)
+    cog.duration = 0.05
+    providers = {
+        name: ReplicateProvider(
+            dry_run=False, provider_name=name, http_client=fake.client(), cog=cog
+        )
+        for name in ("replicate", "replicate-b")
+    }
+    results = engine.apply(
+        spec,
+        LocalState(tmp_path / "state.db"),
+        dry_run=False,
+        providers=providers,
+        only=set(providers),
+    )
+    assert all(r.ok for r in results if r.provider in providers), [r.message for r in results]
+    assert cog.peak == 1
+    assert list(fake.models) == [MODEL]
+    assert len(fake.deployments) == 2

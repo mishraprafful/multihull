@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import timedelta
 from pathlib import Path
@@ -47,6 +48,7 @@ PUSH_TIMEOUT_SECONDS = 3600.0
 LOGIN_TIMEOUT_SECONDS = 60.0
 PERMANENT_SCALE_STATUSES = frozenset({400, 422})
 DEFERRED_DELETE_STATUSES = frozenset({400, 409, 422})
+CONFLICT_STATUS = 409
 DEPLOYMENT_FIELDS = ("version", "hardware", "min_instances", "max_instances")
 OWNER_PLACEHOLDER = "{owner}"
 VERSION_PLACEHOLDER = "{version}"
@@ -65,6 +67,19 @@ class ReplicateApiError(RuntimeError):
 
 class DeletionDeferred(DestroyDeferred):
     pass
+
+
+class ModelLocks:
+    def __init__(self) -> None:
+        self.guard = threading.Lock()
+        self.locks: dict[str, threading.Lock] = {}
+
+    def of(self, model: str) -> threading.Lock:
+        with self.guard:
+            return self.locks.setdefault(model, threading.Lock())
+
+
+MODEL_LOCKS = ModelLocks()
 
 
 def replicate_block(desired: Target) -> ReplicateBlock:
@@ -389,11 +404,20 @@ class ReplicateProvider:
         owner = self.owner(desired)
         hardware = self.pick_hardware(desired)
         name = model_name(desired)
-        if self.api.model(owner, name) is None:
-            self.api.call("POST", "/models", render_model(owner, name, hardware))
-        version = self.version(observed, owner, name, context, scan.digest)
+        with MODEL_LOCKS.of(f"{owner}/{name}"):
+            self.ensure_model(owner, name, hardware)
+            version = self.version(observed, owner, name, context, scan.digest)
         self.ensure_deployment(render_deployment(desired, owner, version, hardware), owner)
         return self.ref(desired, owner, {VERSION_KEY: version, CONTEXT_KEY: scan.digest})
+
+    def ensure_model(self, owner: str, name: str, hardware: str) -> None:
+        if self.api.model(owner, name) is not None:
+            return
+        try:
+            self.api.call("POST", "/models", render_model(owner, name, hardware))
+        except ReplicateApiError as exc:
+            if exc.status != CONFLICT_STATUS:
+                raise
 
     def ref(self, desired: Target, owner: str, extra: Mapping[str, str]) -> Ref:
         ids = {
