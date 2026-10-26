@@ -83,6 +83,16 @@ jobs:
           LIVE_MOCK_IMAGE: ${{ env.MOCK_IMAGE }}
           LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
           LIVE_WORKDIR: ${{ runner.temp }}/live
+      - name: Translator conformance (Kubernetes on kind, Docker)
+        working-directory: python
+        run: |
+          kubectl create namespace "$MULTIHULL_CONFORMANCE_NAMESPACE"
+          uv run --project ../testing/live pytest -v tests/test_conformance.py
+        env:
+          MULTIHULL_CONFORMANCE_LIVE: kubernetes,docker
+          MULTIHULL_CONFORMANCE_IMAGE: ${{ env.MOCK_IMAGE }}
+          MULTIHULL_CONFORMANCE_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER }}
+          MULTIHULL_CONFORMANCE_NAMESPACE: multihull-conformance
       - name: Cluster state
         if: failure()
         run: |
