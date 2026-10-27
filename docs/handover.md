@@ -114,7 +114,8 @@ If `cargo` is missing, add `$HOME/.cargo/bin` or `$(brew --prefix rustup)/bin` t
 
 **Baseten**
 - `docs.baseten.co/llms-full.txt` holds every guide page in one file and the `.md` pages under `reference/management-api/` carry the OpenAPI schemas; the Truss config reference rejects fields such as `runtime.health_checks.initial_delay_seconds` that the 0.1.0 translator rendered (`TrussConfig.validate_forbid_extra` in truss 0.18.34 fails on them). A replicas-only change does not change the Truss config, so it is an autoscaling update, not a new deployment (PR 177).
-- Adding a target to `python/tests/fixtures/llama-8b.yaml` breaks about 40 engine, controller, deploy and CLI tests; `test_conformance.py` overrides `llama_spec` with `with_baseten` instead (PR 177).
+- Adding a target to `python/tests/fixtures/llama-8b.yaml` breaks about 40 engine, controller, deploy and CLI tests; the Baseten conformance case builds its spec with `with_baseten` instead (PR 177).
+- A rediscovered ref carried no mirrored secret names, so destroying it left the Baseten secrets behind; `rediscover` now lists `GET /v1/secrets` (documented under `reference/management-api/secrets/`, metadata only) and keeps names with the model's prefix (issue 66).
 
 **Kubernetes and kind**
 - Docker Desktop `--network host` is the Linux VM's loopback, not the Mac's, so a router container neither reaches a NodePort bound to `127.0.0.1` nor answers on the host; run the router binary on the Mac (walkthrough of issue 140). Images older than run 38042038493 (every `0.1.0` tag) are amd64 only and fail on an arm64 kind node with `no match for platform in manifest` (issue 147).
