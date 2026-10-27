@@ -534,7 +534,8 @@ def test_modal_check_names_the_source_and_hides_tokens(
     )
     ambiguous = check_credentials(credentials=f"env:{OVERRIDE_ENV}")
     assert ambiguous.message == (
-        f"credentials env:{OVERRIDE_ENV} has several profiles and none is active"
+        f"credentials env:{OVERRIDE_ENV} has no active profile; mark one with active = true "
+        "or keep a single profile named default"
     )
     monkeypatch.setenv(OVERRIDE_ENV, f"[{first}")
     broken = check_credentials(credentials=f"env:{OVERRIDE_ENV}")
@@ -572,10 +573,16 @@ def test_modal_profile_selection_follows_the_modal_config_rules(
     assert modal_profile_message(top_level, monkeypatch) == (
         f"{source} must hold only .modal.toml profile tables"
     )
+    no_active = (
+        f"{source} has no active profile; mark one with active = true "
+        "or keep a single profile named default"
+    )
     with_default = modal_toml(("spare", *other, False), ("default", *good, False))
-    assert modal_profile_message(with_default, monkeypatch) == "tokens " + ",".join(good)
-    only = modal_toml(("prod", *good, False))
-    assert modal_profile_message(only, monkeypatch) == "tokens " + ",".join(good)
+    assert modal_profile_message(with_default, monkeypatch) == no_active
+    lone_other = modal_toml(("prod", *good, False))
+    assert modal_profile_message(lone_other, monkeypatch) == no_active
+    lone_default = modal_toml(("default", *good, False))
+    assert modal_profile_message(lone_default, monkeypatch) == "tokens " + ",".join(good)
     active = modal_toml(("default", *other, False), ("prod", *good, True))
     assert modal_profile_message(active, monkeypatch) == "tokens " + ",".join(good)
 
