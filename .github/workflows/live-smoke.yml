@@ -31,6 +31,7 @@ jobs:
     outputs:
       modal: ${{ steps.check.outputs.modal }}
       runpod: ${{ steps.runpod.outputs.enabled }}
+      baseten: ${{ steps.baseten.outputs.enabled }}
       replicate: ${{ steps.replicate.outputs.enabled }}
     steps:
       - id: check
@@ -53,6 +54,16 @@ jobs:
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "RUNPOD_API_KEY is not available; the RunPod target was skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - id: baseten
+        env:
+          BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+        run: |
+          if [ -n "$BASETEN_API_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "BASETEN_API_KEY is not available; the Baseten target was skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
       - id: replicate
         env:
@@ -255,6 +266,93 @@ jobs:
             ${{ runner.temp }}/live/results.xml
           if-no-files-found: ignore
 
+  baseten-smoke:
+    needs: gate
+    if: needs.gate.outputs.baseten == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    concurrency:
+      group: live-smoke-baseten
+      cancel-in-progress: false
+    env:
+      MOCK_IMAGE: ${{ inputs.mock_image || 'ghcr.io/mishraprafful/multihull-mock-server:main' }}
+      LIVE_SPEC: kind-baseten
+      LIVE_SERVICE: live-${{ github.run_id }}
+      BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER }}
+          config: testing/live/kind-config.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: router
+      - run: cargo build --release -p multihull
+        working-directory: router
+      - run: docker build -t "$MOCK_IMAGE" testing/mock-server
+      - run: kind load docker-image "$MOCK_IMAGE" --name "$KIND_CLUSTER"
+      - name: Doctor, deploy, baseline, failover to Baseten, recovery, logs, destroy
+        timeout-minutes: 32
+        run: >
+          uv run --project testing/live pytest -q -x
+          -c testing/live/pyproject.toml testing/live/tests
+          --junitxml "$RUNNER_TEMP/live/results.xml"
+        env:
+          LIVE_MOCK_IMAGE: ${{ env.MOCK_IMAGE }}
+          LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
+          LIVE_WORKDIR: ${{ runner.temp }}/live
+      - name: Destroy
+        if: always()
+        run: |
+          workdir="$RUNNER_TEMP/live"
+          mkdir -p "$workdir/logs"
+          if [ -f "$workdir/multihull.yaml" ]; then
+            cd "$workdir"
+            uv run --project "$GITHUB_WORKSPACE/testing/live" hull destroy multihull.yaml --yes \
+              --state .multihull/state.db --snapshot-out .multihull/snapshot.json 2>&1 \
+              | tee logs/workflow-destroy.log
+          else
+            echo "no rendered spec; nothing to destroy" | tee "$workdir/logs/workflow-destroy.log"
+          fi
+      - name: Delete Baseten models left by this run
+        if: always()
+        working-directory: testing/live
+        run: |
+          log="$RUNNER_TEMP/live/logs/baseten-backstop.log"
+          mkdir -p "$(dirname "$log")"
+          uv run python -m live.baseten_sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" | tee "$log"
+      - name: Job summary
+        if: always()
+        working-directory: testing/live
+        run: >
+          uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
+          --job-status "$JOB_STATUS" --artifact live-smoke-baseten-logs --spec kind-baseten
+        env:
+          JOB_STATUS: ${{ job.status }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: live-smoke-baseten-logs
+          path: |
+            ${{ runner.temp }}/live/logs
+            ${{ runner.temp }}/live/multihull.yaml
+            ${{ runner.temp }}/live/router.toml
+            ${{ runner.temp }}/live/summary.md
+            ${{ runner.temp }}/live/summary.json
+            ${{ runner.temp }}/live/results.xml
+          if-no-files-found: ignore
+
   replicate-smoke:
     needs: gate
     if: needs.gate.outputs.replicate == 'true' && github.event_name != 'schedule'
@@ -365,6 +463,28 @@ jobs:
         working-directory: testing/live
         run: |
           uv run python -m live.runpod_sweep --prefix "$APP_PREFIX" --older-than 7200 \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  baseten-sweep:
+    needs: gate
+    if: needs.gate.outputs.baseten == 'true' && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      BASETEN_API_KEY: ${{ secrets.BASETEN_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Delete live Baseten models older than two hours
+        working-directory: testing/live
+        run: |
+          uv run python -m live.baseten_sweep --prefix "$APP_PREFIX" --older-than 7200 \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
   replicate-sweep:

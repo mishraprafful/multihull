@@ -4,16 +4,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from multihull import discovery, engine
+from multihull.providers import baseten
 from multihull.providers.base import Provider, Ref, Target, secret_env_name
 from multihull.providers.replicate import API_TOKEN_ENV, CLI_AUTH_TOKEN_ENV, ReplicateProvider
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState
 from tests.conftest import assert_golden
+from tests.fake_baseten import FakeBaseten, with_baseten
 from tests.fake_replicate import EXAMPLE, FakeCog, FakeReplicate, echo_raw
 from tests.fake_runpod import FakeRunpod
 
@@ -79,10 +82,39 @@ def replicate_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
     )
 
 
+def baseten_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
+    monkeypatch.setenv(baseten.API_KEY_ENV, CALLER)
+    monkeypatch.delenv(baseten.INFERENCE_API_KEY_ENV, raising=False)
+    for name in spec.container.secrets:
+        monkeypatch.setenv(secret_env_name(name), MIRRORED)
+    fake = FakeBaseten(CALLER)
+
+    def set_serving(ref: Ref, serving: bool) -> None:
+        fake.health[ref.ids["model"]] = 200 if serving else 503
+
+    return Case(
+        target="baseten-us",
+        golden="llama-8b.baseten.json",
+        spec=spec,
+        provider=baseten.BasetenProvider(
+            dry_run=False, provider_name="baseten-us", http_client=fake.client()
+        ),
+        resources=lambda: len(fake.models) + len(fake.secrets),
+        set_serving=set_serving,
+        secret_values=(MIRRORED,),
+    )
+
+
 CASES: dict[str, Callable[[pytest.MonkeyPatch, ServiceSpec], Case]] = {
+    "baseten": baseten_case,
     "replicate": replicate_case,
     "runpod": runpod_case,
 }
+
+
+@pytest.fixture
+def llama_spec(llama_raw: dict[str, Any]) -> ServiceSpec:
+    return with_baseten(llama_raw)
 
 
 @pytest.fixture(params=sorted(CASES))

@@ -28,3 +28,6 @@ def test_deploy_waits_until_every_target_is_ready(
     if deployment.secondary_type == "runpod":
         assert endpoints[deployment.secondary]["url"].endswith(".api.runpod.ai")
         assert endpoints[deployment.secondary]["inject_headers"].keys() == {"Authorization"}
+    if deployment.secondary_type == "baseten":
+        assert endpoints[deployment.secondary]["url"].endswith("/environments/production/sync")
+        assert endpoints[deployment.secondary]["inject_headers"].keys() == {"Authorization"}

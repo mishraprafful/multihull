@@ -80,7 +80,7 @@ def provider_kwargs(target: TargetSpec, live: bool) -> dict[str, Any]:
     if target.type == "kubernetes":
         context = target.kubernetes.context if target.kubernetes else None
         return {"context": context, "connect": live}
-    if target.type in ("modal", "runpod", "replicate"):
+    if target.type in ("modal", "runpod", "baseten", "replicate"):
         return {"dry_run": not live, "provider_name": target.provider}
     if target.type == "docker":
         return {"provider_name": target.provider}
@@ -104,10 +104,8 @@ def provider_for_ref(ref: Ref) -> Provider:
         return create("kubernetes", context=ref.ids.get("context"), connect=True)
     if ref.type == "modal":
         return create("modal", dry_run=False)
-    if ref.type == "runpod":
-        return create("runpod", dry_run=False, provider_name=ref.provider)
-    if ref.type == "replicate":
-        return create("replicate", dry_run=False, provider_name=ref.provider)
+    if ref.type in ("runpod", "baseten", "replicate"):
+        return create(ref.type, dry_run=False, provider_name=ref.provider)
     return create(ref.type)
 
 

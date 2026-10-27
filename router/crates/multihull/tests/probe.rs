@@ -146,6 +146,41 @@ async fn replicate_probes_carry_the_provider_auth_and_predictions_replace_the_cl
 }
 
 #[tokio::test]
+async fn baseten_api_key_reaches_probes_and_traffic_under_the_sync_path() {
+    let provider_auth = "Api-Key baseten-fixture";
+    let upstream = MockUpstream::start(
+        MockUpstreamConfig::default().with_required_authorization(provider_auth),
+    )
+    .await
+    .unwrap();
+    let sync_url = format!("{}/environments/production/sync", upstream.url());
+    let mut baseten = endpoint("a", "baseten-us", sync_url, 1);
+    baseten.kind = EndpointType::Baseten;
+    let timeout = Duration::from_secs(1);
+    let proxy = start_proxy(vec![baseten.clone()]).await;
+
+    let without = probe_once(&proxy.state.client, &baseten, timeout).await;
+    assert_eq!(without.outcome, ProbeOutcome::Failure);
+    assert_eq!(without.status, Some(401));
+
+    baseten
+        .inject_headers
+        .insert("Authorization".into(), provider_auth.into());
+    let probed = probe_once(&proxy.state.client, &baseten, timeout).await;
+    assert_eq!(probed.outcome, ProbeOutcome::Success);
+
+    let proxy = start_proxy(vec![baseten]).await;
+    let reply = get(
+        &proxy,
+        "/v1/models",
+        &[("authorization", "Bearer client-supplied")],
+    )
+    .await;
+    assert_eq!(reply.status, 200);
+    assert_eq!(upstream.request_count(), 3);
+}
+
+#[tokio::test]
 async fn three_failed_rounds_open_the_circuit_and_three_good_rounds_allow_a_half_open_trial() {
     let upstream = MockUpstream::start(
         MockUpstreamConfig::default().with_status(StatusCode::SERVICE_UNAVAILABLE),

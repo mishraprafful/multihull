@@ -22,6 +22,7 @@ GPU_OPTIONAL_TYPES: tuple[ProviderType, ...] = (
     "kubernetes",
     "modal",
     "runpod",
+    "baseten",
     "replicate",
 )
 ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
