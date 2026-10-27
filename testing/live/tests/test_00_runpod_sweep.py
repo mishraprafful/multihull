@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from live.runpod_sweep import main, stale_endpoints, stale_secrets
+from live.runpod_sweep import main, stale_endpoints, stale_stores
 from multihull.providers.runpod import API_KEY_ENV, RunpodApi
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
@@ -61,7 +61,7 @@ def test_sweeper_deletes_matching_endpoints(
     assert output == [
         "ep-multihull-live-9-runpod multihull-live-9-runpod deleted",
         "1 endpoint(s) matched multihull-live-9-, 0 failed",
-        "0 secret(s) matched multihull_live_9_, 0 failed",
+        "0 mirrored secret(s) matched multihull_live_9_, 0 failed",
     ]
 
 
@@ -100,9 +100,9 @@ def test_sweeper_picks_mirrored_secrets_by_their_sanitized_prefix() -> None:
         stored("multihull_live_1_runpod_hf_token", "2026-10-07T09:00:00Z"),
         stored("multihull_live_2_runpod_hf_token", "2026-10-07T11:30:00Z"),
     ]
-    current = stale_secrets(listed, "multihull-live-c7-", timedelta(0), NOW)
+    current = stale_stores(listed, "multihull-live-c7-", timedelta(0), NOW)
     assert [s["name"] for s in current] == ["multihull_live_c7_ab12_runpod_conformance_secret"]
-    stale = stale_secrets(listed, "multihull-live-", timedelta(hours=2), NOW)
+    stale = stale_stores(listed, "multihull-live-", timedelta(hours=2), NOW)
     assert [s["name"] for s in stale] == ["multihull_live_1_runpod_hf_token"]
 
 
@@ -125,4 +125,4 @@ def test_sweeper_deletes_mirrored_secrets_left_without_an_endpoint(
     assert main(["--prefix", "multihull-live-9-"], api_answering(httpx.MockTransport(answer))) == 0
     assert deleted == ["/v2/account/secrets/sec-multihull_live_9_runpod_hf_token"]
     summary = capsys.readouterr().out.splitlines()[-1]
-    assert summary == "1 secret(s) matched multihull_live_9_, 0 failed"
+    assert summary == "1 mirrored secret(s) matched multihull_live_9_, 0 failed"
