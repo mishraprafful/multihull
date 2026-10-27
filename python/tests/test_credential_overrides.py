@@ -36,7 +36,7 @@ from multihull.providers.registry import PROVIDERS
 from multihull.providers.replicate import ReplicateProvider
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
-from multihull.state import LocalState
+from multihull.state import LocalState, StateRecord
 from tests.fake_baseten import BASETEN_TARGET, FakeBaseten, with_baseten
 from tests.fake_docker import FakeDockerClient
 from tests.fake_modal import FakeModal
@@ -771,7 +771,7 @@ def test_docker_library_errors_become_credential_errors_naming_the_source(
         assert marker not in message and encoded not in message
 
 
-def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
+def test_a_removed_target_is_destroyed_with_its_override_but_never_refreshed_with_it(
     monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], tmp_path: Path, fake_registry
 ) -> None:
     value = sentinel()
@@ -793,13 +793,22 @@ def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
     stored = (tmp_path / "state.db").read_bytes()
     assert f'"credentials": "{reference}"'.encode() in stored
     assert value.encode() not in stored
-    fake_registry["modal"].kwargs = {}
-    engine.refresh("llama-8b", LocalState(tmp_path / "state.db"))
-    assert fake_registry["modal"].kwargs == {"dry_run": False, "credentials": reference}
 
     llama_raw["targets"] = llama_raw["targets"][:1]
     path.write_text(yaml.safe_dump(llama_raw))
     fake_registry["modal"].kwargs = {}
+    store = LocalState(tmp_path / "state.db")
+    before = store.get("llama-8b", "modal-main")
+    status_calls = fake_registry["modal"].status_calls
+    refreshed = engine.refresh("llama-8b", store, {"gke-prod": fake_registry["kubernetes"]})
+    skipped = next(r for r in refreshed if r.provider == "modal-main")
+    assert (skipped.observed.phase, skipped.changed) == ("Unknown", False)
+    assert skipped.observed.message == engine.STORED_CREDENTIALS_NOT_REFRESHED
+    assert fake_registry["modal"].kwargs == {}
+    assert fake_registry["modal"].status_calls == status_calls
+    after = store.get("llama-8b", "modal-main")
+    assert before is not None and after is not None
+    assert after.last_status == before.last_status
     destroyed = runner.invoke(app, ["destroy", str(path), "--yes", *state])
     assert destroyed.exit_code == 0, destroyed.output
     assert fake_registry["modal"].kwargs == {"dry_run": False, "credentials": reference}
@@ -807,6 +816,28 @@ def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
     native = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "multihull"})
     engine.provider_for_ref(native)
     assert "credentials" not in fake_registry["kubernetes"].kwargs
+
+
+def test_refresh_never_loads_a_kubeconfig_named_only_by_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    planted = tmp_path / "planted-kubeconfig"
+    planted.write_text(kubeconfig("evil", current="evil"))
+    loaded: list[str | None] = []
+    monkeypatch.setattr(
+        DynamicKubeClient,
+        "from_context",
+        lambda context, credentials=None: loaded.append(credentials),
+    )
+    store = LocalState(tmp_path / "state.db")
+    ref = Ref("gone", "kubernetes", "svc", {"namespace": "x", "credentials": f"file:{planted}"})
+    store.put(StateRecord(service="svc", provider="gone", ref=ref.to_json(), last_status="Ready"))
+    for providers in (None, {}):
+        [result] = engine.refresh("svc", store, providers)
+        assert result.observed.message == engine.STORED_CREDENTIALS_NOT_REFRESHED
+    assert loaded == []
+    record = store.get("svc", "gone")
+    assert record is not None and record.last_status == "Ready"
 
 
 def healthy_http() -> httpx.Client:
