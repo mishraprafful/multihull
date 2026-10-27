@@ -56,7 +56,7 @@ class DestroyResult:
     type: str
     ok: bool
     message: str = ""
-    draining: bool = False
+    deferred: bool = False
 
 
 @dataclass
@@ -282,8 +282,8 @@ def destroy(
         for result, record in zip(results, records, strict=True):
             if result.ok:
                 state.delete(service, result.provider)
-            elif result.draining:
-                state.put(replace(record, last_status="Draining"))
+            elif result.deferred:
+                state.put(replace(record, last_status="Failed"))
     return results
 
 

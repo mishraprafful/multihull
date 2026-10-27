@@ -535,7 +535,10 @@ class ReplicateProvider:
         warm = int(settings.get("min_instances") or 0)
         if int(settings.get("max_instances") or 0) == 0:
             return Observed(
-                "Draining", 0, 0, "max_instances is 0; waiting for Replicate to allow deletion"
+                "Failed",
+                0,
+                0,
+                "max_instances is 0; out of rotation until Replicate allows deletion",
             )
         running = str(settings.get("version") or "")
         applied = ref.ids.get(VERSION_KEY)

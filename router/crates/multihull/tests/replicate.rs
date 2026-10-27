@@ -1,10 +1,12 @@
 mod common;
 
 use bytes::Bytes;
-use common::{endpoint, get, post, send, single_route, start_proxy, start_proxy_configured};
+use common::{
+    endpoint, get, post, send, single_route, start_proxy, start_proxy_configured, start_proxy_with,
+};
 use http::Request;
 use http_body_util::Full;
-use multihull::core::snapshot::EndpointType;
+use multihull::core::snapshot::{EndpointType, Snapshot};
 use multihull::proxy::{PhaseTimeouts, ProxyConfig};
 use router_testkit::{MockUpstream, MockUpstreamConfig};
 use std::time::Duration;
@@ -96,6 +98,53 @@ async fn predictions_wait_less_than_the_first_byte_timeout() {
     )
     .await;
     assert_eq!(reply.status, 200);
+}
+
+#[tokio::test]
+async fn a_replicate_endpoint_published_down_after_a_deferred_destroy_gets_no_traffic() {
+    let replicate = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let cog = MockUpstream::start(MockUpstreamConfig::default())
+        .await
+        .unwrap();
+    let document = serde_json::json!({
+        "version": 7,
+        "routes": [{
+            "id": "replicate-echo",
+            "endpoints": [
+                {
+                    "id": "replicate-echo/replicate",
+                    "provider": "replicate",
+                    "type": "replicate",
+                    "url": format!("{}/v1/deployments/acme/echo", replicate.url()),
+                    "priority": 1,
+                    "health": "down",
+                    "inject_headers": {"Authorization": "Bearer replicate-fixture"}
+                },
+                {
+                    "id": "replicate-echo/local",
+                    "provider": "local",
+                    "type": "docker",
+                    "url": cog.url(),
+                    "priority": 2,
+                    "health": "ready"
+                }
+            ]
+        }]
+    });
+    let snapshot: Snapshot = serde_json::from_value(document).unwrap();
+    let proxy = start_proxy_with(snapshot).await;
+
+    for _ in 0..6 {
+        let reply = post(&proxy, "/predictions", &[], PREDICTION).await;
+        assert_eq!(
+            (reply.status, reply.endpoint()),
+            (200, "replicate-echo/local")
+        );
+    }
+    assert_eq!(replicate.request_count(), 0);
+    assert_eq!(cog.request_count(), 6);
 }
 
 #[tokio::test]

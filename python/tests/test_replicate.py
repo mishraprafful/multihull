@@ -348,7 +348,8 @@ def test_destroy_scales_to_zero_then_deletes_once_offline_for_15_minutes(
     settings = fake.deployment_settings(DEPLOYMENT)
     assert (settings["min_instances"], settings["max_instances"]) == (0, 0)
     observed = provider.status(ref)
-    assert (observed.phase, observed.ready_replicas) == ("Draining", 0)
+    assert (observed.phase, observed.ready_replicas) == ("Failed", 0)
+    assert observed.message.startswith("max_instances is 0; out of rotation")
     fake.advance(timedelta(minutes=14))
     with pytest.raises(DeletionDeferred):
         provider.destroy(ref)
@@ -377,10 +378,12 @@ def test_engine_destroy_keeps_the_state_record_while_deletion_is_deferred(
     assert "run destroy again" in deferred.message
     record = state.get(spec.name, "replicate")
     assert record is not None
-    assert record.last_status == "Draining"
+    assert record.last_status == "Failed"
     snapshot = discovery.snapshot_after_destroy(spec, state, providers, None)
-    [endpoint] = snapshot["routes"][0]["endpoints"]
-    assert endpoint["health"] == "draining"
+    [endpoint] = discovery.router_document(snapshot)["routes"][0]["endpoints"]
+    assert (endpoint["type"], endpoint["health"]) == ("replicate", "down")
+    refreshed = engine.refresh(spec.name, state, providers)
+    assert [r.observed.phase for r in refreshed] == ["Failed"]
     fake.advance(timedelta(minutes=15))
     [done] = engine.destroy(spec.name, state, providers=providers)
     assert done.ok
