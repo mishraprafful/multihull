@@ -5,7 +5,7 @@ import os
 import posixpath
 import re
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,6 +16,8 @@ SQLITE_MAGIC = b"SQLite format 3\x00"
 STATE_TABLE = "snapshot_versions"
 SNAPSHOT_MARKER = b'"inject_headers"'
 READ_CHUNK = 1 << 20
+MIN_SECRET_LENGTH = 8
+SNAPSHOT = ""
 
 
 @dataclass(frozen=True)
@@ -139,15 +141,17 @@ def multihull_state(path: Path) -> bool:
     return found is not None
 
 
-def hash_file(path: Path, digest: hashlib._Hash) -> bool:
+def hash_file(path: Path, digest: hashlib._Hash, needles: Mapping[str, bytes]) -> set[str]:
+    keep = max(len(needle) for needle in needles.values()) - 1
     tail = b""
-    marked = False
+    found: set[str] = set()
     with path.open("rb") as handle:
         while chunk := handle.read(READ_CHUNK):
             digest.update(chunk)
-            marked = marked or SNAPSHOT_MARKER in tail + chunk
-            tail = chunk[-(len(SNAPSHOT_MARKER) - 1) :]
-    return marked
+            window = tail + chunk
+            found.update(label for label, needle in needles.items() if needle in window)
+            tail = window[-keep:] if keep else b""
+    return found
 
 
 def identities(paths: Sequence[Path]) -> set[tuple[int, int]]:
@@ -161,10 +165,16 @@ def identities(paths: Sequence[Path]) -> set[tuple[int, int]]:
     return found
 
 
-def scan_context(root: Path, protected: Sequence[Path] = ()) -> ContextScan:
+def scan_context(
+    root: Path, protected: Sequence[Path] = (), secrets: Mapping[str, str] | None = None
+) -> ContextScan:
     digest = hashlib.sha256()
     problems: list[str] = []
     rules = read_rules(root)
+    needles = {SNAPSHOT: SNAPSHOT_MARKER}
+    for origin, value in (secrets or {}).items():
+        if len(value.strip()) >= MIN_SECRET_LENGTH:
+            needles[origin] = value.strip().encode()
     guarded = identities(protected)
     for relative in shipped_files(root, rules, UNHASHED_DIRS):
         status = (root / relative).lstat()
@@ -183,8 +193,12 @@ def scan_context(root: Path, protected: Sequence[Path] = ()) -> ContextScan:
             digest.update(f"L {relative} {os.readlink(path)}\n".encode())
             continue
         digest.update(f"F {relative}\n".encode())
-        if hash_file(path, digest):
+        found = hash_file(path, digest, needles)
+        if SNAPSHOT in found:
             problems.append(f"ships {relative}, a Multihull snapshot with provider credentials")
+        elif found:
+            origins = ", ".join(sorted(found))
+            problems.append(f"ships {relative}, which holds the value of {origins}")
         elif multihull_state(path):
             problems.append(f"ships {relative}, a Multihull state database")
     return ContextScan(digest.hexdigest()[:16], problems)

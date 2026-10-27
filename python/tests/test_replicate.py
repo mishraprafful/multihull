@@ -731,3 +731,27 @@ def test_apply_refuses_a_hard_link_to_a_credentials_file_outside_the_context(
     with pytest.raises(ValueError, match="ships bundled.bin, a credentials file"):
         provider.apply(Target(spec, spec.target("replicate")), None)
     assert fake.calls == [] and cog.pushes == []
+
+
+def test_apply_refuses_a_context_file_holding_a_token_value(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    (context / "settings.py").write_text(f'TOKEN = "{CALLER}"\n')
+    monkeypatch.chdir(context)
+    target = echo_target()
+    provider = ReplicateProvider(dry_run=False, http_client=fake.client(), cog=cog)
+    [note] = provider.plan(target, None).notes
+    assert note.endswith(
+        "ships settings.py, which holds the value of REPLICATE_API_TOKEN; "
+        "exclude it in .dockerignore"
+    )
+    with pytest.raises(ValueError) as raised:
+        provider.apply(target, None)
+    assert "settings.py, which holds the value of REPLICATE_API_TOKEN" in str(raised.value)
+    assert CALLER not in str(raised.value) and CALLER not in note
+    assert fake.calls == [] and cog.pushes == []
+    (context / ".env.local").write_text(f"REPLICATE_API_TOKEN={CALLER}\n")
+    (context / "settings.py").unlink()
+    assert provider.plan(target, None).notes == []
