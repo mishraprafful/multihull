@@ -21,7 +21,7 @@ from multihull.providers.base import (
     error_reason,
 )
 from multihull.spec import ServiceSpec, TargetSpec
-from multihull.state.base import StateBackend, StateRecord
+from multihull.state.base import Floor, StateBackend, StateRecord
 
 Change = Literal["new", "changed", "unchanged", "orphaned", "skipped"]
 ProviderFactory = Callable[[TargetSpec], Provider]
@@ -248,6 +248,21 @@ def write_plan_dir(plans: list[TargetPlan], out_dir: str | Path = DEFAULT_PLAN_D
     return written
 
 
+def withdraw(state: StateBackend, record: StateRecord) -> list[Floor]:
+    with state.lock():
+        floors = [f for f in state.list_floors(record.service) if f.provider == record.provider]
+        state.delete_floor(record.service, record.provider)
+        state.put(replace(record, last_status="Failed"))
+    return floors
+
+
+def reinstate(state: StateBackend, record: StateRecord, floors: list[Floor]) -> None:
+    with state.lock():
+        state.put(record)
+        for floor in floors:
+            state.put_floor(floor)
+
+
 def destroy(
     service: str,
     state: StateBackend,
@@ -260,6 +275,7 @@ def destroy(
 
     def run(record: StateRecord) -> DestroyResult:
         ref = Ref.from_json(record.ref)
+        floors = withdraw(state, record)
         try:
             provider = (
                 providers[record.provider]
@@ -270,6 +286,7 @@ def destroy(
         except DestroyDeferred as exc:
             return DestroyResult(record.provider, ref.type, False, error_reason(exc), True)
         except Exception as exc:
+            reinstate(state, record, floors)
             return DestroyResult(record.provider, ref.type, False, error_reason(exc))
         return DestroyResult(record.provider, ref.type, True, "destroyed")
 
@@ -277,13 +294,9 @@ def destroy(
         results = list(pool.map(run, records))
 
     with state.lock():
-        for result, record in zip(results, records, strict=True):
-            if result.ok or result.deferred:
-                state.delete_floor(service, result.provider)
+        for result in results:
             if result.ok:
                 state.delete(service, result.provider)
-            elif result.deferred:
-                state.put(replace(record, last_status="Failed"))
     return results
 
 

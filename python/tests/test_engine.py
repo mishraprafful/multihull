@@ -8,7 +8,7 @@ import yaml
 from multihull import engine
 from multihull.providers.base import Ref
 from multihull.spec import ServiceSpec
-from multihull.state import LocalState, StateRecord
+from multihull.state import Floor, LocalState, StateRecord
 from tests.fakes import FakeProvider
 
 
@@ -107,3 +107,53 @@ def test_refresh_never_turns_a_failed_target_unknown(
         "modal-main": "Unknown",
         "runpod-eu": "Ready",
     }
+
+
+class WatchingProvider(FakeProvider):
+    def __init__(self, state: LocalState, failure: Exception | None = None) -> None:
+        super().__init__()
+        self.state = state
+        self.failure = failure
+        self.seen: list[tuple[str | None, list[str]]] = []
+
+    def destroy(self, ref: Ref) -> None:
+        record = self.state.get(ref.service, ref.provider)
+        floors = [f.provider for f in self.state.list_floors(ref.service)]
+        self.seen.append((record.last_status if record else None, floors))
+        if self.failure is not None:
+            raise self.failure
+
+
+def seeded(spec: ServiceSpec, tmp_path: Path) -> LocalState:
+    state = LocalState(tmp_path / "state.db")
+    target = spec.targets[1]
+    ref = Ref(target.provider, target.type, spec.name, {"id": "1"})
+    state.put(StateRecord(spec.name, target.provider, ref.to_json(), None, "h", "Ready"))
+    state.put_floor(Floor(spec.name, target.provider, 3, 1))
+    return state
+
+
+def test_destroy_marks_the_target_failed_and_drops_its_floor_before_the_provider_call(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = seeded(llama_spec, tmp_path)
+    provider = WatchingProvider(state)
+    [result] = engine.destroy(llama_spec.name, state, providers={"modal-main": provider})
+    assert result.ok
+    assert provider.seen == [("Failed", [])]
+    assert state.list(llama_spec.name) == []
+
+
+def test_a_failed_destroy_restores_the_record_and_floor(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = seeded(llama_spec, tmp_path)
+    provider = WatchingProvider(state, RuntimeError("provider API down"))
+    [result] = engine.destroy(llama_spec.name, state, providers={"modal-main": provider})
+    assert not result.ok
+    assert provider.seen == [("Failed", [])]
+    record = state.get(llama_spec.name, "modal-main")
+    assert record is not None and record.last_status == "Ready"
+    assert [
+        (f.provider, f.min_replicas, f.pre_degraded_min) for f in state.list_floors(llama_spec.name)
+    ] == [("modal-main", 3, 1)]
