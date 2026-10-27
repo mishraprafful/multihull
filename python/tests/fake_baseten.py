@@ -420,8 +420,6 @@ class FakeBaseten:
         return httpx.Response(200, json={"logs": lines[:limit]})
 
     def secret(self, method: str, parts: list[str], body: dict[str, Any] | None) -> httpx.Response:
-        if not parts and method == "GET":
-            return httpx.Response(200, json={"secrets": [{"name": name} for name in self.secrets]})
         if not parts and method == "POST":
             assert body is not None
             self.secrets[body["name"]] = body["value"]

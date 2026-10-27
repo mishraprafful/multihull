@@ -51,6 +51,7 @@ AUTH_SCHEME = "Api-Key"
 ENVIRONMENT = "production"
 SPEC_LABEL = "multihull.dev/spec"
 HEALTH_PATH_LABEL = "multihull.dev/health-path"
+SECRETS_LABEL = "multihull.dev/secrets"
 SECRETS_DIR = "/secrets"
 RESERVED_ENV = ("PORT", "HOST", "HOSTNAME", "PATH")
 SCALE_DOWN_DELAY_SECONDS = 300
@@ -195,6 +196,19 @@ def config_digest(config: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
+def deployment_labels(desired: Target, config: dict[str, Any]) -> dict[str, str]:
+    labels = {
+        SERVICE_LABEL: desired.name,
+        PROVIDER_LABEL: desired.provider,
+        SPEC_LABEL: config_digest(config),
+        HEALTH_PATH_LABEL: desired.service.container.health.path,
+    }
+    stored = [secret_store_name(desired, name) for name in desired.service.container.secrets]
+    if stored:
+        labels[SECRETS_LABEL] = ",".join(stored)
+    return labels
+
+
 def render_deployment(desired: Target) -> dict[str, Any]:
     config = render_truss_config(desired)
     return {
@@ -202,12 +216,7 @@ def render_deployment(desired: Target) -> dict[str, Any]:
         "raw_config": yaml.safe_dump(config, sort_keys=False),
         "environment_name": ENVIRONMENT,
         "preserve_env_instance_type": False,
-        "labels": {
-            SERVICE_LABEL: desired.name,
-            PROVIDER_LABEL: desired.provider,
-            SPEC_LABEL: config_digest(config),
-            HEALTH_PATH_LABEL: desired.service.container.health.path,
-        },
+        "labels": deployment_labels(desired, config),
         "autoscaling_settings": autoscaling_settings(desired),
     }
 
@@ -457,11 +466,6 @@ class BasetenApi:
 
     def environment(self, model_id: str) -> dict[str, Any] | None:
         return self.call("GET", f"/models/{model_id}/environments/{ENVIRONMENT}", missing_ok=True)
-
-    def stored_names(self, prefix: str) -> list[str]:
-        listing = self.call("GET", "/secrets", missing_ok=True) or {}
-        names = (str(item.get("name") or "") for item in listing.get("secrets") or [])
-        return sorted(name for name in names if name.startswith(prefix))
 
     def deployments(self, model_id: str) -> list[dict[str, Any]]:
         listing = self.call("GET", f"/models/{model_id}/deployments")
@@ -797,7 +801,7 @@ class BasetenProvider:
         }
         if deployment:
             ids[DEPLOYMENT_KEY] = str(deployment["id"])
-        stored = self.api.stored_names(UNSAFE_SECRET_CHARS.sub("_", f"{name}_"))
+        stored = str(labels.get(SECRETS_LABEL) or "")
         if stored:
-            ids[SECRETS_KEY] = ",".join(stored)
+            ids[SECRETS_KEY] = stored
         return Ref(provider=self.provider_name, type="baseten", service=service, ids=ids)

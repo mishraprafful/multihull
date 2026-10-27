@@ -17,6 +17,7 @@ from multihull.providers.baseten import (
     BasetenProvider,
     render_payload,
     render_truss_config,
+    secret_store_name,
     signed_s3_put,
 )
 from multihull.spec import ServiceSpec
@@ -601,3 +602,38 @@ def test_a_rediscovered_ref_destroys_only_the_mirrored_secrets(
     assert found is not None
     provider.destroy(found)
     assert (fake.models, list(fake.secrets)) == ({}, ["team_shared"])
+
+
+def named_target(llama_raw: dict[str, Any], service: str, provider: str) -> Target:
+    target = {"provider": provider, "type": "baseten", "priority": 9, "baseten": {}}
+    spec = ServiceSpec.model_validate(
+        {**llama_raw, "name": service, "targets": [*llama_raw["targets"], target]}
+    )
+    return Target(spec, spec.target(provider))
+
+
+@pytest.mark.parametrize(
+    ("ours", "theirs"),
+    [
+        (("llama-8b", "baseten"), ("llama-8b", "baseten-us")),
+        (("llama", "baseten"), ("llama-baseten", "us")),
+    ],
+)
+def test_rediscover_never_claims_another_targets_secrets(
+    fake: FakeBaseten,
+    llama_raw: dict[str, Any],
+    ours: tuple[str, str],
+    theirs: tuple[str, str],
+) -> None:
+    providers = {
+        pair: BasetenProvider(False, pair[1], fake.client(), clock=lambda: NOW)
+        for pair in (ours, theirs)
+    }
+    for (service, provider_name), provider in providers.items():
+        provider.apply(named_target(llama_raw, service, provider_name), None)
+    other = named_target(llama_raw, *theirs)
+    kept = sorted(secret_store_name(other, name) for name in other.service.container.secrets)
+    found = providers[ours].rediscover(ours[0])
+    assert found is not None
+    providers[ours].destroy(found)
+    assert sorted(fake.secrets) == kept
