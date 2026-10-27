@@ -384,3 +384,10 @@ def test_rediscover_leaves_secrets_the_spec_only_references(
     assert found is not None
     provider.destroy(found)
     assert [stored["name"] for stored in fake.secrets.values()] == ["team_shared"]
+
+
+def test_endpoint_repr_hides_the_injected_headers(provider: RunpodProvider, target: Target) -> None:
+    endpoint = provider.endpoint(provider.apply(target, None))
+    hidden = CALLER not in repr(endpoint)
+    assert endpoint.inject_headers
+    assert hidden

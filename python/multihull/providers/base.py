@@ -102,7 +102,7 @@ class EdgeError:
 @dataclass
 class Endpoint:
     url: str
-    inject_headers: dict[str, str] = field(default_factory=dict)
+    inject_headers: dict[str, str] = field(default_factory=dict, repr=False)
     region: str | None = None
     edge_error: EdgeError | None = None
 
