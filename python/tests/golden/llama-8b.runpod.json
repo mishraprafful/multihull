@@ -1,7 +1,7 @@
 {
   "secrets": [
     {
-      "name": "multihull_llama_8b_runpod_eu_hf_token"
+      "name": "multihull_llama_8b_runpod_eu_hf_token_b3eb37f43880"
     }
   ],
   "endpoint": {
@@ -19,7 +19,7 @@
     ],
     "env": {
       "VLLM_LOGGING_LEVEL": "INFO",
-      "hf-token": "{{ RUNPOD_SECRET_multihull_llama_8b_runpod_eu_hf_token }}",
+      "hf-token": "{{ RUNPOD_SECRET_multihull_llama_8b_runpod_eu_hf_token_b3eb37f43880 }}",
       "PORT": "8000",
       "PORT_HEALTH": "8000",
       "HEALTH_CHECK_PATH": "/health"

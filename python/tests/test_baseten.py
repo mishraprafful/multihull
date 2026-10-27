@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from multihull import engine
-from multihull.providers.base import Ref, ScaleRefused, Target, secret_env_name
+from multihull.providers.base import Ref, ScaleRefused, Target, secret_env_name, store_name
 from multihull.providers.baseten import (
     API_KEY_ENV,
     INFERENCE_API_KEY_ENV,
@@ -28,7 +28,7 @@ CALLER = "baseten-fixture-caller"
 TRAFFIC_CALLER = "baseten-fixture-traffic"
 MIRRORED = "mirrored-fixture-value"
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=UTC)
-STORE = "multihull_llama_8b_baseten_us_hf_token"
+STORE = store_name("llama-8b", "baseten-us", "hf-token")
 
 
 @pytest.fixture
@@ -104,14 +104,16 @@ def test_identifier_secrets_are_exported_so_values_stay_out_of_argv(
 ) -> None:
     mixed = variant(llama_raw, container={"secrets": ["HF_TOKEN", "hf-token"]})
     argv = shlex.split(render_truss_config(mixed)["docker_server"]["start_command"])
-    read = "/secrets/multihull_llama_8b_baseten_us_"
+    read = "/secrets/"
+    upper = store_name("llama-8b", "baseten-us", "HF_TOKEN")
+    lower = store_name("llama-8b", "baseten-us", "hf-token")
     assert argv[2] == (
-        f'HF_TOKEN="$(cat {read}HF_TOKEN)"; export HF_TOKEN; '
-        f'exec env hf-token="$(cat {read}hf_token)" "$@"'
+        f'HF_TOKEN="$(cat {read}{upper})"; export HF_TOKEN; '
+        f'exec env hf-token="$(cat {read}{lower})" "$@"'
     )
     exported = variant(llama_raw, container={"secrets": ["HF_TOKEN"]})
     argv = shlex.split(render_truss_config(exported)["docker_server"]["start_command"])
-    assert argv[2] == f'HF_TOKEN="$(cat {read}HF_TOKEN)"; export HF_TOKEN; exec "$@"'
+    assert argv[2] == f'HF_TOKEN="$(cat {read}{upper})"; export HF_TOKEN; exec "$@"'
     assert "env" not in argv[2].split()
 
 

@@ -24,6 +24,7 @@ from multihull.providers.base import (
     redact_env,
     redact_token,
     resolve_secret_values,
+    store_name,
 )
 from multihull.spec import GPU, RunpodBlock
 
@@ -56,7 +57,6 @@ URL_KEY = "url"
 HEALTH_PATH_KEY = "health_path"
 DIGEST_KEY = "spec"
 SECRETS_KEY = "secrets"
-UNSAFE_SECRET_CHARS = re.compile(r"[^A-Za-z0-9_]")
 SECRET_REFERENCE = re.compile(r"\{\{ RUNPOD_SECRET_([A-Za-z0-9_]+) \}\}")
 
 
@@ -84,18 +84,18 @@ def base_url(endpoint: Mapping[str, Any]) -> str:
 
 
 def secret_store_name(desired: Target, secret: str) -> str:
-    return UNSAFE_SECRET_CHARS.sub("_", f"{endpoint_name(desired)}_{secret}")
+    return store_name(desired.name, desired.provider, secret)
 
 
 def secret_reference(store_name: str) -> str:
     return "{{ RUNPOD_SECRET_" + store_name + " }}"
 
 
-def owned_secrets(env: Mapping[str, Any], endpoint: str) -> list[str]:
+def owned_secrets(env: Mapping[str, Any], service: str, provider: str) -> list[str]:
     owned: list[str] = []
     for key, value in env.items():
         match = SECRET_REFERENCE.fullmatch(str(value))
-        if match and match.group(1) == UNSAFE_SECRET_CHARS.sub("_", f"{endpoint}_{key}"):
+        if match and match.group(1) == store_name(service, provider, str(key)):
             owned.append(match.group(1))
     return owned
 
@@ -608,7 +608,7 @@ class RunpodProvider:
             URL_KEY: base_url(found),
             HEALTH_PATH_KEY: str(env.get(HEALTH_CHECK_PATH_ENV) or DEFAULT_HEALTH_PATH),
         }
-        stored = owned_secrets(env, name)
+        stored = owned_secrets(env, service, self.provider_name)
         if stored:
             ids[SECRETS_KEY] = ",".join(stored)
         return Ref(provider=self.provider_name, type="runpod", service=service, ids=ids)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
@@ -14,6 +16,9 @@ SERVICE_LABEL = "multihull.dev/service"
 PROVIDER_LABEL = "multihull.dev/provider"
 GPU_CLASS_LABEL = "multihull.dev/gpu-class"
 REDACTED = "<redacted>"
+UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9_]")
+STORE_NAME_READABLE_LENGTH = 100
+STORE_NAME_DIGEST_LENGTH = 12
 
 Phase = Literal["Pending", "Ready", "Degraded", "Draining", "Failed", "Unknown"]
 
@@ -204,6 +209,12 @@ def redact_token(text: str, reference: str | None) -> str:
 
 def secret_env_name(secret: str) -> str:
     return secret.upper().replace("-", "_").replace(".", "_")
+
+
+def store_name(service: str, provider: str, secret: str) -> str:
+    readable = UNSAFE_NAME_CHARS.sub("_", f"multihull-{service}-{provider}_{secret}")
+    digest = hashlib.sha256(json.dumps([service, provider, secret]).encode()).hexdigest()
+    return f"{readable[:STORE_NAME_READABLE_LENGTH]}_{digest[:STORE_NAME_DIGEST_LENGTH]}"
 
 
 def resolve_secret_values(names: list[str]) -> dict[str, str]:
