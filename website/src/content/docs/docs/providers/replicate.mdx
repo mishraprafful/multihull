@@ -17,7 +17,7 @@ targets:
     priority: 2
 ```
 
-Credentials: `REPLICATE_API_TOKEN`, sent as `Authorization: Bearer`. `hull doctor` reads the token's account and fails on 401 or when `cog` is not on `PATH`. `cog push` needs a Cog login: set `REPLICATE_CLI_AUTH_TOKEN` (from replicate.com/auth/token) and `apply` runs `cog login --token-stdin` with it, or run `cog login` once yourself. `replicate.owner` is optional; when set it must be the token's account, since Replicate creates models and deployments only there.
+Credentials: `REPLICATE_API_TOKEN`, sent as `Authorization: Bearer`. `hull doctor` reads the token's account and fails on 401 or when `cog` is not on `PATH`. `cog push` needs a Cog login: set `REPLICATE_CLI_AUTH_TOKEN` (from replicate.com/auth/token) and `apply` runs `cog login --token-stdin` with it, or run `cog login` once yourself. `replicate.owner` is optional; when set it must be the token's account, since Replicate creates models and deployments only there. A target's `credentials: env:NAME` or `credentials: file:PATH` replaces `REPLICATE_API_TOKEN` for API calls, `hull doctor` and the router's `Authorization`. It never goes to `cog login`: Replicate issues a separate CLI token, so `cog push` keeps using `REPLICATE_CLI_AUTH_TOKEN` or an existing login, which must belong to the same account as the override.
 
 ## Build context
 
