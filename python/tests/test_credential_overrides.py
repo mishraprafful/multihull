@@ -34,13 +34,15 @@ from multihull.providers.kubernetes import (
 )
 from multihull.providers.modal import ModalProvider, check_credentials
 from multihull.providers.registry import PROVIDERS
-from multihull.providers.replicate import ReplicateProvider
+from multihull.providers.replicate import API_TOKEN_ENV as REPLICATE_API_TOKEN_ENV
+from multihull.providers.replicate import CLI_AUTH_TOKEN_ENV, ReplicateProvider
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
 from tests.fake_baseten import BASETEN_TARGET, FakeBaseten, with_baseten
 from tests.fake_docker import FakeDockerClient
 from tests.fake_modal import FakeModal
+from tests.fake_replicate import EXAMPLE, FakeCog, FakeReplicate, echo_raw
 from tests.fake_runpod import FakeRunpod
 from tests.test_credentials import OVERRIDE_ENV, sentinel, single_target_spec, write_spec
 from tests.test_kubernetes import FakeKubeClient
@@ -324,11 +326,19 @@ def test_doctor_names_a_missing_override(
     assert f"credentials {CredentialSource.parse(reference)} {expected}" in result.output
 
 
+def replicate_factory(fake: FakeReplicate) -> Any:
+    def build(**kwargs: Any) -> ReplicateProvider:
+        return ReplicateProvider(http_client=fake.client(), cog=FakeCog(fake), **kwargs)
+
+    return build
+
+
 def test_doctor_accepts_a_readable_override_without_printing_it(
     monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], tmp_path: Path
 ) -> None:
     value = sentinel()
     monkeypatch.setenv(OVERRIDE_ENV, value)
+    monkeypatch.setitem(PROVIDERS, "replicate", replicate_factory(FakeReplicate(value)))
     llama_raw["targets"] = [
         {"provider": "replicate-a", "type": "replicate", "priority": 1},
     ]
@@ -342,16 +352,101 @@ def test_doctor_accepts_a_readable_override_without_printing_it(
     assert "OK" in result.output and value not in result.output
 
 
-def test_render_only_replicate_checks_the_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(OVERRIDE_ENV, raising=False)
-    provider = ReplicateProvider(credentials=f"env:{OVERRIDE_ENV}")
-    health = provider.credentials_health()
-    assert not health.ok and health.message.startswith(f"credentials env:{OVERRIDE_ENV} is not set")
+@pytest.fixture
+def replicate_override(monkeypatch: pytest.MonkeyPatch) -> str:
     value = sentinel()
     monkeypatch.setenv(OVERRIDE_ENV, value)
-    health = provider.credentials_health()
-    assert health.ok and health.message == f"env:{OVERRIDE_ENV} is set"
-    assert value not in health.message
+    monkeypatch.setenv(REPLICATE_API_TOKEN_ENV, sentinel())
+    monkeypatch.setenv(CLI_AUTH_TOKEN_ENV, sentinel())
+    monkeypatch.chdir(EXAMPLE)
+    return value
+
+
+def replicate_target(reference: str) -> Target:
+    spec = ServiceSpec.model_validate(echo_raw())
+    return Target(spec, spec.target("replicate").model_copy(update={"credentials": reference}))
+
+
+def test_replicate_calls_the_api_and_signs_traffic_with_the_override(
+    replicate_override: str,
+) -> None:
+    reference = f"env:{OVERRIDE_ENV}"
+    fake = FakeReplicate(replicate_override)
+    cog = FakeCog(fake)
+    provider = ReplicateProvider(
+        dry_run=False, http_client=fake.client(), cog=cog, credentials=reference
+    )
+    target = replicate_target(reference)
+    ref = provider.apply(target, None)
+    assert replicate_override not in ref.to_json()
+    assert replicate_override not in json.dumps(provider.plan(target, None).payload)
+    assert cog.logins == [os.environ[CLI_AUTH_TOKEN_ENV]]
+    assert provider.status(ref).phase == "Ready"
+    assert provider.endpoint(ref).inject_headers == {
+        "Authorization": f"Bearer {replicate_override}"
+    }
+    assert provider.credentials_health().message == (
+        f"Replicate accepted {reference}, which also signs router traffic"
+    )
+    native = os.environ[REPLICATE_API_TOKEN_ENV]
+    assert ReplicateProvider().endpoint(ref).inject_headers == {"Authorization": f"Bearer {native}"}
+
+
+def test_replicate_names_a_missing_or_rejected_override_without_its_value(
+    monkeypatch: pytest.MonkeyPatch, replicate_override: str
+) -> None:
+    reference = f"env:{OVERRIDE_ENV}"
+    fake = FakeReplicate(sentinel())
+    rejected = ReplicateProvider(
+        dry_run=False, http_client=fake.client(), cog=FakeCog(fake), credentials=reference
+    )
+    health = rejected.credentials_health()
+    assert health.message.startswith(f"Replicate rejected {reference}: ")
+    with pytest.raises(RuntimeError) as raised:
+        rejected.apply(replicate_target(reference), None)
+    for message in (health.message, str(raised.value)):
+        assert replicate_override not in message
+    monkeypatch.delenv(OVERRIDE_ENV)
+    native = FakeReplicate(os.environ[REPLICATE_API_TOKEN_ENV])
+    missing = ReplicateProvider(
+        dry_run=False, http_client=native.client(), cog=FakeCog(native), credentials=reference
+    )
+    assert missing.credentials_health().message == (
+        f"credentials {reference} is not set; replicate credentials missing"
+    )
+    with pytest.raises(CredentialError) as raised:
+        missing.apply(replicate_target(reference), None)
+    assert str(raised.value) == f"credentials {reference} is not set; Replicate credentials missing"
+    assert native.calls == []
+    ref = Ref("r", "replicate", "s", {"owner": "acme", "deployment": "d"})
+    assert missing.endpoint(ref).inject_headers == {}
+
+
+def test_replicate_override_stays_out_of_output_state_plan_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    replicate_override: str,
+) -> None:
+    fake = FakeReplicate(replicate_override, grace=timedelta(0))
+    monkeypatch.setitem(PROVIDERS, "replicate", replicate_factory(fake))
+    reference = f"env:{OVERRIDE_ENV}"
+    raw = echo_raw()
+    raw["container"]["build"]["context"] = str(EXAMPLE)
+    raw["targets"] = [{**raw["targets"][1], "credentials": reference}]
+    raw["reliability"] = {"minWarmProviders": 1}
+    spec = ServiceSpec.model_validate(raw)
+    round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
+    assert not round_trip.leaks(replicate_override)
+    assert f'"credentials": "{reference}"'.encode() in round_trip.stored
+    endpoints = round_trip.snapshot["routes"][0]["endpoints"]
+    assert [e["inject_headers"] for e in endpoints] == [
+        {"Authorization": f"Bearer {replicate_override}"}
+    ]
+    for endpoint in endpoints:
+        endpoint.pop("inject_headers")
+    assert replicate_override not in json.dumps(endpoints)
+    assert fake.deployments == {}
 
 
 @pytest.fixture

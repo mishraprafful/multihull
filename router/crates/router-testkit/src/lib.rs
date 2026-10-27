@@ -36,6 +36,7 @@ pub struct MockUpstreamConfig {
     pub stalling_first: usize,
     pub stall: Duration,
     pub required_authorization: Option<String>,
+    pub required_header: Option<(String, String)>,
 }
 
 impl Default for MockUpstreamConfig {
@@ -57,6 +58,7 @@ impl Default for MockUpstreamConfig {
             stalling_first: 0,
             stall: Duration::ZERO,
             required_authorization: None,
+            required_header: None,
         }
     }
 }
@@ -120,6 +122,15 @@ impl MockUpstreamConfig {
 
     pub fn with_required_authorization(mut self, value: impl Into<String>) -> Self {
         self.required_authorization = Some(value.into());
+        self
+    }
+
+    pub fn with_required_header(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.required_header = Some((name.into(), value.into()));
         self
     }
 
@@ -294,6 +305,23 @@ async fn respond(
         if !presented {
             let response = Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
+                .body(
+                    Full::new(Bytes::new())
+                        .map_err(|never| match never {})
+                        .boxed(),
+                )
+                .expect("valid response");
+            return Ok(response);
+        }
+    }
+    if let Some((name, value)) = &config.required_header {
+        let presented = req
+            .headers()
+            .get(name.as_str())
+            .is_some_and(|found| found.as_bytes() == value.as_bytes());
+        if !presented {
+            let response = Response::builder()
+                .status(StatusCode::PRECONDITION_FAILED)
                 .body(
                     Full::new(Bytes::new())
                         .map_err(|never| match never {})

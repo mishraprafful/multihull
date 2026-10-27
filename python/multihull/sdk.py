@@ -193,13 +193,15 @@ class Service:
         snapshot_path: str | Path = DEFAULT_SNAPSHOT_PATH,
         providers: Mapping[str, Provider] | None = None,
     ) -> Service:
-        return cls(
+        service = cls(
             state=state,
             state_path=state_path,
             snapshot_path=snapshot_path,
             providers=providers,
             **specmod.dump(spec),
         )
+        service.spec.located_in(spec.source_dir)
+        return service
 
     @classmethod
     def from_yaml(
@@ -234,7 +236,8 @@ class Service:
         return self._state
 
     def validated(self) -> ServiceSpec:
-        self.spec = ServiceSpec.model_validate(specmod.dump(self.spec))
+        source = self.spec.source_dir
+        self.spec = ServiceSpec.model_validate(specmod.dump(self.spec)).located_in(source)
         return self.spec
 
     def to_dict(self) -> dict[str, Any]:

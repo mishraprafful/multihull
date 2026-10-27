@@ -1,0 +1,21 @@
+{
+  "model": {
+    "owner": "{owner}",
+    "name": "multihull-replicate-echo",
+    "visibility": "private",
+    "hardware": "cpu"
+  },
+  "push": {
+    "image": "r8.im/{owner}/multihull-replicate-echo",
+    "context": ".",
+    "digest": "e3d93285de75901d"
+  },
+  "deployment": {
+    "name": "multihull-replicate-echo-replicate",
+    "model": "{owner}/multihull-replicate-echo",
+    "version": "{version}",
+    "hardware": "cpu",
+    "min_instances": 1,
+    "max_instances": 2
+  }
+}

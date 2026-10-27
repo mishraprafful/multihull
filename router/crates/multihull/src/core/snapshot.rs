@@ -213,6 +213,7 @@ impl EdgeError {
 }
 
 pub const DEFAULT_HEALTH_PATH: &str = "/health";
+pub const REPLICATE_PREDICTIONS: (&str, &str) = ("POST", "/predictions");
 
 fn default_weight() -> u32 {
     1
@@ -224,13 +225,19 @@ fn default_max_concurrency() -> u32 {
 
 impl Endpoint {
     pub fn health_path(&self) -> Cow<'_, str> {
-        if self.health_path.is_empty() {
+        if self.kind == EndpointType::Replicate {
+            Cow::Borrowed("")
+        } else if self.health_path.is_empty() {
             Cow::Borrowed(DEFAULT_HEALTH_PATH)
         } else if self.health_path.starts_with('/') {
             Cow::Borrowed(&self.health_path)
         } else {
             Cow::Owned(format!("/{}", self.health_path))
         }
+    }
+
+    pub fn forwards(&self, method: &str, path_and_query: &str) -> bool {
+        self.kind != EndpointType::Replicate || (method, path_and_query) == REPLICATE_PREDICTIONS
     }
 
     pub fn accepts_traffic(&self) -> bool {
@@ -401,6 +408,38 @@ mod tests {
         assert_eq!(endpoint.health_path(), "/healthz");
         endpoint.health_path = "/ready".into();
         assert_eq!(endpoint.health_path(), "/ready");
+    }
+
+    #[test]
+    fn replicate_endpoints_forward_only_prediction_posts() {
+        let mut endpoint = Endpoint {
+            url: "https://api.replicate.com/v1/deployments/acme/echo".into(),
+            ..Default::default()
+        };
+        assert!(endpoint.forwards("PATCH", "/anything"));
+        endpoint.kind = EndpointType::Replicate;
+        assert!(endpoint.forwards("POST", "/predictions"));
+        for (method, target) in [
+            ("PATCH", "/"),
+            ("DELETE", "/"),
+            ("GET", "/predictions"),
+            ("POST", "/predictions/abc/cancel"),
+            ("POST", "/predictions?x=1"),
+            ("GET", "/health-check"),
+        ] {
+            assert!(!endpoint.forwards(method, target), "{method} {target}");
+        }
+    }
+
+    #[test]
+    fn replicate_endpoints_probe_the_deployment_url_itself() {
+        let endpoint = Endpoint {
+            kind: EndpointType::Replicate,
+            url: "https://api.replicate.com/v1/deployments/acme/echo".into(),
+            health_path: "/health-check".into(),
+            ..Default::default()
+        };
+        assert_eq!(endpoint.health_path(), "");
     }
 
     #[test]

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from multihull.credentials import CREDENTIALS_PATTERN, CredentialSource
 
@@ -18,13 +18,6 @@ PROVIDER_TYPES: tuple[ProviderType, ...] = (
     "baseten",
     "replicate",
     "docker",
-)
-GPU_OPTIONAL_TYPES: tuple[ProviderType, ...] = (
-    "docker",
-    "kubernetes",
-    "modal",
-    "runpod",
-    "baseten",
 )
 ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
@@ -248,6 +241,20 @@ class ServiceSpec(SpecModel):
     reliability: Reliability = Reliability()
     targets: list[TargetSpec] = Field(min_length=1)
     route: Route
+    _source_dir: Path | None = PrivateAttr(default=None)
+
+    @property
+    def source_dir(self) -> Path | None:
+        return self._source_dir
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ServiceSpec):
+            return NotImplemented
+        return self.__dict__ == other.__dict__
+
+    def located_in(self, directory: Path | None) -> ServiceSpec:
+        self._source_dir = directory
+        return self
 
     def effective_replicas(self, target: TargetSpec) -> Replicas:
         base = self.scaling.replicas
@@ -300,20 +307,6 @@ class ServiceSpec(SpecModel):
         return self
 
     @model_validator(mode="after")
-    def gpu_required_unless_all_targets_gpu_optional(self) -> ServiceSpec:
-        if self.resources.gpu:
-            return self
-        needing_gpu = [t for t in self.targets if t.type not in GPU_OPTIONAL_TYPES]
-        if needing_gpu:
-            names = ", ".join(f"{t.provider} ({t.type})" for t in needing_gpu)
-            optional = ", ".join(GPU_OPTIONAL_TYPES)
-            raise ValueError(
-                f"resources.gpu is empty but these targets need a GPU class: {names}; "
-                f"an empty gpu list runs on CPU and is allowed only for target types {optional}"
-            )
-        return self
-
-    @model_validator(mode="after")
     def warm_floor_is_satisfiable(self) -> ServiceSpec:
         if self.reliability.fallbackScaleToZero:
             return self
@@ -331,7 +324,7 @@ def load(path: str | Path) -> ServiceSpec:
     raw = yaml.safe_load(Path(path).read_text())
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected a mapping at top level")
-    return ServiceSpec.model_validate(raw)
+    return ServiceSpec.model_validate(raw).located_in(Path(path).resolve().parent)
 
 
 def dump(spec: ServiceSpec) -> dict[str, Any]:

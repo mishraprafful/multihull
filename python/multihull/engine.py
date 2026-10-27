@@ -11,9 +11,17 @@ from typing import Any, Literal
 import yaml
 
 from multihull.providers import create
-from multihull.providers.base import Observed, Plan, Provider, Ref, Target, error_reason
+from multihull.providers.base import (
+    DestroyDeferred,
+    Observed,
+    Plan,
+    Provider,
+    Ref,
+    Target,
+    error_reason,
+)
 from multihull.spec import ServiceSpec, TargetSpec
-from multihull.state.base import StateBackend, StateRecord
+from multihull.state.base import Floor, StateBackend, StateRecord
 
 Change = Literal["new", "changed", "unchanged", "orphaned", "skipped"]
 ProviderFactory = Callable[[TargetSpec], Provider]
@@ -52,6 +60,7 @@ class DestroyResult:
     type: str
     ok: bool
     message: str = ""
+    deferred: bool = False
 
 
 @dataclass
@@ -75,7 +84,7 @@ def provider_kwargs(target: TargetSpec, live: bool) -> dict[str, Any]:
     if target.type == "kubernetes":
         context = target.kubernetes.context if target.kubernetes else None
         return {"context": context, "connect": live}
-    if target.type in ("modal", "runpod", "baseten"):
+    if target.type in ("modal", "runpod", "baseten", "replicate"):
         return {"dry_run": not live, "provider_name": target.provider}
     if target.type == "docker":
         return {"provider_name": target.provider}
@@ -115,7 +124,7 @@ def provider_for_ref(ref: Ref) -> Provider:
         return create("kubernetes", context=ref.ids.get("context"), connect=True, **credentials)
     if ref.type == "modal":
         return create("modal", dry_run=False, **credentials)
-    if ref.type in ("runpod", "baseten"):
+    if ref.type in ("runpod", "baseten", "replicate"):
         return create(ref.type, dry_run=False, provider_name=ref.provider, **credentials)
     return create(ref.type, **credentials)
 
@@ -260,6 +269,21 @@ def write_plan_dir(plans: list[TargetPlan], out_dir: str | Path = DEFAULT_PLAN_D
     return written
 
 
+def withdraw(state: StateBackend, record: StateRecord) -> list[Floor]:
+    with state.lock():
+        floors = [f for f in state.list_floors(record.service) if f.provider == record.provider]
+        state.delete_floor(record.service, record.provider)
+        state.put(replace(record, last_status="Failed"))
+    return floors
+
+
+def reinstate(state: StateBackend, record: StateRecord, floors: list[Floor]) -> None:
+    with state.lock():
+        state.put(record)
+        for floor in floors:
+            state.put_floor(floor)
+
+
 def destroy(
     service: str,
     state: StateBackend,
@@ -272,6 +296,7 @@ def destroy(
 
     def run(record: StateRecord) -> DestroyResult:
         ref = Ref.from_json(record.ref)
+        floors = withdraw(state, record)
         try:
             provider = (
                 providers[record.provider]
@@ -279,7 +304,10 @@ def destroy(
                 else factory(ref)
             )
             provider.destroy(ref)
+        except DestroyDeferred as exc:
+            return DestroyResult(record.provider, ref.type, False, error_reason(exc), True)
         except Exception as exc:
+            reinstate(state, record, floors)
             return DestroyResult(record.provider, ref.type, False, error_reason(exc))
         return DestroyResult(record.provider, ref.type, True, "destroyed")
 
@@ -287,9 +315,11 @@ def destroy(
         results = list(pool.map(run, records))
 
     with state.lock():
-        for result in results:
+        for result, record in zip(results, records, strict=True):
             if result.ok:
                 state.delete(service, result.provider)
+            elif result.deferred:
+                state.put(replace(record, last_status="Failed"))
     return results
 
 
@@ -330,6 +360,13 @@ def rediscover(
     return results
 
 
+def settled(record: StateRecord, observed: Observed) -> Observed:
+    if observed.phase != "Unknown" or record.last_status != "Failed":
+        return observed
+    detail = f"{observed.message}; " if observed.message else ""
+    return Observed("Failed", message=f"{detail}kept Failed until the provider answers")
+
+
 def refresh(
     service: str,
     state: StateBackend,
@@ -343,12 +380,13 @@ def refresh(
         ref = Ref.from_json(record.ref)
         provider = providers.get(record.provider) if providers is not None else None
         if provider is None and CREDENTIALS_KEY in ref.ids:
-            observed = Observed(phase="Unknown", message=STORED_CREDENTIALS_NOT_REFRESHED)
-            return RefreshResult(record.provider, ref.type, ref, observed, False)
+            skipped = Observed(phase="Unknown", message=STORED_CREDENTIALS_NOT_REFRESHED)
+            return RefreshResult(record.provider, ref.type, ref, settled(record, skipped), False)
         try:
             observed = (provider or factory(ref)).status(ref)
         except Exception as exc:
             observed = Observed(phase="Unknown", message=error_reason(exc))
+        observed = settled(record, observed)
         return RefreshResult(
             record.provider, ref.type, ref, observed, observed.phase != record.last_status
         )
@@ -358,7 +396,11 @@ def refresh(
 
     with state.lock():
         for record, result in zip(records, results, strict=True):
-            if result.changed:
-                record.last_status = result.observed.phase
-                state.put(record)
+            current = state.get(service, record.provider)
+            if not result.changed or current is None:
+                continue
+            if current.last_status != record.last_status:
+                continue
+            record.last_status = result.observed.phase
+            state.put(record)
     return results
