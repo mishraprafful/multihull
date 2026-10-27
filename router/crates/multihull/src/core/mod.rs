@@ -9,6 +9,7 @@ pub mod score;
 pub mod serde_secs;
 pub mod snapshot;
 pub mod sticky;
+pub mod target;
 
 pub use outcome::{AttemptError, Outcome};
 pub use snapshot::{Endpoint, EndpointId, Route, Snapshot};

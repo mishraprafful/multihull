@@ -30,6 +30,7 @@ DEFAULT_HEALTH_INTERVAL = timedelta(minutes=5)
 DEFAULT_DEGRADED_COOLDOWN = timedelta(minutes=10)
 DEFAULT_GRPC_LISTEN = "0.0.0.0:7700"
 SCALABLE_PHASES = {"Ready"}
+FAILED_PHASE = "Failed"
 SCALE_BACK_TICKS_PER_COOLDOWN = 10
 PERMANENT_SCALE_REFUSALS = (ScaleRefused, NotImplementedError)
 
@@ -362,6 +363,12 @@ class Controller:
             ScaleStep(target.provider, current, new_min, replicas.max, record.ref, cause)
         )
 
+    def removing(self, provider: str, records: Mapping[str, StateRecord]) -> bool:
+        record = records.get(provider)
+        observed = self.observed.get(provider)
+        phases = {record.last_status if record else None, observed.phase if observed else None}
+        return FAILED_PHASE in phases
+
     def plan_step_down(
         self, target: TargetSpec, records: Mapping[str, StateRecord]
     ) -> ScaleStep | None:
@@ -369,6 +376,15 @@ class Controller:
         if remembered is None or target.provider in self.scaling_targets:
             return None
         replicas = self.spec.effective_replicas(target)
+        if self.removing(target.provider, records):
+            log.info(
+                "dropping the raised floor of %s: it is Failed, so scale-back leaves it alone",
+                target.provider,
+            )
+            self.min_replicas[target.provider] = replicas.min
+            del self.pre_degraded_min[target.provider]
+            self.persist_floor(target.provider)
+            return None
         current = self.min_replicas[target.provider]
         if current <= max(remembered, replicas.min):
             del self.pre_degraded_min[target.provider]
