@@ -455,6 +455,7 @@ def test_rediscover_finds_the_model_by_name(
         "url": created.ids["url"],
         "health_path": "/health",
         "deployment": created.ids["deployment"],
+        "secrets": STORE,
     }
     other = BasetenProvider(False, "baseten-eu", fake.client())
     assert other.rediscover("llama-8b") is None
@@ -589,3 +590,14 @@ def test_archive_upload_is_signed_like_botocore(bucket: str, url: str, signature
         "SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-security-token, "
         f"Signature={signature}"
     )
+
+
+def test_a_rediscovered_ref_destroys_only_the_mirrored_secrets(
+    provider: BasetenProvider, fake: FakeBaseten, target: Target
+) -> None:
+    fake.secrets["team_shared"] = "owned-by-the-user"
+    provider.apply(target, None)
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert (fake.models, list(fake.secrets)) == ({}, ["team_shared"])

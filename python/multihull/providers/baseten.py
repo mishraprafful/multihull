@@ -429,6 +429,11 @@ class BasetenApi:
     def environment(self, model_id: str) -> dict[str, Any] | None:
         return self.call("GET", f"/models/{model_id}/environments/{ENVIRONMENT}", missing_ok=True)
 
+    def stored_names(self, prefix: str) -> list[str]:
+        listing = self.call("GET", "/secrets", missing_ok=True) or {}
+        names = (str(item.get("name") or "") for item in listing.get("secrets") or [])
+        return sorted(name for name in names if name.startswith(prefix))
+
     def deployments(self, model_id: str) -> list[dict[str, Any]]:
         listing = self.call("GET", f"/models/{model_id}/deployments")
         return list(listing.get("deployments") or [])
@@ -760,4 +765,7 @@ class BasetenProvider:
         }
         if deployment:
             ids[DEPLOYMENT_KEY] = str(deployment["id"])
+        stored = self.api.stored_names(UNSAFE_SECRET_CHARS.sub("_", f"{name}_"))
+        if stored:
+            ids[SECRETS_KEY] = ",".join(stored)
         return Ref(provider=self.provider_name, type="baseten", service=service, ids=ids)
