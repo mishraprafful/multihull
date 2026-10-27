@@ -399,9 +399,32 @@ class BasetenApi:
             raise BasetenApiError(response.status_code, redact(error_detail(response)))
         return response.json() if response.content else None
 
-    def model_named(self, name: str) -> dict[str, Any] | None:
+    def owned_model(self, name: str, service: str, provider: str) -> dict[str, Any] | None:
         listing = self.call("GET", "/models", params={"name": name})
-        return next((m for m in listing.get("models") or [] if m.get("name") == name), None)
+        models = [m for m in listing.get("models") or [] if m.get("name") == name]
+        if not models:
+            return None
+        if len(models) > 1:
+            teams = ", ".join(sorted(str(m.get("team_name") or "unknown") for m in models))
+            raise RuntimeError(
+                f"Baseten has {len(models)} models named {name} (teams {teams}); "
+                "multihull adopts or deletes only a unique one, so rename or remove the others"
+            )
+        model = models[0]
+        if not self.labelled_for(str(model["id"]), service, provider):
+            raise RuntimeError(
+                f"Baseten model {name} ({model['id']}) has no deployment labelled "
+                f"{SERVICE_LABEL}={service} and {PROVIDER_LABEL}={provider}; "
+                "multihull will not adopt or delete it"
+            )
+        return dict(model)
+
+    def labelled_for(self, model_id: str, service: str, provider: str) -> bool:
+        return any(
+            (d.get("labels") or {}).get(SERVICE_LABEL) == service
+            and (d.get("labels") or {}).get(PROVIDER_LABEL) == provider
+            for d in self.deployments(model_id)
+        )
 
     def environment(self, model_id: str) -> dict[str, Any] | None:
         return self.call("GET", f"/models/{model_id}/environments/{ENVIRONMENT}", missing_ok=True)
@@ -513,9 +536,9 @@ class BasetenProvider:
         payload = render_deployment(desired)
         if self.dry_run:
             return ref_for(desired, None, None, payload)
-        secrets = self.sync_secrets(desired)
         name = model_name(desired)
-        model = self.current_model(observed, name)
+        model = self.current_model(observed, desired)
+        secrets = self.sync_secrets(desired)
         if model is None:
             created = self.api.push(name, None, payload, self.clock())
             return ref_for(desired, created["model"], created["deployment"], payload, secrets)
@@ -534,13 +557,13 @@ class BasetenProvider:
             stored.append(store_name)
         return stored
 
-    def current_model(self, observed: Ref | None, name: str) -> dict[str, Any] | None:
+    def current_model(self, observed: Ref | None, desired: Target) -> dict[str, Any] | None:
         model_id = observed.ids.get(MODEL_KEY) if observed else None
         if model_id:
             found = self.api.call("GET", f"/models/{model_id}", missing_ok=True)
             if found is not None:
                 return dict(found)
-        return self.api.model_named(name)
+        return self.api.owned_model(model_name(desired), desired.name, desired.provider)
 
     def converge(self, model_id: str, name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         digest = str(payload["labels"][SPEC_LABEL])
@@ -562,7 +585,7 @@ class BasetenProvider:
         model_id = ref.ids.get(MODEL_KEY)
         if model_id or not ref.ids.get(NAME_KEY):
             return model_id
-        found = self.api.model_named(ref.ids[NAME_KEY])
+        found = self.api.owned_model(ref.ids[NAME_KEY], ref.service, ref.provider)
         return str(found["id"]) if found else None
 
     def destroy(self, ref: Ref) -> None:
@@ -720,7 +743,7 @@ class BasetenProvider:
         if self.dry_run:
             return None
         name = f"multihull-{service}-{self.provider_name}"
-        model = self.api.model_named(name)
+        model = self.api.owned_model(name, service, self.provider_name)
         if model is None:
             return None
         model_id = str(model["id"])

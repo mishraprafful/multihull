@@ -263,18 +263,7 @@ class FakeBaseten:
         if model_id is None:
             if not source.get("name"):
                 return error(422, "name is required")
-            model_id = self.next_id("m")
-            self.models[model_id] = {
-                "id": model_id,
-                "name": source["name"],
-                "created_at": "2026-10-26T12:00:00Z",
-                "production_deployment_id": None,
-            }
-            self.environments[model_id] = {
-                "autoscaling_settings": dict(DEFAULT_AUTOSCALING),
-                "current": None,
-                "candidate": None,
-            }
+            model_id = self.new_model(source["name"], "default")
         environment = self.environments[model_id]
         settings = {
             **environment["autoscaling_settings"],
@@ -304,6 +293,36 @@ class FakeBaseten:
         return httpx.Response(
             200, json={"model": model, "deployment": self.deployments[deployment_id]}
         )
+
+    def new_model(self, name: str, team: str) -> str:
+        model_id = self.next_id("m")
+        self.models[model_id] = {
+            "id": model_id,
+            "name": name,
+            "team_name": team,
+            "created_at": "2026-10-26T12:00:00Z",
+            "production_deployment_id": None,
+        }
+        self.environments[model_id] = {
+            "autoscaling_settings": dict(DEFAULT_AUTOSCALING),
+            "current": None,
+            "candidate": None,
+        }
+        return model_id
+
+    def add_foreign_model(self, name: str, team: str, labels: Mapping[str, str]) -> str:
+        model_id = self.new_model(name, team)
+        deployment_id = self.next_id("d")
+        self.deployments[deployment_id] = {
+            "id": deployment_id,
+            "model_id": model_id,
+            "status": "ACTIVE",
+            "active_replica_count": 1,
+            "autoscaling_settings": dict(DEFAULT_AUTOSCALING),
+            "labels": dict(labels),
+        }
+        self.environments[model_id]["current"] = deployment_id
+        return model_id
 
     def finish_promotion(self, model_id: str) -> None:
         environment = self.environments[model_id]

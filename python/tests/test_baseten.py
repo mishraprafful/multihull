@@ -273,6 +273,40 @@ def test_apply_without_state_adopts_the_model_by_name(
     assert len(fake.models) == 1 and len(fake.uploads) == 1
 
 
+def test_a_name_shared_across_teams_is_never_adopted_or_deleted(
+    provider: BasetenProvider, fake: FakeBaseten, target: Target
+) -> None:
+    ours = provider.apply(target, None)
+    name = ours.ids["name"]
+    labels = {"multihull.dev/service": "llama-8b", "multihull.dev/provider": "baseten-us"}
+    fake.add_foreign_model(name, "research", labels)
+    with pytest.raises(RuntimeError, match=f"2 models named {name} \\(teams default, research\\)"):
+        provider.apply(target, None)
+    unnamed = Ref("baseten-us", "baseten", "llama-8b", {"name": name})
+    with pytest.raises(RuntimeError, match="2 models named"):
+        provider.destroy(unnamed)
+    with pytest.raises(RuntimeError, match="2 models named"):
+        provider.rediscover("llama-8b")
+    assert len(fake.models) == 2
+    assert provider.apply(target, ours).ids == ours.ids
+
+
+def test_a_model_without_our_labels_is_never_adopted_or_deleted(
+    provider: BasetenProvider, fake: FakeBaseten, target: Target
+) -> None:
+    name = "multihull-llama-8b-baseten-us"
+    labels = {"multihull.dev/service": "other", "multihull.dev/provider": "baseten-us"}
+    foreign = fake.add_foreign_model(name, "default", labels)
+    with pytest.raises(RuntimeError, match="multihull will not adopt or delete it"):
+        provider.apply(target, None)
+    with pytest.raises(RuntimeError, match="will not adopt or delete it"):
+        provider.destroy(Ref("baseten-us", "baseten", "llama-8b", {"name": name}))
+    with pytest.raises(RuntimeError, match="will not adopt or delete it"):
+        provider.rediscover("llama-8b")
+    assert list(fake.models) == [foreign]
+    assert fake.secrets == {} and fake.uploads == {}
+
+
 def test_status_follows_the_promotion_then_the_health_path(
     provider: BasetenProvider, fake: FakeBaseten, target: Target
 ) -> None:
