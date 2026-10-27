@@ -226,6 +226,12 @@ def test_every_registry_provider_has_a_case() -> None:
     assert sorted(CASES) == sorted(PROVIDERS)
 
 
+def test_case_repr_hides_credential_values(case: Case) -> None:
+    shown = repr(case)
+    hidden = not any(value in shown for value in (*case.secret_values, *case.traffic_values))
+    assert hidden
+
+
 @pytest.mark.skipif(bool(LIVE), reason="goldens are checked against fakes")
 def test_plan_matches_the_golden_payload(case: Case) -> None:
     payload = case.provider.plan(case.desired, None).payload
@@ -274,7 +280,8 @@ def test_rediscover_rebuilds_lost_state(lifecycle: Case, state: LocalState) -> N
         applied.service,
     )
     provider = lifecycle.provider
-    assert provider.endpoint(found).url == provider.endpoint(applied).url
+    found_url, applied_url = provider.endpoint(found).url, provider.endpoint(applied).url
+    assert found_url == applied_url
     assert provider.status(found).phase == "Ready"
     assert change_of(lifecycle, state) == "unchanged"
 
@@ -306,7 +313,10 @@ def test_secret_values_never_reach_plan_state_or_snapshot(
         "snapshot": snapshot_path.read_bytes(),
     }
     routes = json.loads(outputs["snapshot"])["routes"]
-    assert [e["provider"] for route in routes for e in route["endpoints"]] == [lifecycle.target]
-    assert leaks(outputs, lifecycle.secret_values) == []
+    published = [str(e["provider"]) for route in routes for e in route["endpoints"]]
+    assert published == [lifecycle.target]
+    secrets_found = leaks(outputs, lifecycle.secret_values)
+    assert secrets_found == []
     del outputs["snapshot"]
-    assert leaks(outputs, lifecycle.traffic_values) == []
+    traffic_found = leaks(outputs, lifecycle.traffic_values)
+    assert traffic_found == []

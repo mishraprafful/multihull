@@ -23,8 +23,8 @@ class Case:
     provider: Provider
     resources: Callable[[], int]
     set_serving: Callable[[Ref, bool], None]
-    secret_values: tuple[str, ...]
-    traffic_values: tuple[str, ...] = ()
+    secret_values: tuple[str, ...] = field(repr=False)
+    traffic_values: tuple[str, ...] = field(default=(), repr=False)
     render_only: str | None = None
     timeout_seconds: float = 0.0
     applied: list[Ref] = field(default_factory=list)
