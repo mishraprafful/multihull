@@ -12,6 +12,7 @@ from multihull import discovery, engine
 from multihull.providers import create
 from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref
+from multihull.providers.baseten import API_KEY_ENV as BASETEN_API_KEY_ENV
 from multihull.providers.docker import DockerProvider
 from multihull.providers.kubernetes import KubernetesProvider
 from multihull.providers.modal import (
@@ -23,6 +24,7 @@ from multihull.providers.modal import (
     ModalProvider,
 )
 from multihull.providers.registry import PROVIDERS
+from multihull.providers.replicate import API_TOKEN_ENV as REPLICATE_API_TOKEN_ENV
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState
@@ -132,9 +134,11 @@ def runpod_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
     )
 
 
-def render_only(provider_type: str, issue: int) -> CaseBuilder:
+def render_only(provider_type: str, credential_env: str, issue: int) -> CaseBuilder:
     def build(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
         spec = cog_spec(spec, provider_type)
+        credential = sentinel(f"{provider_type}-key")
+        monkeypatch.setenv(credential_env, credential)
         return Case(
             spec=spec,
             target=f"{provider_type}-x",
@@ -142,7 +146,7 @@ def render_only(provider_type: str, issue: int) -> CaseBuilder:
             provider=create(provider_type),
             resources=lambda: 0,
             set_serving=lambda ref, serving: None,
-            secret_values=(mirror_secrets(monkeypatch, spec),),
+            secret_values=(credential, mirror_secrets(monkeypatch, spec)),
             render_only=f"render-only until issue {issue} implements apply",
         )
 
@@ -150,11 +154,11 @@ def render_only(provider_type: str, issue: int) -> CaseBuilder:
 
 
 CASES: dict[str, CaseBuilder] = {
-    "baseten": render_only("baseten", issue=64),
+    "baseten": render_only("baseten", BASETEN_API_KEY_ENV, issue=64),
     "docker": docker_case,
     "kubernetes": kubernetes_case,
     "modal": modal_case,
-    "replicate": render_only("replicate", issue=65),
+    "replicate": render_only("replicate", REPLICATE_API_TOKEN_ENV, issue=65),
     "runpod": runpod_case,
 }
 LIVE = live_types()
@@ -174,7 +178,8 @@ def case(
 @pytest.fixture
 def lifecycle(case: Case, request: pytest.FixtureRequest) -> Case:
     if case.render_only:
-        request.applymarker(pytest.mark.xfail(reason=case.render_only, strict=True))
+        xfail = pytest.mark.xfail(raises=NotImplementedError, reason=case.render_only, strict=True)
+        request.applymarker(xfail)
     return case
 
 
@@ -184,6 +189,8 @@ def state(tmp_path: Path) -> LocalState:
 
 
 def deploy(case: Case, state: LocalState) -> Ref:
+    if case.render_only:
+        case.provider.apply(case.desired, None)
     [result] = [
         r
         for r in engine.apply(
@@ -222,8 +229,23 @@ def serve(case: Case, ref: Ref) -> None:
     assert reaches(case, ref, ("Ready",)), case.provider.status(ref)
 
 
+def plan_output(plans: list[engine.TargetPlan], directory: Path) -> bytes:
+    written = engine.write_plan_dir(plans, directory)
+    notes = "\n".join(note for p in plans if p.plan for note in p.plan.notes)
+    return b"".join(path.read_bytes() for path in written) + notes.encode()
+
+
 def test_every_registry_provider_has_a_case() -> None:
     assert sorted(CASES) == sorted(PROVIDERS)
+
+
+def test_render_only_cases_still_raise_not_implemented(
+    monkeypatch: pytest.MonkeyPatch, llama_spec: ServiceSpec
+) -> None:
+    built = [build(monkeypatch, llama_spec) for build in CASES.values()]
+    for render_only_case in (case for case in built if case.render_only):
+        with pytest.raises(NotImplementedError):
+            render_only_case.provider.apply(render_only_case.desired, None)
 
 
 def test_case_repr_hides_credential_values(case: Case) -> None:
@@ -236,6 +258,15 @@ def test_case_repr_hides_credential_values(case: Case) -> None:
 def test_plan_matches_the_golden_payload(case: Case) -> None:
     payload = case.provider.plan(case.desired, None).payload
     assert_golden(case.golden, json.loads(json.dumps(payload)))
+
+
+def test_plan_output_never_holds_credential_values(
+    case: Case, state: LocalState, tmp_path: Path
+) -> None:
+    plans = engine.plan(case.spec, state, {case.target: case.provider})
+    outputs = {"plan": plan_output(plans, tmp_path / "plan")}
+    found = leaks(outputs, (*case.secret_values, *case.traffic_values))
+    assert found == []
 
 
 def test_apply_twice_creates_nothing_new_and_plans_unchanged(
@@ -302,13 +333,11 @@ def test_secret_values_never_reach_plan_state_or_snapshot(
     providers = {lifecycle.target: lifecycle.provider}
     deploy(lifecycle, state)
     plans = engine.plan(lifecycle.spec, state, providers)
-    written = engine.write_plan_dir(plans, tmp_path / "plan")
-    notes = "\n".join(note for p in plans if p.plan for note in p.plan.notes)
     snapshot_path = tmp_path / "snapshot.json"
     snapshot = discovery.file_snapshot(lifecycle.spec, state, providers, snapshot_path)
     discovery.write_snapshot(snapshot, snapshot_path)
     outputs = {
-        "plan": b"".join(path.read_bytes() for path in written) + notes.encode(),
+        "plan": plan_output(plans, tmp_path / "plan"),
         "state": b"".join(p.read_bytes() for p in (tmp_path / "state").iterdir()),
         "snapshot": snapshot_path.read_bytes(),
     }
