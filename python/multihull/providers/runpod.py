@@ -89,9 +89,10 @@ def secret_reference(store_name: str) -> str:
     return "{{ RUNPOD_SECRET_" + store_name + " }}"
 
 
-def referenced_secrets(env: Mapping[str, Any]) -> list[str]:
+def owned_secrets(env: Mapping[str, Any], endpoint: str) -> list[str]:
+    prefix = UNSAFE_SECRET_CHARS.sub("_", f"{endpoint}_")
     found = (SECRET_REFERENCE.fullmatch(str(value)) for value in env.values())
-    return [match.group(1) for match in found if match]
+    return [match.group(1) for match in found if match and match.group(1).startswith(prefix)]
 
 
 def gpu_pools(desired: Target) -> list[str]:
@@ -560,7 +561,7 @@ class RunpodProvider:
             URL_KEY: base_url(found),
             HEALTH_PATH_KEY: str(env.get(HEALTH_CHECK_PATH_ENV) or DEFAULT_HEALTH_PATH),
         }
-        stored = referenced_secrets(env)
+        stored = owned_secrets(env, name)
         if stored:
             ids[SECRETS_KEY] = ",".join(stored)
         return Ref(provider=self.provider_name, type="runpod", service=service, ids=ids)

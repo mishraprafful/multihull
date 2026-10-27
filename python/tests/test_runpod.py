@@ -371,3 +371,16 @@ def test_a_rediscovered_ref_destroys_the_mirrored_secrets(
     assert found is not None
     provider.destroy(found)
     assert (fake.endpoints, fake.secrets) == ({}, {})
+
+
+def test_rediscover_leaves_secrets_the_spec_only_references(
+    provider: RunpodProvider, fake: FakeRunpod, llama_raw: dict[str, Any]
+) -> None:
+    env = {**llama_raw["container"]["env"], "SHARED": "{{ RUNPOD_SECRET_team_shared }}"}
+    target = variant(llama_raw, container={"env": env})
+    provider.api.put_secret("team_shared", "owned-by-the-user")
+    provider.apply(target, None)
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert [stored["name"] for stored in fake.secrets.values()] == ["team_shared"]
