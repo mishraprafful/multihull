@@ -391,3 +391,16 @@ def test_endpoint_repr_hides_the_injected_headers(provider: RunpodProvider, targ
     hidden = CALLER not in repr(endpoint)
     assert endpoint.inject_headers
     assert hidden
+
+
+def test_rediscover_leaves_a_reference_that_only_shares_the_endpoint_prefix(
+    provider: RunpodProvider, fake: FakeRunpod, llama_raw: dict[str, Any]
+) -> None:
+    lookalike = "multihull_llama_8b_runpod_eu_other_team"
+    env = {**llama_raw["container"]["env"], "SHARED": "{{ RUNPOD_SECRET_" + lookalike + " }}"}
+    provider.api.put_secret(lookalike, "owned-by-another-target")
+    provider.apply(variant(llama_raw, container={"env": env}), None)
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert [stored["name"] for stored in fake.secrets.values()] == [lookalike]

@@ -92,9 +92,12 @@ def secret_reference(store_name: str) -> str:
 
 
 def owned_secrets(env: Mapping[str, Any], endpoint: str) -> list[str]:
-    prefix = UNSAFE_SECRET_CHARS.sub("_", f"{endpoint}_")
-    found = (SECRET_REFERENCE.fullmatch(str(value)) for value in env.values())
-    return [match.group(1) for match in found if match and match.group(1).startswith(prefix)]
+    owned: list[str] = []
+    for key, value in env.items():
+        match = SECRET_REFERENCE.fullmatch(str(value))
+        if match and match.group(1) == UNSAFE_SECRET_CHARS.sub("_", f"{endpoint}_{key}"):
+            owned.append(match.group(1))
+    return owned
 
 
 def gpu_pools(desired: Target) -> list[str]:
