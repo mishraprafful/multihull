@@ -12,7 +12,7 @@ Calls RunPod's REST API v2 (`https://api.runpod.io/v2`) directly. `apply` create
   runpod: {dataCenters: [EU-RO-1, EU-SE-1]}
 ```
 
-Credentials: `RUNPOD_API_KEY`, sent as `Authorization: Bearer`. `hull doctor` lists endpoints with it and fails on 401 or 403. RunPod also requires a key on every inference request, so the router injects the same header from the snapshot, on traffic and probes. Set `RUNPOD_ENDPOINT_API_KEY` to a Restricted key with access to the endpoint to keep the deploy key out of the snapshot.
+Credentials: `RUNPOD_API_KEY`, sent as `Authorization: Bearer`. `hull doctor` lists endpoints with it and fails on 401 or 403. RunPod also requires a key on every inference request, so the router injects the same header from the snapshot, on traffic and probes. Set `RUNPOD_ENDPOINT_API_KEY` to a Restricted key with access to the endpoint to keep the deploy key out of the snapshot. A target with `credentials` ([The spec](/docs/concepts/spec/#credentials)) always signs traffic with its own key and ignores `RUNPOD_ENDPOINT_API_KEY`.
 
 Requirements:
 - The server listens on `0.0.0.0:<container.port>`. The translator sets `PORT` and `PORT_HEALTH` to that port and `HEALTH_CHECK_PATH` to `container.health.path`. RunPod's load balancer polls that path: 200 healthy, 204 initializing, anything else unhealthy.

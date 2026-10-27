@@ -22,7 +22,38 @@ A normalised enum: `L4, A10G, A100-40, A100-80, H100, H200, B200`. Each translat
 
 ## Credentials
 
-Never in the file. Each provider block resolves credentials from its native location by default and accepts `credentials: env:NAME` or `credentials: file:PATH` as overrides. Service secrets are listed by name only and mirrored into each provider's native secret store.
+Never in the file. Each target reads its provider's native location by default. Set `credentials` on a target to read them elsewhere, for example a second account or a kubeconfig outside `KUBECONFIG`:
+
+```yaml
+targets:
+  - provider: gke-prod
+    type: kubernetes
+    priority: 1
+    credentials: file:~/.kube/prod.yaml
+  - provider: runpod-eu
+    type: runpod
+    priority: 2
+    credentials: env:RUNPOD_EU_KEY
+```
+
+- `env:NAME` reads environment variable NAME. `file:PATH` reads a file; `~` expands to the home directory and a relative path resolves against the working directory of `hull` (use an absolute path for `hull controller` in a container).
+- The value has the provider's native format:
+
+  | Type | Native location | Override value |
+  |---|---|---|
+  | `runpod` | `RUNPOD_API_KEY` | the API key |
+  | `baseten` | `BASETEN_API_KEY` | the API key |
+  | `replicate` | `REPLICATE_API_TOKEN` | the API token |
+  | `kubernetes` | kubeconfig (`KUBECONFIG`, `~/.kube/config`) or in-cluster | kubeconfig YAML; `kubernetes.context` picks the context, else its `current-context` |
+  | `modal` | `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or `~/.modal.toml` | `.modal.toml` TOML, profile tables only: the `active = true` profile, else the only profile, else the one named `default`; it needs `token_id` and `token_secret` (OAuth profiles and `server_url` are not read) |
+  | `docker` | `~/.docker/config.json` for image pulls | Docker `config.json` (`auths`, `credsStore` or `credHelpers`); a registry it has no entry for is pulled anonymously, and with `docker.pull: false` a missing image is pulled with it too |
+
+- An override replaces the native location; a missing or unreadable override fails, it never falls back. `hull doctor` names the variable or path that is missing.
+- The value is never logged, printed, stored in state or written to a plan; errors name only the variable or path. The one exception is RunPod and Baseten traffic: the router signs such a target's requests and probes with that target's key, so it reaches the snapshot as `Authorization`. `RUNPOD_ENDPOINT_API_KEY` and `BASETEN_INFERENCE_API_KEY` are process-wide and apply only to targets without `credentials`, since another account's endpoint would reject them; `hull doctor` says so (see [Security](/docs/reference/security/)).
+- Modal proxy auth tokens (`MODAL_PROXY_TOKEN_ID`, `MODAL_PROXY_TOKEN_SECRET`) are traffic credentials, not deploy credentials, and are not overridden.
+- With a Modal override, the `modal app stop` that `hull destroy` runs sees only the override: the native `~/.modal.toml`, `MODAL_PROFILE`, `MODAL_TOKEN_*` and `MODAL_OAUTH_*` are hidden from it. The in-process Modal SDK still loads the native config when imported, takes its server URL from there or `MODAL_SERVER_URL`, and refuses a malformed native file.
+
+Service secrets are listed by name only and mirrored into each provider's native secret store.
 
 ## Route API keys
 

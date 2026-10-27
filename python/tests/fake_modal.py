@@ -55,6 +55,18 @@ class FakeModalClient:
             raise self.error
 
 
+class FakeClientFactory:
+    def __init__(self, fake: FakeModal) -> None:
+        self.fake = fake
+
+    def __call__(self, token_id: str, token_secret: str) -> FakeModalClient:
+        self.fake.logins.append((token_id, token_secret))
+        return self.fake.client
+
+    async def aio(self, token_id: str, token_secret: str) -> FakeModalClient:
+        return self(token_id, token_secret)
+
+
 class FakeModal:
     def __init__(self) -> None:
         self.images: list[FakeImage] = []
@@ -73,7 +85,12 @@ class FakeModal:
         self.Secret = SimpleNamespace(from_dict=FakeSecret)
         self.Cls = SimpleNamespace(from_name=self._cls_from_name)
         self.client = FakeModalClient()
-        self.Client = SimpleNamespace(from_env=SimpleNamespace(aio=self._client_from_env))
+        self.logins: list[tuple[str, str]] = []
+        self.clients_used: list[tuple[str, Any]] = []
+        self.Client = SimpleNamespace(
+            from_env=SimpleNamespace(aio=self._client_from_env),
+            from_credentials=FakeClientFactory(self),
+        )
         self.exception = SimpleNamespace(AuthError=FakeAuthError, InvalidError=FakeInvalidError)
 
     async def _client_from_env(self) -> FakeModalClient:
@@ -101,14 +118,16 @@ class FakeModal:
                 fake.cls_kwargs = kwargs
                 return lambda cls: cls
 
-            def deploy(self, name: str, environment_name: str) -> None:
+            def deploy(self, name: str, environment_name: str, client: Any = None) -> None:
+                fake.clients_used.append(("deploy", client))
                 if fake.deploy_error is not None:
                     raise fake.deploy_error
                 fake.deployed.append((name, environment_name))
                 fake.builder_versions.append(os.environ.get("MODAL_IMAGE_BUILDER_VERSION"))
 
             @staticmethod
-            def lookup(name: str, environment_name: str | None = None) -> Any:
+            def lookup(name: str, environment_name: str | None = None, client: Any = None) -> Any:
+                fake.clients_used.append(("lookup", client))
                 fake.lookups.append((name, environment_name))
                 return SimpleNamespace(logs=SimpleNamespace(fetch=fake._fetch_logs))
 
@@ -118,7 +137,10 @@ class FakeModal:
         self.log_since = since
         yield from self.log_entries
 
-    def _cls_from_name(self, app_name: str, name: str, environment_name: str | None) -> Any:
+    def _cls_from_name(
+        self, app_name: str, name: str, environment_name: str | None, client: Any = None
+    ) -> Any:
+        self.clients_used.append(("cls", client))
         self.lookups.append((f"{app_name}/{name}", environment_name))
         fake = self
 

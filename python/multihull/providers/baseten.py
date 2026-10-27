@@ -16,6 +16,7 @@ from urllib.parse import quote
 import httpx
 import yaml
 
+from multihull.credentials import CredentialError, read_token, token_origin
 from multihull.providers.base import (
     PROVIDER_LABEL,
     SERVICE_LABEL,
@@ -27,8 +28,9 @@ from multihull.providers.base import (
     Ref,
     ScaleRefused,
     Target,
-    env_credential_health,
+    credential_health,
     redact_env,
+    redact_token,
     resolve_secret_values,
 )
 from multihull.spec import GPU
@@ -324,24 +326,44 @@ def ref_for(
     return Ref(provider=desired.provider, type="baseten", service=desired.name, ids=ids)
 
 
-def redact(text: str) -> str:
-    return redact_env(text, [API_KEY_ENV, INFERENCE_API_KEY_ENV])
+def redact(text: str, credentials: str | None = None) -> str:
+    return redact_token(redact_env(text, [API_KEY_ENV, INFERENCE_API_KEY_ENV]), credentials)
 
 
-def api_key() -> str:
-    value = os.environ.get(API_KEY_ENV, "").strip()
-    if not value:
-        raise RuntimeError(f"{API_KEY_ENV} is not set; Baseten credentials missing")
-    return value
+def api_key(credentials: str | None = None) -> str:
+    try:
+        return read_token(credentials, API_KEY_ENV)
+    except CredentialError as exc:
+        raise CredentialError(f"{exc}; Baseten credentials missing") from None
 
 
 def authorization(value: str) -> dict[str, str]:
     return {"Authorization": f"{AUTH_SCHEME} {value}"}
 
 
-def traffic_headers() -> dict[str, str]:
-    value = (os.environ.get(INFERENCE_API_KEY_ENV) or os.environ.get(API_KEY_ENV) or "").strip()
-    return authorization(value) if value else {}
+def inference_api_key() -> str:
+    return os.environ.get(INFERENCE_API_KEY_ENV, "").strip()
+
+
+def traffic_key(credentials: str | None) -> str:
+    if credentials is None and inference_api_key():
+        return inference_api_key()
+    return api_key(credentials)
+
+
+def traffic_headers(credentials: str | None = None) -> dict[str, str]:
+    try:
+        return authorization(traffic_key(credentials))
+    except CredentialError:
+        return {}
+
+
+def traffic_note(credentials: str | None) -> str:
+    if credentials is None:
+        return "" if inference_api_key() else f"; {DEPLOY_KEY_IN_SNAPSHOT}"
+    if inference_api_key():
+        return f", which also signs router traffic instead of {INFERENCE_API_KEY_ENV}"
+    return ", which also signs router traffic"
 
 
 def error_detail(response: httpx.Response) -> str:
@@ -379,8 +401,9 @@ def epoch_millis(moment: datetime) -> int:
 
 
 class BasetenApi:
-    def __init__(self, http: httpx.Client) -> None:
+    def __init__(self, http: httpx.Client, credentials: str | None = None) -> None:
         self.http = http
+        self.credentials = credentials
 
     def call(
         self,
@@ -391,12 +414,18 @@ class BasetenApi:
         missing_ok: bool = False,
     ) -> Any:
         response = self.http.request(
-            method, f"{API_URL}{path}", json=body, params=params, headers=authorization(api_key())
+            method,
+            f"{API_URL}{path}",
+            json=body,
+            params=params,
+            headers=authorization(api_key(self.credentials)),
         )
         if missing_ok and response.status_code == 404:
             return None
         if response.is_error:
-            raise BasetenApiError(response.status_code, redact(error_detail(response)))
+            raise BasetenApiError(
+                response.status_code, redact(error_detail(response), self.credentials)
+            )
         return response.json() if response.content else None
 
     def owned_model(self, name: str, service: str, provider: str) -> dict[str, Any] | None:
@@ -506,11 +535,13 @@ class BasetenProvider:
         provider_name: str = "baseten",
         http_client: httpx.Client | None = None,
         clock: Callable[[], datetime] | None = None,
+        credentials: str | None = None,
     ) -> None:
         self.dry_run = dry_run
         self.provider_name = provider_name
         self._http = http_client
         self.clock = clock or (lambda: datetime.now(UTC))
+        self.credentials = credentials
 
     @property
     def http(self) -> httpx.Client:
@@ -520,7 +551,7 @@ class BasetenProvider:
 
     @property
     def api(self) -> BasetenApi:
-        return BasetenApi(self.http)
+        return BasetenApi(self.http, self.credentials)
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         return Plan(
@@ -609,7 +640,7 @@ class BasetenProvider:
                 return Observed(phase="Failed", message=f"Baseten model {model_id} not found")
             return self.observe(ref, model_id, environment)
         except (httpx.HTTPError, RuntimeError) as exc:
-            return Observed(phase="Unknown", message=redact(str(exc)))
+            return Observed(phase="Unknown", message=redact(str(exc), self.credentials))
 
     def observe(self, ref: Ref, model_id: str, environment: Mapping[str, Any]) -> Observed:
         desired = int((environment.get("autoscaling_settings") or {}).get("min_replica", 0))
@@ -668,7 +699,9 @@ class BasetenProvider:
 
     def probe(self, url: str, ready: int, desired: int) -> Observed:
         try:
-            response = self.http.get(url, headers=traffic_headers(), timeout=HEALTH_TIMEOUT_SECONDS)
+            response = self.http.get(
+                url, headers=traffic_headers(self.credentials), timeout=HEALTH_TIMEOUT_SECONDS
+            )
         except httpx.HTTPError as exc:
             return Observed(
                 "Pending",
@@ -713,30 +746,29 @@ class BasetenProvider:
 
     def endpoint(self, ref: Ref) -> Endpoint:
         url = ref.ids.get(URL_KEY) or endpoint_url(ref.ids.get(MODEL_KEY, "{modelId}"))
-        return Endpoint(url=url, inject_headers=traffic_headers())
+        return Endpoint(url=url, inject_headers=traffic_headers(self.credentials))
 
     def gpu_inventory(self) -> list[GPUOffer]:
         return [GPUOffer(gpu=gpu, available=True) for gpu in BASETEN_ACCELERATOR]
 
     def credentials_health(self) -> CredHealth:
-        if not os.environ.get(API_KEY_ENV, "").strip():
-            return env_credential_health(API_KEY_ENV, self.type)
+        present = credential_health(self.credentials, API_KEY_ENV, self.type)
+        if not present.ok:
+            return present
+        origin = token_origin(self.credentials, API_KEY_ENV)
         try:
             user = self.api.call("GET", "/users/me")
         except BasetenApiError as exc:
             if exc.status == 401:
-                return CredHealth(ok=False, message=f"Baseten rejected {API_KEY_ENV}: {exc}")
+                return CredHealth(ok=False, message=f"Baseten rejected {origin}: {exc}")
             if exc.status == 403:
-                return CredHealth(ok=False, message=f"{API_KEY_ENV} lacks management access: {exc}")
-            return CredHealth(ok=False, message=f"could not verify {API_KEY_ENV}: {exc}")
+                return CredHealth(ok=False, message=f"{origin} lacks management access: {exc}")
+            return CredHealth(ok=False, message=f"could not verify {origin}: {exc}")
         except httpx.HTTPError as exc:
-            return CredHealth(
-                ok=False, message=redact(f"could not reach Baseten: {type(exc).__name__}: {exc}")
-            )
+            reason = f"could not reach Baseten: {type(exc).__name__}: {exc}"
+            return CredHealth(ok=False, message=redact(reason, self.credentials))
         identity = str((user or {}).get("email") or (user or {}).get("name") or "") or None
-        message = f"Baseten accepted {API_KEY_ENV}"
-        if not os.environ.get(INFERENCE_API_KEY_ENV, "").strip():
-            message += f"; {DEPLOY_KEY_IN_SNAPSHOT}"
+        message = f"Baseten accepted {origin}{traffic_note(self.credentials)}"
         return CredHealth(ok=True, message=message, identity=identity)
 
     def rediscover(self, service: str) -> Ref | None:
