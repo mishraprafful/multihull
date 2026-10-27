@@ -8,7 +8,7 @@
   "push": {
     "image": "r8.im/acme/multihull-llama-8b",
     "context": ".",
-    "digest": "e3d93285de75901d"
+    "digest": "9622f96696ad78db"
   },
   "deployment": {
     "name": "multihull-llama-8b-replicate-x",
