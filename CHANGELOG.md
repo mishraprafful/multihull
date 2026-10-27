@@ -18,6 +18,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 ### Fixed
 
 - Modal `rediscover` reads the deployed web URL from Modal; it derived the URL from `MODAL_WORKSPACE` (default `workspace`), so a rebuilt state routed to the wrong host (#66).
+- `Endpoint` leaves `inject_headers` out of its repr, so a logged or asserted endpoint never shows the provider credentials the router injects (#66).
 
 ## [0.2.0] - 2026-10-12
 
