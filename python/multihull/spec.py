@@ -8,6 +8,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from multihull.credentials import CREDENTIALS_PATTERN, CredentialSource
+
 ProviderType = Literal["kubernetes", "modal", "runpod", "baseten", "replicate", "docker"]
 PROVIDER_TYPES: tuple[ProviderType, ...] = (
     "kubernetes",
@@ -31,7 +33,7 @@ class GPU(StrEnum):
 
 
 class SpecModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, hide_input_in_errors=True)
 
 
 class Build(SpecModel):
@@ -156,12 +158,31 @@ class TargetSpec(SpecModel):
     priority: int = Field(ge=1)
     replicas: TargetReplicas | None = None
     weight: int = Field(default=1, ge=1)
+    credentials: str | None = Field(
+        default=None,
+        pattern=CREDENTIALS_PATTERN,
+        description=(
+            "Where this target's provider credentials come from instead of the native location: "
+            "`env:NAME` reads environment variable NAME, `file:PATH` reads a file (`~` expands, "
+            "a relative path resolves against the working directory). The value uses the "
+            "provider's native format: the API key or token for RunPod, Baseten and Replicate, "
+            "kubeconfig YAML for Kubernetes, `.modal.toml` for Modal, Docker `config.json` for "
+            "Docker registry pulls. The value is never logged, stored in state or put in a plan."
+        ),
+    )
     kubernetes: KubernetesBlock | None = None
     modal: ModalBlock | None = None
     runpod: RunpodBlock | None = None
     baseten: BasetenBlock | None = None
     replicate: ReplicateBlock | None = None
     docker: DockerBlock | None = None
+
+    @field_validator("credentials", mode="before")
+    @classmethod
+    def credentials_is_a_reference(cls, reference: Any) -> Any:
+        if isinstance(reference, str):
+            CredentialSource.parse(reference)
+        return reference
 
     @model_validator(mode="after")
     def block_matches_type(self) -> TargetSpec:

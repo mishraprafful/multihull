@@ -26,6 +26,7 @@ from multihull.controller import (
     DEFAULT_INTERVAL,
     Controller,
 )
+from multihull.credentials import credential_problem
 from multihull.durations import format_duration, parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
 from multihull.state import (
@@ -605,6 +606,9 @@ def doctor(path: SpecArg = DEFAULT_SPEC) -> None:
 
 
 def check_credentials(target: specmod.TargetSpec) -> CredHealth:
+    problem = credential_problem(target.credentials) if target.credentials else None
+    if problem is not None:
+        return CredHealth(ok=False, message=problem)
     try:
         return provider_for(target).credentials_health()
     except Exception as exc:

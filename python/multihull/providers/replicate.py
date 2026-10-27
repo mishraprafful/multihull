@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 import httpx
 
 from multihull.build_context import ContextScan, scan_context
+from multihull.credentials import CredentialError, read_token, token_origin
 from multihull.providers.base import (
     CredHealth,
     DestroyDeferred,
@@ -22,8 +23,9 @@ from multihull.providers.base import (
     Ref,
     ScaleRefused,
     Target,
-    env_credential_health,
+    credential_health,
     redact_env,
+    redact_token,
 )
 from multihull.spec import GPU, ReplicateBlock
 
@@ -237,24 +239,30 @@ def deployment_drift(deployment: Mapping[str, Any], body: Mapping[str, Any]) -> 
     return {field: body[field] for field in DEPLOYMENT_FIELDS if live.get(field) != body[field]}
 
 
-def redact(text: str) -> str:
-    return redact_env(text, [API_TOKEN_ENV, CLI_AUTH_TOKEN_ENV])
+def redact(text: str, credentials: str | None = None) -> str:
+    return redact_token(redact_env(text, [API_TOKEN_ENV, CLI_AUTH_TOKEN_ENV]), credentials)
 
 
-def api_token() -> str:
-    value = os.environ.get(API_TOKEN_ENV, "").strip()
-    if not value:
-        raise RuntimeError(f"{API_TOKEN_ENV} is not set; Replicate credentials missing")
-    return value
+def api_token(credentials: str | None = None) -> str:
+    try:
+        return read_token(credentials, API_TOKEN_ENV)
+    except CredentialError as exc:
+        raise CredentialError(f"{exc}; Replicate credentials missing") from None
 
 
 def bearer(value: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {value}"}
 
 
-def traffic_headers() -> dict[str, str]:
-    value = os.environ.get(API_TOKEN_ENV, "").strip()
-    return bearer(value) if value else {}
+def traffic_headers(credentials: str | None = None) -> dict[str, str]:
+    try:
+        return bearer(api_token(credentials))
+    except CredentialError:
+        return {}
+
+
+def traffic_note(credentials: str | None) -> str:
+    return "" if credentials is None else ", which also signs router traffic"
 
 
 def api_url(path: str) -> str:
@@ -318,8 +326,9 @@ class CogCli:
 
 
 class ReplicateApi:
-    def __init__(self, http: httpx.Client) -> None:
+    def __init__(self, http: httpx.Client, credentials: str | None = None) -> None:
         self.http = http
+        self.credentials = credentials
 
     def call(
         self,
@@ -328,11 +337,15 @@ class ReplicateApi:
         body: Mapping[str, Any] | None = None,
         missing_ok: bool = False,
     ) -> Any:
-        response = self.http.request(method, api_url(path), json=body, headers=bearer(api_token()))
+        response = self.http.request(
+            method, api_url(path), json=body, headers=bearer(api_token(self.credentials))
+        )
         if missing_ok and response.status_code == 404:
             return None
         if response.is_error:
-            raise ReplicateApiError(response.status_code, redact(problem_detail(response)))
+            raise ReplicateApiError(
+                response.status_code, redact(problem_detail(response), self.credentials)
+            )
         return response.json() if response.content else None
 
     def account(self) -> dict[str, Any]:
@@ -367,11 +380,13 @@ class ReplicateProvider:
         provider_name: str = "replicate",
         http_client: httpx.Client | None = None,
         cog: CogCli | None = None,
+        credentials: str | None = None,
     ) -> None:
         self.dry_run = dry_run
         self.provider_name = provider_name
         self._http = http_client
         self.cog = cog or CogCli()
+        self.credentials = credentials
 
     @property
     def http(self) -> httpx.Client:
@@ -381,7 +396,7 @@ class ReplicateProvider:
 
     @property
     def api(self) -> ReplicateApi:
-        return ReplicateApi(self.http)
+        return ReplicateApi(self.http, self.credentials)
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         scan = context_scan(desired)
@@ -433,7 +448,8 @@ class ReplicateProvider:
         wanted = replicate_block(desired).owner
         if wanted and wanted != account:
             raise ValueError(
-                f"replicate.owner is {wanted} but {API_TOKEN_ENV} belongs to {account}; "
+                f"replicate.owner is {wanted} but "
+                f"{token_origin(self.credentials, API_TOKEN_ENV)} belongs to {account}; "
                 "Replicate creates models and deployments only for the token's account"
             )
         return account
@@ -525,7 +541,7 @@ class ReplicateProvider:
         try:
             current = self.api.deployment(owner, name)
         except (httpx.HTTPError, RuntimeError) as exc:
-            return Observed(phase="Unknown", message=redact(str(exc)))
+            return Observed(phase="Unknown", message=redact(str(exc), self.credentials))
         if current is None:
             return Observed(
                 phase="Failed", message=f"Replicate deployment {owner}/{name} not found"
@@ -585,33 +601,40 @@ class ReplicateProvider:
     def endpoint(self, ref: Ref) -> Endpoint:
         owner = ref.ids.get(OWNER_KEY, OWNER_PLACEHOLDER)
         name = ref.ids.get(DEPLOYMENT_KEY, f"multihull-{ref.service}-{ref.provider}")
-        return Endpoint(url=deployment_url(owner, name), inject_headers=traffic_headers())
+        return Endpoint(
+            url=deployment_url(owner, name), inject_headers=traffic_headers(self.credentials)
+        )
 
     def gpu_inventory(self) -> list[GPUOffer]:
         return [GPUOffer(gpu=gpu, available=True) for gpu in REPLICATE_HARDWARE]
 
     def credentials_health(self) -> CredHealth:
-        if not os.environ.get(API_TOKEN_ENV, "").strip():
-            return env_credential_health(API_TOKEN_ENV, self.type)
+        present = credential_health(self.credentials, API_TOKEN_ENV, self.type)
+        if not present.ok:
+            return present
+        origin = token_origin(self.credentials, API_TOKEN_ENV)
         try:
             account = self.api.account()
         except ReplicateApiError as exc:
             if exc.status == 401:
-                return CredHealth(ok=False, message=f"Replicate rejected {API_TOKEN_ENV}: {exc}")
-            return CredHealth(ok=False, message=f"could not verify {API_TOKEN_ENV}: {exc}")
+                return CredHealth(ok=False, message=f"Replicate rejected {origin}: {exc}")
+            return CredHealth(ok=False, message=f"could not verify {origin}: {exc}")
         except httpx.HTTPError as exc:
-            return CredHealth(
-                ok=False, message=redact(f"could not reach Replicate: {type(exc).__name__}: {exc}")
-            )
+            reason = f"could not reach Replicate: {type(exc).__name__}: {exc}"
+            return CredHealth(ok=False, message=redact(reason, self.credentials))
         username = str(account.get("username") or "")
         if not self.cog.available():
             return CredHealth(
                 ok=False,
-                message=f"Replicate accepted {API_TOKEN_ENV}, but cog is not on PATH; "
+                message=f"Replicate accepted {origin}, but cog is not on PATH; "
                 "install Cog to push the model",
                 identity=username,
             )
-        return CredHealth(ok=True, message=f"Replicate accepted {API_TOKEN_ENV}", identity=username)
+        return CredHealth(
+            ok=True,
+            message=f"Replicate accepted {origin}{traffic_note(self.credentials)}",
+            identity=username,
+        )
 
     def rediscover(self, service: str) -> Ref | None:
         if self.dry_run:

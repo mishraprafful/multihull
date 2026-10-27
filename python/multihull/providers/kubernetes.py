@@ -6,6 +6,9 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, ClassVar, Protocol
 
+import yaml
+
+from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers.base import (
     GPU_CLASS_LABEL,
     SERVICE_LABEL,
@@ -47,6 +50,26 @@ def uses_in_cluster_config(context: str | None) -> bool:
     )
 
 
+def kubeconfig_document(credentials: str) -> dict[str, Any]:
+    source = CredentialSource.parse(credentials)
+    try:
+        document = yaml.safe_load(source.read())
+    except yaml.YAMLError:
+        raise CredentialError(f"credentials {source} is not kubeconfig YAML") from None
+    if not isinstance(document, dict):
+        raise CredentialError(f"credentials {source} is not a kubeconfig mapping")
+    return document
+
+
+def context_health(
+    names: list[str], active: str | None, wanted: str | None, origin: str
+) -> CredHealth:
+    chosen = wanted or active
+    if chosen is None or chosen not in names:
+        return CredHealth(ok=False, message=f"context {chosen!r} not found in {origin}")
+    return CredHealth(ok=True, message=f"{origin} context {chosen}", identity=chosen)
+
+
 class KubeClient(Protocol):
     def server_side_apply(self, manifest: dict[str, Any]) -> dict[str, Any]: ...
 
@@ -72,10 +95,18 @@ class DynamicKubeClient:
         self.core = core_api
 
     @classmethod
-    def from_context(cls, context: str | None) -> DynamicKubeClient:
+    def from_context(cls, context: str | None, credentials: str | None = None) -> DynamicKubeClient:
         from kubernetes import client, config, dynamic
 
-        if uses_in_cluster_config(context):
+        if credentials is not None:
+            source = CredentialSource.parse(credentials)
+            document = kubeconfig_document(credentials)
+            api_client = (
+                config.new_client_from_config(config_file=str(source.path), context=context)
+                if source.kind == "file"
+                else config.new_client_from_config_dict(document, context=context)
+            )
+        elif uses_in_cluster_config(context):
             configuration = client.Configuration()
             config.load_incluster_config(client_configuration=configuration)
             api_client = client.ApiClient(configuration)
@@ -423,16 +454,25 @@ class KubernetesProvider:
     type: ClassVar = "kubernetes"
 
     def __init__(
-        self, client: KubeClient | None = None, context: str | None = None, connect: bool = False
+        self,
+        client: KubeClient | None = None,
+        context: str | None = None,
+        connect: bool = False,
+        credentials: str | None = None,
     ) -> None:
         self.client = client
         self.context = context
+        self.credentials = credentials
         if connect and self.client is None:
-            self.client = DynamicKubeClient.from_context(context)
+            self.client = DynamicKubeClient.from_context(context, credentials)
 
     @classmethod
-    def connect(cls, context: str | None) -> KubernetesProvider:
-        return cls(client=DynamicKubeClient.from_context(context), context=context)
+    def connect(cls, context: str | None, credentials: str | None = None) -> KubernetesProvider:
+        return cls(
+            client=DynamicKubeClient.from_context(context, credentials),
+            context=context,
+            credentials=credentials,
+        )
 
     def _require_client(self) -> KubeClient:
         if self.client is None:
@@ -553,6 +593,8 @@ class KubernetesProvider:
             from kubernetes import config
         except ImportError:
             return CredHealth(ok=False, message="kubernetes client not installed")
+        if self.credentials is not None:
+            return self.override_health(self.credentials)
         if uses_in_cluster_config(self.context):
             if SERVICE_ACCOUNT_TOKEN.exists():
                 return CredHealth(ok=True, message="in-cluster service account")
@@ -564,10 +606,18 @@ class KubernetesProvider:
         except Exception as exc:
             return CredHealth(ok=False, message=f"kubeconfig unreadable: {exc}")
         names = [c["name"] for c in contexts or []]
-        wanted = self.context or (active or {}).get("name")
-        if wanted is None or wanted not in names:
-            return CredHealth(ok=False, message=f"context {wanted!r} not found in kubeconfig")
-        return CredHealth(ok=True, message=f"kubeconfig context {wanted}", identity=wanted)
+        return context_health(names, (active or {}).get("name"), self.context, "kubeconfig")
+
+    def override_health(self, credentials: str) -> CredHealth:
+        try:
+            document = kubeconfig_document(credentials)
+        except CredentialError as exc:
+            return CredHealth(ok=False, message=str(exc))
+        contexts = document.get("contexts") or []
+        names = [str(c.get("name")) for c in contexts if isinstance(c, dict)]
+        active = document.get("current-context")
+        origin = f"kubeconfig {CredentialSource.parse(credentials)}"
+        return context_health(names, str(active) if active else None, self.context, origin)
 
     def rediscover(self, service: str) -> Ref | None:
         client = self._require_client()

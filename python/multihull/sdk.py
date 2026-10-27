@@ -39,10 +39,13 @@ class TargetFactory:
         block: Mapping[str, Any] | None,
         replicas: Mapping[str, int] | tuple[int, int] | None,
         weight: int,
+        credentials: str | None = None,
     ) -> TargetSpec:
         document: dict[str, Any] = {"provider": provider, "type": type, "priority": priority}
         if weight != 1:
             document["weight"] = weight
+        if credentials is not None:
+            document["credentials"] = credentials
         scaled = replicas_block(replicas)
         if scaled is not None:
             document["replicas"] = scaled
@@ -64,6 +67,7 @@ class TargetFactory:
         endpoint: str | None = None,
         replicas: Mapping[str, int] | tuple[int, int] | None = None,
         weight: int = 1,
+        credentials: str | None = None,
     ) -> TargetSpec:
         block = {
             "namespace": namespace,
@@ -74,7 +78,7 @@ class TargetFactory:
             "nodePort": node_port,
             "endpoint": endpoint,
         }
-        return self.build(provider, "kubernetes", priority, block, replicas, weight)
+        return self.build(provider, "kubernetes", priority, block, replicas, weight, credentials)
 
     def modal(
         self,
@@ -86,13 +90,14 @@ class TargetFactory:
         registry_secret: Mapping[str, str] | None = None,
         replicas: Mapping[str, int] | tuple[int, int] | None = None,
         weight: int = 1,
+        credentials: str | None = None,
     ) -> TargetSpec:
         block = {
             "environment": environment,
             "region": region,
             "registrySecret": dict(registry_secret) if registry_secret else None,
         }
-        return self.build(provider, "modal", priority, block, replicas, weight)
+        return self.build(provider, "modal", priority, block, replicas, weight, credentials)
 
     def runpod(
         self,
@@ -102,9 +107,10 @@ class TargetFactory:
         data_centers: Collection[str] = (),
         replicas: Mapping[str, int] | tuple[int, int] | None = None,
         weight: int = 1,
+        credentials: str | None = None,
     ) -> TargetSpec:
         block = {"dataCenters": list(data_centers)}
-        return self.build(provider, "runpod", priority, block, replicas, weight)
+        return self.build(provider, "runpod", priority, block, replicas, weight, credentials)
 
     def baseten(
         self,
@@ -113,8 +119,9 @@ class TargetFactory:
         *,
         replicas: Mapping[str, int] | tuple[int, int] | None = None,
         weight: int = 1,
+        credentials: str | None = None,
     ) -> TargetSpec:
-        return self.build(provider, "baseten", priority, None, replicas, weight)
+        return self.build(provider, "baseten", priority, None, replicas, weight, credentials)
 
     def replicate(
         self,
@@ -124,8 +131,11 @@ class TargetFactory:
         owner: str | None = None,
         replicas: Mapping[str, int] | tuple[int, int] | None = None,
         weight: int = 1,
+        credentials: str | None = None,
     ) -> TargetSpec:
-        return self.build(provider, "replicate", priority, {"owner": owner}, replicas, weight)
+        return self.build(
+            provider, "replicate", priority, {"owner": owner}, replicas, weight, credentials
+        )
 
     def docker(
         self,
@@ -140,6 +150,7 @@ class TargetFactory:
         pull: bool = True,
         replicas: Mapping[str, int] | tuple[int, int] | None = None,
         weight: int = 1,
+        credentials: str | None = None,
     ) -> TargetSpec:
         block = {
             "image": image,
@@ -149,7 +160,7 @@ class TargetFactory:
             "network": network,
             "pull": pull,
         }
-        return self.build(provider, "docker", priority, block, replicas, weight)
+        return self.build(provider, "docker", priority, block, replicas, weight, credentials)
 
 
 target = TargetFactory()

@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
+from multihull.credentials import CredentialError, read_credential, read_token, token_origin
 from multihull.spec import GPU, ProviderType, Replicas, ServiceSpec, TargetSpec
 
 SERVICE_LABEL = "multihull.dev/service"
@@ -165,24 +166,44 @@ class Provider(Protocol):
     def rediscover(self, service: str) -> Ref | None: ...
 
 
+def credential_health(reference: str | None, native_env: str, provider: str) -> CredHealth:
+    origin = token_origin(reference, native_env)
+    try:
+        read_token(reference, native_env)
+    except CredentialError as exc:
+        return CredHealth(ok=False, message=f"{exc}; {provider} credentials missing")
+    return CredHealth(ok=True, message=f"{origin} is set")
+
+
 def env_credential_health(var_name: str, provider: str) -> CredHealth:
-    if os.environ.get(var_name):
-        return CredHealth(ok=True, message=f"{var_name} is set", identity=None)
-    return CredHealth(ok=False, message=f"{var_name} is not set; {provider} credentials missing")
+    return credential_health(None, var_name, provider)
 
 
-def secret_fragments(env_names: Iterable[str]) -> list[str]:
+def value_fragments(values: Iterable[str]) -> list[str]:
     fragments: set[str] = set()
-    for name in env_names:
-        value = os.environ.get(name, "")
+    for value in values:
         fragments.update({value, value.strip(), repr(value)[1:-1], *value.split()})
     return sorted((f for f in fragments if f), key=len, reverse=True)
 
 
-def redact_env(text: str, env_names: Iterable[str]) -> str:
-    for fragment in secret_fragments(env_names):
+def redact_values(text: str, values: Iterable[str]) -> str:
+    for fragment in value_fragments(values):
         text = text.replace(fragment, REDACTED)
     return text
+
+
+def redact_env(text: str, env_names: Iterable[str]) -> str:
+    return redact_values(text, (os.environ.get(name, "") for name in env_names))
+
+
+def redact_token(text: str, reference: str | None) -> str:
+    if reference is None:
+        return text
+    try:
+        value = read_credential(reference)
+    except CredentialError:
+        return text
+    return redact_values(text, [value])
 
 
 def secret_env_name(secret: str) -> str:
