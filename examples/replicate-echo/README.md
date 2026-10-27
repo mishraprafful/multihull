@@ -9,7 +9,7 @@ hull doctor
 hull deploy --apply --wait
 ```
 
-`.dockerignore` keeps `.multihull/` (state, plans, the snapshot with the API token) and `multihull.yaml` out of the image; without it `hull deploy` refuses to push from this directory. `hull deploy` creates the private model `<account>/multihull-replicate-echo` if missing, runs `cog push r8.im/<account>/multihull-replicate-echo` here, then creates or updates the deployment `multihull-replicate-echo-replicate` with `min_instances: 1`.
+`.dockerignore` keeps `.multihull/` (state, plans, the snapshot with the API token), `.env*` and `multihull.yaml` out of the image; without it `hull deploy` refuses to push from this directory. `hull deploy` creates the private model `<account>/multihull-replicate-echo` if missing, runs `cog push r8.im/<account>/multihull-replicate-echo` here, then creates or updates the deployment `multihull-replicate-echo-replicate` with `min_instances: 1`.
 
 Credentials: `REPLICATE_API_TOKEN` for the API and the router; `REPLICATE_CLI_AUTH_TOKEN` (from replicate.com/auth/token) for `cog login`, or log in once with `cog login` yourself.
 

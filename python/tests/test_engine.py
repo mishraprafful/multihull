@@ -229,3 +229,36 @@ def test_a_deferred_destroy_ends_failed_even_if_a_refresh_wrote_ready_meanwhile(
     assert (result.ok, result.deferred) == (False, True)
     record = state.get(llama_spec.name, "modal-main")
     assert record is not None and record.last_status == "Failed"
+
+
+class ReappliedDuringRefresh(FakeProvider):
+    def __init__(self, state: LocalState) -> None:
+        super().__init__()
+        self.state = state
+
+    def status(self, ref: Ref) -> Observed:
+        newer = Ref(ref.provider, ref.type, ref.service, {"id": "2"})
+        self.state.put(
+            StateRecord(ref.service, ref.provider, newer.to_json(), None, "h2", "Pending")
+        )
+        return Observed("Ready", 1, 1)
+
+
+def test_refresh_never_rolls_back_a_ref_written_by_a_concurrent_apply(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    target = llama_spec.targets[1]
+    ref = Ref(target.provider, target.type, llama_spec.name, {"id": "1"})
+    state.put(StateRecord(llama_spec.name, target.provider, ref.to_json(), None, "h", "Pending"))
+    [result] = engine.refresh(
+        llama_spec.name, state, {target.provider: ReappliedDuringRefresh(state)}
+    )
+    assert result.changed
+    record = state.get(llama_spec.name, target.provider)
+    assert record is not None
+    assert (Ref.from_json(record.ref).ids, record.spec_hash, record.last_status) == (
+        {"id": "2"},
+        "h2",
+        "Pending",
+    )

@@ -12,7 +12,7 @@ from multihull import deploy as deploymod
 from multihull import engine
 from multihull.cli import app
 from multihull.controller import Controller
-from multihull.providers.base import Ref
+from multihull.providers.base import Observed, Ref
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
 from tests.conftest import FIXTURES
@@ -290,3 +290,35 @@ def test_a_controller_continues_above_the_version_hull_deploy_wrote(
     controller = Controller(llama_spec, LocalState(state_path), providers, controller_out)
     assert asyncio.run(controller.reconcile_once()) is True
     assert json.loads(controller_out.read_text())["version"] > deployed
+
+
+class DestroyedWhileWaiting(FakeProvider):
+    def __init__(self, state: LocalState) -> None:
+        super().__init__()
+        self.state = state
+
+    def status(self, ref: Ref) -> Observed:
+        record = self.state.get(ref.service, ref.provider)
+        assert record is not None
+        record.last_status = "Failed"
+        self.state.put(record)
+        return Observed("Ready", 1, 1)
+
+
+def test_deploy_never_overwrites_a_status_changed_while_it_waited(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    provider = DestroyedWhileWaiting(state)
+    report = deploymod.deploy(
+        llama_spec,
+        state,
+        {"modal-main": provider},
+        dry_run=False,
+        only={"modal-main"},
+        wait=False,
+        snapshot_out=tmp_path / "snapshot.json",
+    )
+    assert [o.provider for o in report.outcomes if o.ok and o.phase == "Ready"] == ["modal-main"]
+    record = state.get(llama_spec.name, "modal-main")
+    assert record is not None and record.last_status == "Failed"

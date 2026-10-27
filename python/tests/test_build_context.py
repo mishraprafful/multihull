@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -111,3 +112,46 @@ def test_a_credentials_file_inside_the_context_is_a_problem_unless_ignored(
     ]
     (context / ".dockerignore").write_text(".multihull\nkeys\n")
     assert scan_context(context, [named, outside]).problems == []
+
+
+def test_a_credentials_file_is_found_by_identity_not_by_spelling(
+    context: Path, tmp_path: Path
+) -> None:
+    outside = tmp_path / "keys" / "replicate.token"
+    outside.parent.mkdir()
+    outside.write_text("fixture value")
+    os.link(outside, context / "linked.token")
+    assert scan_context(context, [outside]).problems == [
+        "ships linked.token, a credentials file a target names"
+    ]
+    (context / "linked.token").unlink()
+    (context / "tok").write_text("fixture value")
+    (context / "sub").mkdir()
+    respelled = context / "sub" / ".." / "tok"
+    assert scan_context(context, [respelled]).problems == [
+        "ships tok, a credentials file a target names"
+    ]
+    if (context / "TOK").exists():
+        assert scan_context(context, [context / "TOK"]).problems == [
+            "ships tok, a credentials file a target names"
+        ]
+
+
+def test_a_shipped_file_holding_a_credential_value_is_named_without_the_value(
+    context: Path,
+) -> None:
+    value = "fixture-" + "value-" + "a1b2c3d4"
+    (context / ".dockerignore").write_text(".multihull\n")
+    (context / ".env").write_text(f"SETTING=1\nAPI={value}\n")
+    padding = b"x" * ((1 << 20) - 5)
+    (context / "weights.bin").write_bytes(padding + value.encode() + b"tail")
+    (context / "notes.txt").write_text("short abc")
+    secrets = {"REPLICATE_API_TOKEN": value, "env:SHORT": "abc"}
+    problems = scan_context(context, secrets=secrets).problems
+    assert problems == [
+        "ships .env, which holds the value of REPLICATE_API_TOKEN",
+        "ships weights.bin, which holds the value of REPLICATE_API_TOKEN",
+    ]
+    assert all(value not in problem for problem in problems)
+    (context / ".dockerignore").write_text(".env*\nweights.bin\n")
+    assert scan_context(context, secrets=secrets).problems == []
