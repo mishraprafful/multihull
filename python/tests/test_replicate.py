@@ -657,3 +657,24 @@ def test_two_replicate_targets_push_the_shared_model_one_at_a_time(
     assert cog.peak == 1
     assert list(fake.models) == [MODEL]
     assert len(fake.deployments) == 2
+
+
+def test_an_api_error_keeps_a_deployment_awaiting_deletion_down(
+    provider: ReplicateProvider, fake: FakeReplicate, tmp_path: Path
+) -> None:
+    spec = ServiceSpec.model_validate(echo_raw())
+    state = LocalState(tmp_path / "state.db")
+    providers = {"replicate": provider}
+    engine.apply(spec, state, dry_run=False, providers=providers, only={"replicate"})
+    engine.destroy(spec.name, state, providers=providers)
+    fake.failure = problem(503, "Service Unavailable", "try later")
+    [refreshed] = engine.refresh(spec.name, state, providers)
+    assert refreshed.observed.phase == "Failed"
+    assert refreshed.observed.message.endswith("kept Failed until the provider answers")
+    record = state.get(spec.name, "replicate")
+    assert record is not None and record.last_status == "Failed"
+    snapshot = discovery.build_snapshot(
+        spec, state, providers, observed={"replicate": refreshed.observed}
+    )
+    [endpoint] = discovery.router_document(snapshot)["routes"][0]["endpoints"]
+    assert endpoint["health"] == "down"

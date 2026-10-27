@@ -87,3 +87,23 @@ def test_apply_isolates_failures(llama_spec: ServiceSpec, tmp_path: Path) -> Non
         "modal-main": "new",
         "runpod-eu": "unchanged",
     }
+
+
+def test_refresh_never_turns_a_failed_target_unknown(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    for target, status in zip(llama_spec.targets, ["Failed", "Ready", "Failed"], strict=True):
+        ref = Ref(target.provider, target.type, llama_spec.name, {"id": "1"})
+        state.put(StateRecord(llama_spec.name, target.provider, ref.to_json(), None, "h", status))
+    providers = {
+        "gke-prod": FakeProvider(phases=["Unknown"]),
+        "modal-main": FakeProvider(phases=["Unknown"]),
+        "runpod-eu": FakeProvider(phases=["Ready"]),
+    }
+    results = engine.refresh(llama_spec.name, state, providers)
+    assert {r.provider: r.observed.phase for r in results} == {
+        "gke-prod": "Failed",
+        "modal-main": "Unknown",
+        "runpod-eu": "Ready",
+    }

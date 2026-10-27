@@ -325,6 +325,13 @@ def rediscover(
     return results
 
 
+def settled(record: StateRecord, observed: Observed) -> Observed:
+    if observed.phase != "Unknown" or record.last_status != "Failed":
+        return observed
+    detail = f"{observed.message}; " if observed.message else ""
+    return Observed("Failed", message=f"{detail}kept Failed until the provider answers")
+
+
 def refresh(
     service: str,
     state: StateBackend,
@@ -345,6 +352,7 @@ def refresh(
             observed = provider.status(ref)
         except Exception as exc:
             observed = Observed(phase="Unknown", message=error_reason(exc))
+        observed = settled(record, observed)
         return RefreshResult(
             record.provider, ref.type, ref, observed, observed.phase != record.last_status
         )
