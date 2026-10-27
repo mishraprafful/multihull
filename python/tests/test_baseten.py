@@ -306,6 +306,37 @@ def test_status_follows_the_promotion_then_the_health_path(
     assert provider.status(ref).phase == "Failed"
 
 
+@pytest.mark.parametrize("outcome", ["BUILD_FAILED", "DEPLOY_FAILED", "INACTIVE"])
+def test_a_failed_rollout_keeps_the_previous_deployment_routed(
+    provider: BasetenProvider,
+    fake: FakeBaseten,
+    target: Target,
+    llama_raw: dict[str, Any],
+    outcome: str,
+) -> None:
+    first = provider.apply(target, None)
+    fake.promote_on_create = False
+    changed = variant(llama_raw, container={"env": {"VLLM_LOGGING_LEVEL": "DEBUG"}})
+    second = provider.apply(changed, first)
+    fake.deployments[second.ids["deployment"]]["status"] = outcome
+    fake.environments[second.ids["model"]]["candidate"] = None
+
+    observed = provider.status(second)
+    assert (observed.phase, observed.ready_replicas) == ("Degraded", 1)
+    assert observed.message == (
+        f"rollout failed: deployment {second.ids['deployment']} {outcome}; "
+        f"serving the previous config from {first.ids['deployment']}"
+    )
+
+    fake.health[second.ids["model"]] = 503
+    observed = provider.status(second)
+    assert observed.phase == "Pending" and "health returned 503" in observed.message
+
+    del fake.deployments[second.ids["deployment"]]
+    fake.health[second.ids["model"]] = 200
+    assert provider.status(second).phase == "Degraded"
+
+
 def test_traffic_and_probes_carry_an_api_key_header(
     provider: BasetenProvider, fake: FakeBaseten, target: Target, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -596,7 +596,12 @@ class BasetenProvider:
             str(current.get("id")) == wanted or spec_of(current) == ref.ids.get(DIGEST_KEY)
         )
         if not serving_ours:
-            return self.promoting(model_id, wanted, current, desired)
+            return self.promoting(ref, model_id, wanted, current, desired)
+        return self.serving(ref, model_id, current, desired)
+
+    def serving(
+        self, ref: Ref, model_id: str, current: Mapping[str, Any], desired: int
+    ) -> Observed:
         if current.get("status") != ACTIVE:
             return Observed(
                 "Pending", 0, desired, f"deployment {current['id']} {current.get('status')}"
@@ -611,7 +616,12 @@ class BasetenProvider:
         return self.probe(f"{url.rstrip('/')}{health_path}", ready, desired)
 
     def promoting(
-        self, model_id: str, wanted: str | None, current: Mapping[str, Any], desired: int
+        self,
+        ref: Ref,
+        model_id: str,
+        wanted: str | None,
+        current: Mapping[str, Any],
+        desired: int,
     ) -> Observed:
         serving = f"production serves {current['id']}" if current else "production serves nothing"
         if not wanted:
@@ -619,12 +629,19 @@ class BasetenProvider:
         deployment = self.api.call(
             "GET", f"/models/{model_id}/deployments/{wanted}", missing_ok=True
         )
-        if deployment is None:
-            return Observed("Failed", 0, desired, f"Baseten deployment {wanted} not found")
-        status = str(deployment.get("status"))
-        if status in UNUSABLE_STATUSES:
+        status = "not found" if deployment is None else str(deployment.get("status"))
+        if deployment is not None and status not in UNUSABLE_STATUSES:
+            return Observed("Pending", 0, desired, f"deployment {wanted} {status}; {serving}")
+        if not current:
             return Observed("Failed", 0, desired, f"deployment {wanted} {status}; {serving}")
-        return Observed("Pending", 0, desired, f"deployment {wanted} {status}; {serving}")
+        previous = self.serving(ref, model_id, current, desired)
+        message = (
+            f"rollout failed: deployment {wanted} {status}; "
+            f"serving the previous config from {current['id']}"
+        )
+        if previous.phase == "Ready":
+            return Observed("Degraded", previous.ready_replicas, desired, message)
+        return Observed(previous.phase, 0, desired, f"{message}, {previous.message}")
 
     def probe(self, url: str, ready: int, desired: int) -> Observed:
         try:
