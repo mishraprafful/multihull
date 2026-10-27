@@ -6,10 +6,12 @@ import logging
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import yaml
 from docker.errors import ImageNotFound
@@ -22,7 +24,11 @@ from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref, Target, secret_env_name
 from multihull.providers.baseten import BasetenProvider
 from multihull.providers.docker import DockerProvider
-from multihull.providers.kubernetes import DynamicKubeClient, KubernetesProvider
+from multihull.providers.kubernetes import (
+    DynamicKubeClient,
+    KubernetesProvider,
+    kubeconfig_document,
+)
 from multihull.providers.modal import ModalProvider, check_credentials
 from multihull.providers.registry import PROVIDERS
 from multihull.providers.replicate import ReplicateProvider
@@ -33,6 +39,7 @@ from tests.fake_docker import FakeDockerClient
 from tests.fake_modal import FakeModal
 from tests.fake_runpod import FakeRunpod
 from tests.test_credentials import OVERRIDE_ENV, sentinel, single_target_spec, write_spec
+from tests.test_kubernetes import FakeKubeClient
 
 runner = CliRunner()
 MODAL_KEYS = ("token_id", "token_" + "secret")
@@ -64,6 +71,34 @@ def kubeconfig(*contexts: str, current: str | None = None, marker: str = "") -> 
 
 def tree_bytes(directory: Path) -> bytes:
     return b"".join(p.read_bytes() for p in sorted(directory.rglob("*")) if p.is_file())
+
+
+@dataclass
+class RoundTrip:
+    texts: list[str]
+    stored: bytes
+    snapshot: dict[str, Any]
+
+    def leaks(self, value: str) -> bool:
+        return any(value in text for text in self.texts) or value.encode() in self.stored
+
+
+def cli_round_trip(path: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> RoundTrip:
+    caplog.set_level(logging.DEBUG)
+    state_dir, plan_dir = tmp_path / "state", tmp_path / "plan"
+    snapshot = tmp_path / "snapshot.json"
+    common = ["--state", str(state_dir / "state.db")]
+    deployed = runner.invoke(
+        app, ["deploy", str(path), "--apply", "--no-wait", "--snapshot-out", str(snapshot), *common]
+    )
+    assert deployed.exit_code == 0, deployed.output
+    planned = runner.invoke(app, ["plan", str(path), "--out", str(plan_dir), *common])
+    status = runner.invoke(app, ["status", str(path), *common])
+    doctor = runner.invoke(app, ["doctor", str(path)])
+    assert (planned.exit_code, status.exit_code) == (0, 0), planned.output + status.output
+    texts = [deployed.output, planned.output, status.output, doctor.output, caplog.text]
+    stored = tree_bytes(state_dir) + tree_bytes(plan_dir)
+    return RoundTrip(texts, stored, json.loads(snapshot.read_text()))
 
 
 @pytest.mark.parametrize("provider_type", ["kubernetes", "modal", "runpod", "baseten", "replicate"])
@@ -220,22 +255,9 @@ def test_deploy_keeps_the_override_out_of_output_state_plan_and_logs(
         PROVIDERS, "runpod", lambda **kwargs: RunpodProvider(http_client=fake.client(), **kwargs)
     )
     spec = single_target_spec(llama_raw, "runpod-eu", credentials=f"env:{OVERRIDE_ENV}")
-    path = write_spec(tmp_path, spec)
-    state_dir, plan_dir = tmp_path / "state", tmp_path / "plan"
-    snapshot = tmp_path / "snapshot.json"
-    caplog.set_level(logging.DEBUG)
-    common = ["--state", str(state_dir / "state.db")]
-    deployed = runner.invoke(
-        app, ["deploy", str(path), "--apply", "--no-wait", "--snapshot-out", str(snapshot), *common]
-    )
-    planned = runner.invoke(app, ["plan", str(path), "--out", str(plan_dir), *common])
-    status = runner.invoke(app, ["status", str(path), *common])
-    assert (deployed.exit_code, planned.exit_code, status.exit_code) == (0, 0, 0), deployed.output
-    for text in (deployed.output, planned.output, status.output, caplog.text):
-        assert runpod_override not in text
-    assert runpod_override.encode() not in tree_bytes(state_dir)
-    assert runpod_override.encode() not in tree_bytes(plan_dir)
-    endpoints = json.loads(snapshot.read_text())["routes"][0]["endpoints"]
+    round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
+    assert not round_trip.leaks(runpod_override)
+    endpoints = round_trip.snapshot["routes"][0]["endpoints"]
     assert [e["inject_headers"] for e in endpoints] == [
         {"Authorization": f"Bearer {runpod_override}"}
     ]
@@ -672,3 +694,101 @@ def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
     native = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "multihull"})
     engine.provider_for_ref(native)
     assert "credentials" not in fake_registry["kubernetes"].kwargs
+
+
+def healthy_http() -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+
+
+def test_kubernetes_override_stays_out_of_output_state_plan_snapshot_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    llama_raw: dict[str, Any],
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    marker = sentinel()
+    context = "gke_acme_europe-west4_prod"
+    monkeypatch.setenv(OVERRIDE_ENV, kubeconfig(context, current=context, marker=marker))
+    loaded: list[str] = []
+
+    def from_context(context: str | None, credentials: str | None = None) -> FakeKubeClient:
+        assert credentials is not None
+        loaded.append(kubeconfig_document(credentials)["users"][0]["user"]["client-key-data"])
+        return FakeKubeClient()
+
+    monkeypatch.setattr(DynamicKubeClient, "from_context", from_context)
+    spec = single_target_spec(llama_raw, "gke-prod", credentials=f"env:{OVERRIDE_ENV}")
+    round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
+    assert loaded == [marker]
+    assert not round_trip.leaks(marker)
+    assert marker not in json.dumps(round_trip.snapshot)
+
+
+def test_modal_override_stays_out_of_output_state_plan_snapshot_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    llama_raw: dict[str, Any],
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    fake_modal: FakeModal,
+    modal_override: tuple[str, str, str],
+) -> None:
+    reference, first, second = modal_override
+    for name in ("MODAL_PROXY_TOKEN_ID", "MODAL_PROXY_TOKEN_" + "SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setitem(
+        PROVIDERS, "modal", lambda **kwargs: ModalProvider(http_client=healthy_http(), **kwargs)
+    )
+    spec = single_target_spec(llama_raw, "modal-main", credentials=reference)
+    round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
+    assert (first, second) in fake_modal.logins
+    assert ("deploy", fake_modal.client) in fake_modal.clients_used
+    assert ("cls", fake_modal.client) in fake_modal.clients_used
+    for value in (first, second):
+        assert not round_trip.leaks(value)
+        assert value not in json.dumps(round_trip.snapshot)
+
+
+def test_modal_status_and_rediscover_use_the_override_client(
+    fake_modal: FakeModal, modal_override: tuple[str, str, str]
+) -> None:
+    reference, _, _ = modal_override
+    provider = ModalProvider(
+        dry_run=False, provider_name="modal-main", http_client=healthy_http(), credentials=reference
+    )
+    ref = Ref("modal-main", "modal", "llama-8b", {"app": "multihull-llama-8b-modal-main"})
+    assert provider.status(ref).phase == "Ready"
+    assert fake_modal.clients_used[-1] == ("cls", fake_modal.client)
+    found = provider.rediscover("llama-8b")
+    assert found is not None and found.ids["app"] == "multihull-llama-8b-modal-main"
+    assert fake_modal.clients_used[-1] == ("lookup", fake_modal.client)
+
+
+def test_docker_override_stays_out_of_output_state_plan_snapshot_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_docker_raw: dict[str, Any],
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from docker import auth
+
+    registry, _ = auth.resolve_repository_name(mock_docker_raw["container"]["image"])
+    user, value = sentinel(), sentinel()
+    config = tmp_path / "config.json"
+    config.write_text(docker_config(registry, user, value))
+    encoded = base64.b64encode(f"{user}:{value}".encode()).decode()
+    fake, pulls = recording_docker()
+    monkeypatch.setitem(
+        PROVIDERS,
+        "docker",
+        lambda **kwargs: DockerProvider(client=fake, http_client=healthy_http(), **kwargs),
+    )
+    mock_docker_raw["targets"] = [
+        {**mock_docker_raw["targets"][0], "credentials": f"file:{config}"}
+    ]
+    mock_docker_raw["reliability"]["minWarmProviders"] = 1
+    spec = ServiceSpec.model_validate(mock_docker_raw)
+    round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
+    assert value in pulls[0]["auth_config"].values()
+    for secret in (value, encoded):
+        assert not round_trip.leaks(secret)
+        assert secret not in json.dumps(round_trip.snapshot)
