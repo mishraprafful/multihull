@@ -362,6 +362,15 @@ class Controller:
             ScaleStep(target.provider, current, new_min, replicas.max, record.ref, cause)
         )
 
+    def serving(self, provider: str, records: Mapping[str, StateRecord], remembered: int) -> bool:
+        record = records.get(provider)
+        if record is None:
+            return False
+        observed = self.observed.get(provider)
+        phases = {record.last_status, *([observed.phase] if observed else [])}
+        woken = {"Pending"} if remembered == 0 else set()
+        return phases <= SCALABLE_PHASES | woken
+
     def plan_step_down(
         self, target: TargetSpec, records: Mapping[str, StateRecord]
     ) -> ScaleStep | None:
@@ -369,6 +378,15 @@ class Controller:
         if remembered is None or target.provider in self.scaling_targets:
             return None
         replicas = self.spec.effective_replicas(target)
+        if not self.serving(target.provider, records, remembered):
+            log.info(
+                "dropping the raised floor of %s: it is not serving, so scale-back leaves it alone",
+                target.provider,
+            )
+            self.min_replicas[target.provider] = replicas.min
+            del self.pre_degraded_min[target.provider]
+            self.persist_floor(target.provider)
+            return None
         current = self.min_replicas[target.provider]
         if current <= max(remembered, replicas.min):
             del self.pre_degraded_min[target.provider]

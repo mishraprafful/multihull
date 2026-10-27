@@ -280,6 +280,8 @@ def destroy(
 
     with state.lock():
         for result, record in zip(results, records, strict=True):
+            if result.ok or result.deferred:
+                state.delete_floor(service, result.provider)
             if result.ok:
                 state.delete(service, result.provider)
             elif result.deferred:

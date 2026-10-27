@@ -15,16 +15,18 @@ from typing import Any
 import grpc
 import pytest
 
-from multihull import discovery
+from multihull import discovery, engine
 from multihull._proto import discovery_pb2 as pb
 from multihull._proto import discovery_pb2_grpc as pb_grpc
 from multihull.apikeys import ApiKeyError
 from multihull.controller import Controller, DiscoveryServicer
 from multihull.providers.base import Ref, ScaleRefused
+from multihull.providers.replicate import API_TOKEN_ENV, ReplicateProvider
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
 from multihull.stream_security import StreamSecurity
 from tests.conftest import no_keys_message
+from tests.fake_replicate import EXAMPLE, FakeCog, FakeReplicate, echo_raw
 from tests.fakes import FakeProvider
 
 
@@ -806,3 +808,56 @@ def test_a_controller_with_nothing_to_rediscover_publishes_nothing_until_it_find
         asyncio.run(scenario())
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]
     assert errors and all(r.exc_info is None for r in errors)
+
+
+def test_scale_back_never_revives_a_deployment_awaiting_deletion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(API_TOKEN_ENV, "controller-fixture-caller")
+    monkeypatch.chdir(EXAMPLE)
+    fake = FakeReplicate("controller-fixture-caller")
+    replicate = ReplicateProvider(
+        dry_run=False, provider_name="replicate", http_client=fake.client(), cog=FakeCog(fake)
+    )
+    spec = ServiceSpec.model_validate(echo_raw())
+    providers = {"local": FakeProvider(), "replicate": replicate}
+    state = LocalState(tmp_path / "state.db")
+    assert all(r.ok for r in engine.apply(spec, state, dry_run=False, providers=providers))
+    clock = FakeClock()
+
+    def controller() -> Controller:
+        return Controller(
+            spec,
+            state,
+            providers,
+            snapshot_out=tmp_path / "snapshot.json",
+            degraded_cooldown=timedelta(seconds=60),
+            clock=clock,
+        )
+
+    running = controller()
+
+    async def scenario() -> None:
+        await running.reconcile_once()
+        await running.handle_degraded(pb.Degraded(service=spec.name, provider="local"))
+        assert fake.deployment_settings("multihull-replicate-echo-replicate")["min_instances"] == 2
+        assert running.pre_degraded_min == {"replicate": 1}
+
+        [deferred] = engine.destroy(spec.name, state, providers=providers, only={"replicate"})
+        assert not deferred.ok
+        assert state.list_floors(spec.name) == []
+        restarted = controller()
+        assert restarted.pre_degraded_min == {}
+
+        clock.advance(60)
+        assert await running.scale_back_once() == []
+        settings = fake.deployment_settings("multihull-replicate-echo-replicate")
+        assert (settings["min_instances"], settings["max_instances"]) == (0, 0)
+        assert running.pre_degraded_min == {}
+        assert state.list_floors(spec.name) == []
+
+        await running.reconcile_once()
+        health = {e["provider"]: e["health"] for e in running.snapshot["routes"][0]["endpoints"]}
+        assert health == {"local": "healthy", "replicate": "unhealthy"}
+
+    asyncio.run(scenario())
