@@ -96,3 +96,18 @@ def test_a_snapshot_or_state_elsewhere_in_the_context_is_a_problem(context: Path
         "ships custom.db, a Multihull state database",
         "ships router-snapshot.json, a Multihull snapshot with provider credentials",
     ]
+
+
+def test_a_credentials_file_inside_the_context_is_a_problem_unless_ignored(
+    context: Path, tmp_path: Path
+) -> None:
+    named = context / "keys" / "replicate.token"
+    named.parent.mkdir()
+    named.write_text("fixture value")
+    outside = tmp_path / "elsewhere.token"
+    outside.write_text("fixture value")
+    assert scan_context(context, [named, outside]).problems == [
+        "ships keys/replicate.token, a credentials file a target names"
+    ]
+    (context / ".dockerignore").write_text(".multihull\nkeys\n")
+    assert scan_context(context, [named, outside]).problems == []

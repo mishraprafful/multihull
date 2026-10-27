@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 import httpx
 
 from multihull.build_context import ContextScan, scan_context
-from multihull.credentials import CredentialError, read_token, token_origin
+from multihull.credentials import CredentialError, CredentialSource, read_token, token_origin
 from multihull.providers.base import (
     CredHealth,
     DestroyDeferred,
@@ -108,9 +108,18 @@ def context_path(desired: Target) -> Path:
     return (desired.service.source_dir or Path.cwd()) / written
 
 
+def credential_files(desired: Target) -> list[Path]:
+    sources = (
+        CredentialSource.parse(t.credentials) for t in desired.service.targets if t.credentials
+    )
+    return [source.path for source in sources if source.kind == "file"]
+
+
 def context_scan(desired: Target) -> ContextScan | None:
     context = context_path(desired)
-    return scan_context(context) if context.is_dir() else None
+    if not context.is_dir():
+        return None
+    return scan_context(context, credential_files(desired))
 
 
 def context_notes(desired: Target, scan: ContextScan | None) -> list[str]:
@@ -123,10 +132,10 @@ def context_notes(desired: Target, scan: ContextScan | None) -> list[str]:
     ]
 
 
-def checked_scan(context: Path) -> ContextScan:
+def checked_scan(context: Path, protected: list[Path]) -> ContextScan:
     if not context.is_dir():
         raise ValueError(f"build.context {context} is not a directory")
-    scan = scan_context(context)
+    scan = scan_context(context, protected)
     if scan.problems:
         raise ValueError(
             f"build.context {context} " + "; ".join(scan.problems) + "; exclude them in "
@@ -415,7 +424,7 @@ class ReplicateProvider:
             owner = replicate_block(desired).owner or OWNER_PLACEHOLDER
             return self.ref(desired, owner, {})
         context = context_path(desired)
-        scan = checked_scan(context)
+        scan = checked_scan(context, credential_files(desired))
         owner = self.owner(desired)
         hardware = self.pick_hardware(desired)
         name = model_name(desired)

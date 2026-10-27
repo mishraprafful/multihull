@@ -678,3 +678,33 @@ def test_an_api_error_keeps_a_deployment_awaiting_deletion_down(
     )
     [endpoint] = discovery.router_document(snapshot)["routes"][0]["endpoints"]
     assert endpoint["health"] == "down"
+
+
+def test_apply_refuses_to_push_a_credentials_file_from_the_context(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    (context / "replicate.token").write_text(CALLER)
+    monkeypatch.chdir(context)
+    monkeypatch.delenv(API_TOKEN_ENV)
+    raw = echo_raw()
+    raw["targets"][1]["credentials"] = "file:replicate.token"
+    spec = ServiceSpec.model_validate(raw)
+    target = Target(spec, spec.target("replicate"))
+    provider = ReplicateProvider(
+        dry_run=False, http_client=fake.client(), cog=cog, credentials="file:replicate.token"
+    )
+    assert provider.plan(target, None).notes == [
+        f"build.context {context} ships replicate.token, a credentials file a target names; "
+        "exclude it in .dockerignore"
+    ]
+    with pytest.raises(ValueError, match="ships replicate.token, a credentials file"):
+        provider.apply(target, None)
+    assert fake.calls == [] and cog.pushes == []
+    with (context / ".dockerignore").open("a") as ignore:
+        ignore.write("replicate.token\n")
+    assert provider.plan(target, None).notes == []
+    ref = provider.apply(target, None)
+    assert ref.ids["deployment"] == DEPLOYMENT
+    assert len(cog.pushes) == 1

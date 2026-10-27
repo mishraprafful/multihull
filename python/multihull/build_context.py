@@ -150,11 +150,21 @@ def hash_file(path: Path, digest: hashlib._Hash) -> bool:
     return marked
 
 
-def scan_context(root: Path) -> ContextScan:
+def inside(root: Path, paths: Sequence[Path]) -> set[str]:
+    base = root.resolve()
+    resolved = (path.resolve() for path in paths)
+    return {path.relative_to(base).as_posix() for path in resolved if path.is_relative_to(base)}
+
+
+def scan_context(root: Path, protected: Sequence[Path] = ()) -> ContextScan:
     digest = hashlib.sha256()
     problems: list[str] = []
     rules = read_rules(root)
+    guarded = inside(root, protected)
     for relative in shipped_files(root, rules, UNHASHED_DIRS):
+        if relative in guarded:
+            problems.append(f"ships {relative}, a credentials file a target names")
+            continue
         pieces = relative.split("/")
         if LOCAL_STATE_DIR in pieces[:-1]:
             local = "/".join(pieces[: pieces.index(LOCAL_STATE_DIR) + 1])
