@@ -65,6 +65,7 @@ HEALTH_PATH_KEY = "health_path"
 DEFAULT_HEALTH_PATH = "/health"
 HEALTH_TIMEOUT_SECONDS = 5.0
 EDGE_ERROR = EdgeError(statuses=(404,), body_prefix="modal-http:")
+DEFAULT_PROFILE = "default"
 
 
 class CredentialStatus(StrEnum):
@@ -98,18 +99,19 @@ def redact(text: str, env_names: Iterable[str] = (), tokens: Iterable[str] = ())
     return redact_values(redact_env(text, [TOKEN_ID_ENV, TOKEN_SECRET_ENV, *env_names]), tokens)
 
 
-def token_profile(document: dict[str, Any]) -> dict[str, Any] | None:
-    if document.get("token_id") and document.get("token_secret"):
-        return document
-    profiles = [
-        profile
-        for profile in document.values()
-        if isinstance(profile, dict) and profile.get("token_id") and profile.get("token_secret")
-    ]
-    active = [profile for profile in profiles if profile.get("active")]
-    if len(active) == 1:
+def profile_name(document: dict[str, Any], source: CredentialSource) -> str:
+    if not document or not all(isinstance(profile, dict) for profile in document.values()):
+        raise CredentialError(f"credentials {source} must hold only .modal.toml profile tables")
+    active = [name for name, profile in document.items() if profile.get("active") is True]
+    if len(active) > 1:
+        raise CredentialError(f"credentials {source} has more than one active profile")
+    if active:
         return active[0]
-    return profiles[0] if len(profiles) == 1 else None
+    if len(document) == 1:
+        return next(iter(document))
+    if DEFAULT_PROFILE in document:
+        return DEFAULT_PROFILE
+    raise CredentialError(f"credentials {source} has several profiles and none is active")
 
 
 def modal_tokens(credentials: str) -> tuple[str, str]:
@@ -118,10 +120,12 @@ def modal_tokens(credentials: str) -> tuple[str, str]:
         document = tomllib.loads(source.read())
     except tomllib.TOMLDecodeError:
         raise CredentialError(f"credentials {source} is not .modal.toml TOML") from None
-    profile = token_profile(document)
-    if profile is None:
+    name = profile_name(document, source)
+    profile = document[name]
+    if not (profile.get("token_id") and profile.get("token_secret")):
         raise CredentialError(
-            f"credentials {source} has no single profile with token_id and token_secret"
+            f"profile {name} of credentials {source} has no token_id and token_secret; "
+            "only token profiles are supported, not OAuth"
         )
     return str(profile["token_id"]), str(profile["token_secret"])
 

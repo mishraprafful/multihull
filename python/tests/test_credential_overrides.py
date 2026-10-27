@@ -366,7 +366,7 @@ def test_modal_check_names_the_source_and_hides_tokens(
     )
     ambiguous = check_credentials(credentials=f"env:{OVERRIDE_ENV}")
     assert ambiguous.message == (
-        f"credentials env:{OVERRIDE_ENV} has no single profile with token_id and token_secret"
+        f"credentials env:{OVERRIDE_ENV} has several profiles and none is active"
     )
     monkeypatch.setenv(OVERRIDE_ENV, f"[{first}")
     broken = check_credentials(credentials=f"env:{OVERRIDE_ENV}")
@@ -374,6 +374,42 @@ def test_modal_check_names_the_source_and_hides_tokens(
     monkeypatch.delenv(OVERRIDE_ENV)
     missing = ModalProvider(credentials=f"env:{OVERRIDE_ENV}").credentials_health()
     assert missing.message == f"credentials env:{OVERRIDE_ENV} is not set"
+
+
+def modal_profile_message(document: str, monkeypatch: pytest.MonkeyPatch) -> str:
+    monkeypatch.setenv(OVERRIDE_ENV, document)
+    try:
+        return "tokens " + ",".join(modal_provider.modal_tokens(f"env:{OVERRIDE_ENV}"))
+    except CredentialError as exc:
+        return str(exc)
+
+
+def test_modal_profile_selection_follows_the_modal_config_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    good, other = (sentinel(), sentinel()), (sentinel(), sentinel())
+    source = f"credentials env:{OVERRIDE_ENV}"
+    oauth_active = "[work]\nactive = true\noauth_client_id = 'x'\n" + modal_toml(
+        ("spare", *good, False)
+    )
+    assert modal_profile_message(oauth_active, monkeypatch) == (
+        f"profile work of {source} has no token_id and token_secret; "
+        "only token profiles are supported, not OAuth"
+    )
+    two_active = modal_toml(("a", *good, True), ("b", *other, True))
+    assert modal_profile_message(two_active, monkeypatch) == (
+        f"{source} has more than one active profile"
+    )
+    top_level = modal_toml(("x", *good, False)).replace("[x]\n", "")
+    assert modal_profile_message(top_level, monkeypatch) == (
+        f"{source} must hold only .modal.toml profile tables"
+    )
+    with_default = modal_toml(("spare", *other, False), ("default", *good, False))
+    assert modal_profile_message(with_default, monkeypatch) == "tokens " + ",".join(good)
+    only = modal_toml(("prod", *good, False))
+    assert modal_profile_message(only, monkeypatch) == "tokens " + ",".join(good)
+    active = modal_toml(("default", *other, False), ("prod", *good, True))
+    assert modal_profile_message(active, monkeypatch) == "tokens " + ",".join(good)
 
 
 def test_modal_sdk_calls_use_the_override_client(
