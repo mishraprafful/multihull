@@ -18,6 +18,7 @@ from docker.errors import ImageNotFound
 from typer.testing import CliRunner
 
 from multihull import engine
+from multihull import spec as specmod
 from multihull.cli import app
 from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers import modal as modal_provider
@@ -99,9 +100,26 @@ def cli_round_trip(path: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture)
     planned = runner.invoke(app, ["plan", str(path), "--out", str(plan_dir), *common])
     status = runner.invoke(app, ["status", str(path), *common])
     doctor = runner.invoke(app, ["doctor", str(path)])
-    assert (planned.exit_code, status.exit_code) == (0, 0), planned.output + status.output
-    texts = [deployed.output, planned.output, status.output, doctor.output, caplog.text]
+    provider = specmod.load(path).targets[0].provider
+    logs = runner.invoke(app, ["logs", str(path), "--provider", provider, *common])
     stored = tree_bytes(state_dir) + tree_bytes(plan_dir)
+    after_destroy = tmp_path / "after-destroy.json"
+    destroyed = runner.invoke(
+        app, ["destroy", str(path), "--yes", "--snapshot-out", str(after_destroy), *common]
+    )
+    exits = [planned.exit_code, status.exit_code, logs.exit_code, destroyed.exit_code]
+    assert exits == [0, 0, 0, 0], planned.output + status.output + logs.output + destroyed.output
+    texts = [
+        deployed.output,
+        planned.output,
+        status.output,
+        doctor.output,
+        logs.output,
+        destroyed.output,
+        after_destroy.read_text(),
+        caplog.text,
+    ]
+    stored += tree_bytes(state_dir)
     return RoundTrip(texts, stored, json.loads(snapshot.read_text()))
 
 
@@ -870,7 +888,7 @@ def test_kubernetes_override_stays_out_of_output_state_plan_snapshot_and_logs(
     monkeypatch.setattr(DynamicKubeClient, "from_context", from_context)
     spec = single_target_spec(llama_raw, "gke-prod", credentials=f"env:{OVERRIDE_ENV}")
     round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
-    assert loaded == [marker]
+    assert loaded and set(loaded) == {marker}
     assert not round_trip.leaks(marker)
     assert marker not in json.dumps(round_trip.snapshot)
 
@@ -889,8 +907,17 @@ def test_modal_override_stays_out_of_output_state_plan_snapshot_and_logs(
     monkeypatch.setitem(
         PROVIDERS, "modal", lambda **kwargs: ModalProvider(http_client=healthy_http(), **kwargs)
     )
+    stopped_with: list[str] = []
+
+    def stop(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        stopped_with.append(kwargs["env"]["MODAL_TOKEN_ID"])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(modal_provider.subprocess, "run", stop)
     spec = single_target_spec(llama_raw, "modal-main", credentials=reference)
     round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
+    assert stopped_with == [first]
+    assert ("lookup", fake_modal.client) in fake_modal.clients_used
     assert (first, second) in fake_modal.logins
     assert ("deploy", fake_modal.client) in fake_modal.clients_used
     assert ("cls", fake_modal.client) in fake_modal.clients_used
