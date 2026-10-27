@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 import httpx
-from docker.errors import DockerException, ImageNotFound, NotFound
+from docker.errors import ImageNotFound, NotFound
 
 from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers.base import (
@@ -181,15 +181,24 @@ def registry_config(credentials: str) -> Any:
         raise CredentialError(f"credentials {source} is not a Docker config.json object")
     try:
         return auth.load_config(config_dict=document)
-    except DockerException as exc:
-        raise CredentialError(f"credentials {source}: {type(exc).__name__}") from None
+    except Exception as exc:
+        raise CredentialError(
+            f"credentials {source} is not a usable Docker config.json: {type(exc).__name__}"
+        ) from None
 
 
 def registry_auth(credentials: str, image: str) -> dict[str, Any]:
     from docker import auth
 
     registry, _ = auth.resolve_repository_name(image)
-    return registry_config(credentials).resolve_authconfig(registry) or {}
+    config = registry_config(credentials)
+    try:
+        return config.resolve_authconfig(registry) or {}
+    except Exception as exc:
+        source = CredentialSource.parse(credentials)
+        raise CredentialError(
+            f"credentials {source} has no usable auth for {registry}: {type(exc).__name__}"
+        ) from None
 
 
 def default_client() -> Any:

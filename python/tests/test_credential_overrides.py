@@ -528,6 +528,35 @@ def test_docker_health_names_a_broken_override(tmp_path: Path) -> None:
     assert marker not in health.message
 
 
+@pytest.mark.filterwarnings("ignore:docker-credential-multihull-missing-helper")
+def test_docker_library_errors_become_credential_errors_naming_the_source(
+    mock_docker_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    marker = sentinel()
+    undecodable = tmp_path / "undecodable.json"
+    encoded = base64.b64encode(marker.encode()).decode()
+    undecodable.write_text(json.dumps({"auths": {"ghcr.io": {"auth": encoded}}}))
+    health = DockerProvider(
+        client=FakeDockerClient(), credentials=f"file:{undecodable}"
+    ).credentials_health()
+    assert health.message == (
+        f"credentials file:{undecodable} is not a usable Docker config.json: ValueError"
+    )
+    helper = tmp_path / "helper.json"
+    helper.write_text(json.dumps({"credsStore": "multihull-missing-helper"}))
+    target = mock_docker_spec.targets[0].model_copy(update={"credentials": f"file:{helper}"})
+    fake, _ = recording_docker()
+    with pytest.raises(CredentialError) as raised:
+        DockerProvider(client=fake, credentials=f"file:{helper}").apply(
+            Target(mock_docker_spec, target), None
+        )
+    assert str(raised.value) == (
+        f"credentials file:{helper} has no usable auth for docker.io: DockerException"
+    )
+    for message in (health.message, str(raised.value)):
+        assert marker not in message and encoded not in message
+
+
 def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
     monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], tmp_path: Path, fake_registry
 ) -> None:
