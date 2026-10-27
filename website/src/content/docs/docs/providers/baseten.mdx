@@ -22,7 +22,7 @@ Requirements:
 ## Lifecycle
 
 - A deployment is labelled with a digest of its Truss config. `apply` again with an unchanged config pushes nothing and only restores the `production` autoscaling settings if they drifted; changing only `scaling.replicas` is such an update. A changed config is a new deployment of the same model, promoted when it is ready, while the previous deployment keeps serving. A ready deployment for the same config, for example after a rollback, is promoted instead of pushed again. With no state, `apply` adopts the model by name.
-- `scale` sets `min_replica` and `max_replica` on the `production` environment and its current deployment; a 400 or 422 is a permanent refusal.
+- `scale` sets `min_replica` and `max_replica` on the `production` environment in one call, which applies to the deployment it serves; a 400 or 422 is a permanent refusal and changes nothing.
 - `hull logs` reads the deployment's logs from `--since` (at most 7 days) until now.
 - `destroy` deletes the model, with all its deployments, and the secrets it mirrored. A 404 counts as gone.
 

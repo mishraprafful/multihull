@@ -361,6 +361,9 @@ class FakeBaseten:
         ):
             return error(400, "min_replica exceeds max_replica")
         self.environments[model_id]["autoscaling_settings"].update(settings)
+        current = self.environments[model_id]["current"]
+        if current:
+            self.deployments[current]["autoscaling_settings"].update(settings)
         return httpx.Response(
             200,
             json={

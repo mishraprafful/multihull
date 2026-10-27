@@ -445,20 +445,12 @@ class BasetenApi:
             self.call("POST", f"/models/{model_id}/deployments/{deployment_id}/promote", body)
         )
 
-    def set_autoscaling(
-        self, model_id: str, deployment_id: str | None, settings: Mapping[str, Any]
-    ) -> None:
+    def set_autoscaling(self, model_id: str, settings: Mapping[str, Any]) -> None:
         self.call(
             "PATCH",
             f"/models/{model_id}/environments/{ENVIRONMENT}",
             {"autoscaling_settings": dict(settings)},
         )
-        if deployment_id:
-            self.call(
-                "PATCH",
-                f"/models/{model_id}/deployments/{deployment_id}/autoscaling_settings",
-                dict(settings),
-            )
 
     def logs(
         self, model_id: str, deployment_id: str, start: datetime, end: datetime
@@ -559,8 +551,7 @@ class BasetenProvider:
         for deployment in (current, candidate):
             if usable(deployment, digest):
                 if autoscaling_drift(environment.get("autoscaling_settings"), autoscaling):
-                    serving = current if deployment is current else None
-                    self.api.set_autoscaling(model_id, serving and str(serving["id"]), autoscaling)
+                    self.api.set_autoscaling(model_id, autoscaling)
                 return dict(deployment)
         existing = next((d for d in self.api.deployments(model_id) if usable(d, digest)), None)
         if existing is not None:
@@ -662,9 +653,7 @@ class BasetenProvider:
             raise ScaleRefused("no Baseten model id in state")
         settings = {"min_replica": min, "max_replica": max}
         try:
-            environment = self.api.environment(model_id) or {}
-            current = environment.get("current_deployment") or {}
-            self.api.set_autoscaling(model_id, current.get("id"), settings)
+            self.api.set_autoscaling(model_id, settings)
         except BasetenApiError as exc:
             if exc.status in PERMANENT_SCALE_STATUSES:
                 raise ScaleRefused(str(exc)) from None

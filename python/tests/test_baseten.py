@@ -249,10 +249,7 @@ def test_apply_restores_autoscaling_drift(
     fake.calls.clear()
     provider.apply(target, ref)
     assert environment(fake, ref)["autoscaling_settings"]["min_replica"] == 1
-    assert fake.calls_of("PATCH") == [
-        f"/v1/models/{ref.ids['model']}/environments/production",
-        f"/v1/models/{ref.ids['model']}/deployments/{ref.ids['deployment']}/autoscaling_settings",
-    ]
+    assert fake.calls_of("PATCH") == [f"/v1/models/{ref.ids['model']}/environments/production"]
 
 
 def test_a_failed_deployment_for_the_spec_is_pushed_again(
@@ -329,17 +326,21 @@ def test_traffic_and_probes_carry_an_api_key_header(
     assert provider.endpoint(ref).inject_headers == {}
 
 
-def test_scale_sets_the_environment_and_the_serving_deployment(
+def test_scale_sets_the_production_environment_in_one_call(
     provider: BasetenProvider, fake: FakeBaseten, target: Target
 ) -> None:
     ref = provider.apply(target, None)
+    fake.calls.clear()
     provider.scale(ref, 3, 6)
+    assert fake.calls == [("PATCH", f"/v1/models/{ref.ids['model']}/environments/production")]
     settings = environment(fake, ref)["autoscaling_settings"]
     assert (settings["min_replica"], settings["max_replica"]) == (3, 6)
     served = fake.deployments[ref.ids["deployment"]]["autoscaling_settings"]
     assert (served["min_replica"], served["max_replica"]) == (3, 6)
     with pytest.raises(ScaleRefused, match="400"):
         provider.scale(ref, 9, 6)
+    assert environment(fake, ref)["autoscaling_settings"]["min_replica"] == 3
+    assert fake.deployments[ref.ids["deployment"]]["autoscaling_settings"]["min_replica"] == 3
     fake.failure = error(503, "try again")
     with pytest.raises(BasetenApiError, match="503"):
         provider.scale(ref, 2, 6)
