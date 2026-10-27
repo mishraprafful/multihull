@@ -1,11 +1,12 @@
 :root {
-  --mh-navy: #0b1d2e;
-  --mh-foam: #f4f1ea;
-  --mh-sand: #e9dcc3;
-  --mh-teal: #1fb6a6;
-  --mh-coral: #ff6b57;
-  --mh-amber: #f5b841;
-  --mh-slate: #8495a3;
+  --mh-navy: #0a141f;
+  --mh-foam: #f0f4f8;
+  --mh-mist: #f7f9fb;
+  --mh-teal: #2ec4b6;
+  --mh-green: #57c785;
+  --mh-coral: #ef7464;
+  --mh-amber: #e6b04f;
+  --mh-slate: #8a9bb0;
 
   --mh-section-gap: clamp(3.5rem, 8vw, 6rem);
   --mh-radius: 0.5rem;
@@ -60,29 +61,32 @@ h1#_top:not([data-page-title]),
 :root,
 :root[data-theme='dark'] {
   --mh-bg: var(--mh-navy);
-  --mh-paper: #0f2436;
-  --mh-panel: #152b40;
+  --mh-paper: #0f1b28;
+  --mh-panel: #152433;
   --mh-ink: var(--mh-foam);
-  --mh-body: #cfd3d1;
+  --mh-body: #c3cdd9;
   --mh-muted: var(--mh-slate);
-  --mh-rule: #1e3447;
-  --mh-strong: #3d566d;
-  --mh-shadow: #030b13;
+  --mh-rule: #1e2d3e;
+  --mh-strong: #566b83;
+  --mh-shadow: #04090f;
   --mh-on-accent: var(--mh-navy);
   --mh-surface: var(--mh-paper);
-  --mh-ok: var(--mh-teal);
+  --mh-ok: var(--mh-green);
   --mh-warn: var(--mh-amber);
   --mh-down: var(--mh-coral);
 
-  --sl-color-accent-low: #0f3a3a;
+  --sl-color-accent-low: #12393b;
   --sl-color-accent: var(--mh-teal);
-  --sl-color-accent-high: #8fe3d9;
+  --sl-color-accent-high: #9fe9df;
+  --sl-color-orange-low: #2a2416;
+  --sl-color-orange: var(--mh-warn);
+  --sl-color-orange-high: #f3d79a;
   --sl-color-white: var(--mh-ink);
-  --sl-color-gray-1: #e6e2d8;
+  --sl-color-gray-1: #dfe6ee;
   --sl-color-gray-2: var(--mh-body);
   --sl-color-gray-3: var(--mh-muted);
-  --sl-color-gray-4: #4a5c6c;
-  --sl-color-gray-5: #263d52;
+  --sl-color-gray-4: #5b6f87;
+  --sl-color-gray-5: #273a4d;
   --sl-color-gray-6: var(--mh-panel);
   --sl-color-black: var(--mh-bg);
   --sl-color-bg: var(--mh-bg);
@@ -90,36 +94,39 @@ h1#_top:not([data-page-title]),
   --sl-color-bg-sidebar: var(--mh-bg);
   --sl-color-bg-inline-code: var(--mh-panel);
   --sl-color-text: var(--mh-body);
-  --sl-color-text-accent: var(--mh-teal);
+  --sl-color-text-accent: var(--sl-color-accent);
   --sl-color-hairline: var(--mh-rule);
   --sl-color-hairline-light: var(--mh-rule);
   --sl-color-hairline-shade: var(--mh-rule);
 }
 
 :root[data-theme='light'] {
-  --mh-bg: #faf7f0;
-  --mh-paper: #fffdf9;
-  --mh-panel: #f0e9da;
-  --mh-ink: #0d1e2c;
-  --mh-body: #2c3d4d;
-  --mh-muted: #5b6d7c;
-  --mh-rule: #e2d8c4;
-  --mh-strong: #0d1e2c;
-  --mh-shadow: #0d1e2c;
-  --mh-on-accent: #fffdf9;
-  --mh-ok: #0f7a70;
-  --mh-warn: #8a5e00;
-  --mh-down: #b83a28;
+  --mh-bg: var(--mh-mist);
+  --mh-paper: #ffffff;
+  --mh-panel: #eef2f6;
+  --mh-ink: #0c1824;
+  --mh-body: #2c3a4a;
+  --mh-muted: #56677a;
+  --mh-rule: #dde4ec;
+  --mh-strong: #6c7d91;
+  --mh-shadow: #d3dbe5;
+  --mh-on-accent: #ffffff;
+  --mh-ok: #18733f;
+  --mh-warn: #8a5706;
+  --mh-down: #b33526;
 
-  --sl-color-accent-low: #d3f1ec;
-  --sl-color-accent: #0f7a70;
-  --sl-color-accent-high: #0b3d38;
+  --sl-color-accent-low: #d9f2ee;
+  --sl-color-accent: #0b7266;
+  --sl-color-accent-high: #0a4840;
+  --sl-color-orange-low: #fcf3e3;
+  --sl-color-orange: var(--mh-warn);
+  --sl-color-orange-high: #5c3a04;
   --sl-color-white: var(--mh-ink);
-  --sl-color-gray-1: #1c2e3e;
+  --sl-color-gray-1: #1a2735;
   --sl-color-gray-2: var(--mh-body);
   --sl-color-gray-3: var(--mh-muted);
-  --sl-color-gray-4: #a39b8a;
-  --sl-color-gray-5: #d9ccb2;
+  --sl-color-gray-4: #7f8fa2;
+  --sl-color-gray-5: #c9d3de;
   --sl-color-gray-6: var(--mh-panel);
   --sl-color-gray-7: var(--mh-paper);
   --sl-color-black: var(--mh-bg);
@@ -128,7 +135,7 @@ h1#_top:not([data-page-title]),
   --sl-color-bg-sidebar: var(--mh-bg);
   --sl-color-bg-inline-code: var(--mh-panel);
   --sl-color-text: var(--mh-body);
-  --sl-color-text-accent: #0f7a70;
+  --sl-color-text-accent: var(--sl-color-accent);
   --sl-color-hairline: var(--mh-rule);
   --sl-color-hairline-light: var(--mh-rule);
   --sl-color-hairline-shade: var(--mh-rule);
@@ -461,8 +468,8 @@ site-search button[data-open-modal]:hover {
 .sidebar-content a[aria-current='page']:hover,
 .sidebar-content a[aria-current='page']:focus {
   font-weight: 600;
-  color: var(--mh-on-accent);
-  background-color: var(--sl-color-accent);
+  color: var(--sl-color-accent-high);
+  background-color: var(--sl-color-accent-low);
 }
 
 .sidebar-content a[aria-current='page'] .large {
@@ -480,6 +487,7 @@ site-search button[data-open-modal]:hover {
 }
 
 .sl-markdown-content a:not(:where(.not-content *)),
+.mh-demo figcaption a,
 .mh-closing a {
   color: var(--sl-color-text-accent);
   text-decoration: underline;
@@ -490,6 +498,7 @@ site-search button[data-open-modal]:hover {
 }
 
 .sl-markdown-content a:hover:not(:where(.not-content *)),
+.mh-demo figcaption a:hover,
 .mh-closing a:hover {
   color: var(--sl-color-text-accent);
   text-decoration-color: currentColor;
@@ -671,17 +680,17 @@ site-search button[data-open-modal]:hover {
 
 .mh-pill[data-state='healthy'] {
   color: var(--mh-ok);
-  background: color-mix(in srgb, var(--mh-teal) 12%, transparent);
+  background: color-mix(in srgb, var(--mh-ok) 12%, transparent);
 }
 
 .mh-pill[data-state='degraded'] {
   color: var(--mh-warn);
-  background: color-mix(in srgb, var(--mh-amber) 14%, transparent);
+  background: color-mix(in srgb, var(--mh-warn) 14%, transparent);
 }
 
 .mh-pill[data-state='failover'] {
   color: var(--mh-down);
-  background: color-mix(in srgb, var(--mh-coral) 14%, transparent);
+  background: color-mix(in srgb, var(--mh-down) 14%, transparent);
 }
 
 .starlight-aside--note {
@@ -690,18 +699,18 @@ site-search button[data-open-modal]:hover {
 }
 
 .starlight-aside--tip {
-  --sl-color-asides-text-accent: var(--mh-ok);
-  --sl-color-asides-border: var(--mh-teal);
+  --sl-color-asides-text-accent: var(--sl-color-accent);
+  --sl-color-asides-border: var(--sl-color-accent);
 }
 
 .starlight-aside--caution {
   --sl-color-asides-text-accent: var(--mh-warn);
-  --sl-color-asides-border: var(--mh-amber);
+  --sl-color-asides-border: var(--mh-warn);
 }
 
 .starlight-aside--danger {
   --sl-color-asides-text-accent: var(--mh-down);
-  --sl-color-asides-border: var(--mh-coral);
+  --sl-color-asides-border: var(--mh-down);
 }
 
 starlight-version-select select[autocomplete] {
