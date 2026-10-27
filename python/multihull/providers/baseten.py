@@ -54,6 +54,7 @@ ENVIRONMENT = "production"
 SPEC_LABEL = "multihull.dev/spec"
 HEALTH_PATH_LABEL = "multihull.dev/health-path"
 SECRETS_LABEL = "multihull.dev/secrets"
+LABELS_LIMIT_BYTES = 2048
 SECRETS_DIR = "/secrets"
 RESERVED_ENV = ("PORT", "HOST", "HOSTNAME", "PATH")
 SCALE_DOWN_DELAY_SECONDS = 300
@@ -109,8 +110,12 @@ def endpoint_url(model_id: str) -> str:
     return f"https://model-{model_id}.api.baseten.co/environments/{ENVIRONMENT}/sync"
 
 
+def store_name_for(model: str, secret: str) -> str:
+    return UNSAFE_SECRET_CHARS.sub("_", f"{model}_{secret}")
+
+
 def secret_store_name(desired: Target, secret: str) -> str:
-    return UNSAFE_SECRET_CHARS.sub("_", f"{model_name(desired)}_{secret}")
+    return store_name_for(model_name(desired), secret)
 
 
 def accelerator(desired: Target) -> str:
@@ -205,10 +210,32 @@ def deployment_labels(desired: Target, config: dict[str, Any]) -> dict[str, str]
         SPEC_LABEL: config_digest(config),
         HEALTH_PATH_LABEL: desired.service.container.health.path,
     }
-    stored = [secret_store_name(desired, name) for name in desired.service.container.secrets]
-    if stored:
-        labels[SECRETS_LABEL] = ",".join(stored)
+    if desired.service.container.secrets:
+        labels[SECRETS_LABEL] = json.dumps(desired.service.container.secrets, separators=(",", ":"))
     return labels
+
+
+def labelled_names(labels: Mapping[str, Any]) -> list[str]:
+    try:
+        names = json.loads(str(labels.get(SECRETS_LABEL) or "[]"))
+    except ValueError:
+        return []
+    return [name for name in names if isinstance(name, str)] if isinstance(names, list) else []
+
+
+def label_problems(desired: Target) -> list[str]:
+    labels = deployment_labels(desired, render_truss_config(desired))
+    size = len(json.dumps(labels, separators=(",", ":")).encode())
+    if size <= LABELS_LIMIT_BYTES:
+        return []
+    return [
+        f"deployment labels take {size} bytes of JSON, over Baseten's {LABELS_LIMIT_BYTES}-byte "
+        "limit; shorten the service, provider or secret names, or declare fewer secrets"
+    ]
+
+
+def refusals(desired: Target) -> list[str]:
+    return command_problems(desired) + label_problems(desired)
 
 
 def render_deployment(desired: Target) -> dict[str, Any]:
@@ -242,7 +269,7 @@ def command_problems(desired: Target) -> list[str]:
 
 
 def plan_notes(desired: Target) -> list[str]:
-    notes = command_problems(desired)
+    notes = refusals(desired)
     dropped = [name for name in RESERVED_ENV if name in desired.service.container.env]
     if dropped:
         notes.append(
@@ -581,7 +608,7 @@ class BasetenProvider:
         )
 
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
-        for problem in command_problems(desired):
+        for problem in refusals(desired):
             raise ValueError(problem)
         payload = render_deployment(desired)
         if self.dry_run:
@@ -812,7 +839,7 @@ class BasetenProvider:
         }
         if deployment:
             ids[DEPLOYMENT_KEY] = str(deployment["id"])
-        stored = str(labels.get(SECRETS_LABEL) or "")
+        stored = [store_name_for(name, raw) for raw in labelled_names(labels)]
         if stored:
-            ids[SECRETS_KEY] = stored
+            ids[SECRETS_KEY] = ",".join(stored)
         return Ref(provider=self.provider_name, type="baseten", service=service, ids=ids)

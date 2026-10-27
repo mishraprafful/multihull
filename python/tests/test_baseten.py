@@ -13,6 +13,7 @@ from multihull.providers.base import Ref, ScaleRefused, Target, secret_env_name
 from multihull.providers.baseten import (
     API_KEY_ENV,
     INFERENCE_API_KEY_ENV,
+    SECRETS_LABEL,
     BasetenApiError,
     BasetenProvider,
     render_payload,
@@ -644,6 +645,26 @@ def deployed_victim(fake: FakeBaseten, llama_raw: dict[str, Any]) -> str:
     return victim.apply(named_target(llama_raw, "llama-8b", "baseten-eu"), None).ids["model"]
 
 
+@pytest.mark.parametrize("plain", [True, False])
+def test_a_tampered_secrets_label_never_reaches_another_api_path(
+    provider: BasetenProvider,
+    fake: FakeBaseten,
+    llama_raw: dict[str, Any],
+    target: Target,
+    plain: bool,
+) -> None:
+    victim = deployed_victim(fake, llama_raw)
+    ours = provider.apply(target, None)
+    for deployment in fake.deployments.values():
+        if deployment["model_id"] == ours.ids["model"]:
+            entry = f"../models/{victim}"
+            deployment["labels"][SECRETS_LABEL] = entry if plain else json.dumps([entry])
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert victim in fake.models and ours.ids["model"] not in fake.models
+
+
 def test_destroy_refuses_a_state_name_outside_the_store_charset(
     provider: BasetenProvider, fake: FakeBaseten, llama_raw: dict[str, Any], target: Target
 ) -> None:
@@ -655,3 +676,11 @@ def test_destroy_refuses_a_state_name_outside_the_store_charset(
     with pytest.raises(ValueError, match="refusing"):
         provider.destroy(tampered)
     assert {victim, ours.ids["model"]} <= set(fake.models)
+
+
+def test_labels_over_the_baseten_limit_are_noted_and_refused(llama_raw: dict[str, Any]) -> None:
+    many = [f"credential-{index:02d}-" + "x" * 60 for index in range(40)]
+    target = variant(llama_raw, container={"secrets": many})
+    assert any("2048-byte" in note for note in BasetenProvider().plan(target, None).notes)
+    with pytest.raises(ValueError, match="2048-byte"):
+        BasetenProvider().apply(target, None)

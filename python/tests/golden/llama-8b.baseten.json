@@ -43,7 +43,7 @@
       "multihull.dev/provider": "baseten-us",
       "multihull.dev/spec": "1191db25e2e4723a",
       "multihull.dev/health-path": "/health",
-      "multihull.dev/secrets": "multihull_llama_8b_baseten_us_hf_token"
+      "multihull.dev/secrets": "[\"hf-token\"]"
     },
     "autoscaling_settings": {
       "min_replica": 1,
