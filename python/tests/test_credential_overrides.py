@@ -22,7 +22,6 @@ from multihull.cli import app
 from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref, Target, secret_env_name
-from multihull.providers.baseten import BasetenProvider
 from multihull.providers.docker import DockerProvider
 from multihull.providers.kubernetes import (
     DynamicKubeClient,
@@ -308,22 +307,21 @@ def test_doctor_accepts_a_readable_override_without_printing_it(
     value = sentinel()
     monkeypatch.setenv(OVERRIDE_ENV, value)
     llama_raw["targets"] = [
-        {"provider": "baseten-a", "type": "baseten", "priority": 1},
+        {"provider": "replicate-a", "type": "replicate", "priority": 1},
     ]
+    llama_raw["container"].pop("image")
+    llama_raw["container"]["build"] = {"target": "cog"}
     spec = single_target_spec(
-        llama_raw, "baseten-a", credentials=f"env:{OVERRIDE_ENV}", replicas={"min": 1}
+        llama_raw, "replicate-a", credentials=f"env:{OVERRIDE_ENV}", replicas={"min": 1}
     )
     result = runner.invoke(app, ["doctor", str(write_spec(tmp_path, spec))])
     assert result.exit_code == 0, result.output
     assert "OK" in result.output and value not in result.output
 
 
-@pytest.mark.parametrize("provider_class", [BasetenProvider, ReplicateProvider])
-def test_render_only_translators_check_the_override(
-    monkeypatch: pytest.MonkeyPatch, provider_class: type
-) -> None:
+def test_render_only_replicate_checks_the_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(OVERRIDE_ENV, raising=False)
-    provider = provider_class(credentials=f"env:{OVERRIDE_ENV}")
+    provider = ReplicateProvider(credentials=f"env:{OVERRIDE_ENV}")
     health = provider.credentials_health()
     assert not health.ok and health.message.startswith(f"credentials env:{OVERRIDE_ENV} is not set")
     value = sentinel()

@@ -14,11 +14,16 @@ from live.harness import (
     modal_app_states,
 )
 from multihull.providers.base import SERVICE_LABEL, Ref
+from multihull.providers.baseten import BasetenProvider
 from multihull.providers.runpod import RunpodProvider
 
 
 def runpod_endpoint_gone(ref: Ref) -> bool:
     return RunpodProvider(dry_run=False).status(ref).phase == "Failed"
+
+
+def baseten_model_gone(ref: Ref) -> bool:
+    return BasetenProvider(dry_run=False).status(ref).phase == "Failed"
 
 
 def test_destroy_leaves_nothing_behind(
@@ -62,4 +67,7 @@ def test_destroy_leaves_nothing_behind(
     if deployment.secondary_type == "runpod":
         ref = refs[deployment.secondary]
         wait_until(lambda: runpod_endpoint_gone(ref), 120, 5.0, "runpod endpoint deleted")
+    if deployment.secondary_type == "baseten":
+        ref = refs[deployment.secondary]
+        wait_until(lambda: baseten_model_gone(ref), 120, 5.0, "baseten model deleted")
     scenario.note(f"nothing left in namespace {kind.namespace} or on {deployment.secondary}")

@@ -3,15 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from multihull import discovery, engine
+from multihull.providers import baseten
 from multihull.providers.base import Provider, Ref, Target, secret_env_name
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState
 from tests.conftest import assert_golden
+from tests.fake_baseten import FakeBaseten, with_baseten
 from tests.fake_runpod import FakeRunpod
 
 CALLER = "conformance-fixture-caller"
@@ -50,7 +53,37 @@ def runpod_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
     )
 
 
-CASES: dict[str, Callable[[pytest.MonkeyPatch, ServiceSpec], Case]] = {"runpod": runpod_case}
+def baseten_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
+    monkeypatch.setenv(baseten.API_KEY_ENV, CALLER)
+    monkeypatch.delenv(baseten.INFERENCE_API_KEY_ENV, raising=False)
+    for name in spec.container.secrets:
+        monkeypatch.setenv(secret_env_name(name), MIRRORED)
+    fake = FakeBaseten(CALLER)
+
+    def set_serving(ref: Ref, serving: bool) -> None:
+        fake.health[ref.ids["model"]] = 200 if serving else 503
+
+    return Case(
+        target="baseten-us",
+        golden="llama-8b.baseten.json",
+        provider=baseten.BasetenProvider(
+            dry_run=False, provider_name="baseten-us", http_client=fake.client()
+        ),
+        resources=lambda: len(fake.models) + len(fake.secrets),
+        set_serving=set_serving,
+        secret_values=(MIRRORED,),
+    )
+
+
+CASES: dict[str, Callable[[pytest.MonkeyPatch, ServiceSpec], Case]] = {
+    "runpod": runpod_case,
+    "baseten": baseten_case,
+}
+
+
+@pytest.fixture
+def llama_spec(llama_raw: dict[str, Any]) -> ServiceSpec:
+    return with_baseten(llama_raw)
 
 
 @pytest.fixture(params=sorted(CASES))

@@ -1,11 +1,16 @@
 {
+  "secrets": [
+    {
+      "name": "multihull_llama_8b_baseten_us_hf_token"
+    }
+  ],
   "truss": {
-    "model_name": "multihull-llama-8b",
+    "model_name": "multihull-llama-8b-baseten-us",
     "base_image": {
-      "image": "llama-8b:build"
+      "image": "ghcr.io/acme/vllm-llama:1.4.0"
     },
     "docker_server": {
-      "start_command": "vllm serve meta-llama/Llama-3.1-8B-Instruct",
+      "start_command": "sh -c 'exec env hf-token=\"$(cat /secrets/multihull_llama_8b_baseten_us_hf_token)\" \"$@\"' sh vllm serve meta-llama/Llama-3.1-8B-Instruct",
       "server_port": 8000,
       "predict_endpoint": "/v1/chat/completions",
       "readiness_endpoint": "/health",
@@ -17,25 +22,33 @@
       "memory": "32Gi"
     },
     "runtime": {
-      "predict_concurrency": 32,
-      "health_checks": {
-        "initial_delay_seconds": 120
-      }
+      "predict_concurrency": 32
     },
     "environment_variables": {
       "VLLM_LOGGING_LEVEL": "INFO"
     },
     "secrets": {
-      "hf-token": null
+      "multihull_llama_8b_baseten_us_hf_token": null
     },
     "model_metadata": {
-      "multihull.dev/service": "llama-8b"
+      "multihull.dev/service": "llama-8b",
+      "multihull.dev/provider": "baseten-us"
     }
   },
-  "autoscaling": {
-    "min_replica": 1,
-    "max_replica": 8,
-    "concurrency_target": 32,
-    "scale_down_delay": 300
+  "deployment": {
+    "environment_name": "production",
+    "preserve_env_instance_type": false,
+    "labels": {
+      "multihull.dev/service": "llama-8b",
+      "multihull.dev/provider": "baseten-us",
+      "multihull.dev/spec": "1191db25e2e4723a",
+      "multihull.dev/health-path": "/health"
+    },
+    "autoscaling_settings": {
+      "min_replica": 1,
+      "max_replica": 8,
+      "concurrency_target": 32,
+      "scale_down_delay": 300
+    }
   }
 }
