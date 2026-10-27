@@ -182,9 +182,30 @@ def test_runpod_missing_override_never_falls_back_to_the_native_key(
     assert (
         health.message == f"credentials env:{OVERRIDE_ENV} is not set; runpod credentials missing"
     )
-    with pytest.raises(CredentialError, match=f"credentials env:{OVERRIDE_ENV} is not set"):
+    with pytest.raises(CredentialError) as raised:
         provider.apply(runpod_target(llama_raw, f"env:{OVERRIDE_ENV}"), None)
+    assert str(raised.value) == (
+        f"credentials env:{OVERRIDE_ENV} is not set; RunPod credentials missing"
+    )
     assert provider.endpoint(Ref("r", "runpod", "s", {"endpoint": "ep1"})).inject_headers == {}
+
+
+@pytest.mark.parametrize("native", [None, "  \n"])
+def test_runpod_without_a_native_key_names_it(
+    monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], native: str | None
+) -> None:
+    if native is None:
+        monkeypatch.delenv(API_KEY_ENV, raising=False)
+    else:
+        monkeypatch.setenv(API_KEY_ENV, native)
+    spec = single_target_spec(llama_raw, "runpod-eu")
+    provider = RunpodProvider(dry_run=False, http_client=FakeRunpod(sentinel()).client())
+    with pytest.raises(CredentialError) as raised:
+        provider.apply(Target(spec, spec.targets[0]), None)
+    assert str(raised.value) == f"{API_KEY_ENV} is not set; RunPod credentials missing"
+    health = provider.credentials_health()
+    assert not health.ok
+    assert health.message == f"{API_KEY_ENV} is not set; runpod credentials missing"
 
 
 def test_deploy_keeps_the_override_out_of_output_state_plan_and_logs(

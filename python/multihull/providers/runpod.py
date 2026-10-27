@@ -219,7 +219,10 @@ def redact(text: str, credentials: str | None = None) -> str:
 
 
 def api_key(credentials: str | None = None) -> str:
-    return read_token(credentials, API_KEY_ENV)
+    try:
+        return read_token(credentials, API_KEY_ENV)
+    except CredentialError as exc:
+        raise CredentialError(f"{exc}; RunPod credentials missing") from None
 
 
 def bearer(value: str) -> dict[str, str]:

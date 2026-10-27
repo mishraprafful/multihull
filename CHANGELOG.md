@@ -15,6 +15,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 ### Changed
 
 - Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
+- A provider key or token that is only whitespace (`RUNPOD_API_KEY`, `BASETEN_API_KEY`, `REPLICATE_API_TOKEN`) now counts as missing, so `hull doctor` fails on it (#67).
 
 ## [0.2.0] - 2026-10-12
 
