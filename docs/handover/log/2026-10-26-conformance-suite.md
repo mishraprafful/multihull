@@ -1,0 +1,6 @@
+# 2026-10-26: translator conformance suite (issue 66)
+
+- `python/tests/test_conformance.py` covers every registry provider; Baseten (PR 177) and Replicate (PR 175) joined as real cases, so no xfail remains. `MULTIHULL_CONFORMANCE_LIVE` runs the same tests against real providers (`tests/conformance_live.py`).
+- Translator bugs found: Modal `rediscover` derived the web URL from `MODAL_WORKSPACE`; RunPod and Baseten `rediscover` lost the mirrored secret names, so destroying a rediscovered ref left the secrets. The first fixes matched names by prefix, which the review showed claims other targets' secrets; both now use exact names. All fixed with regression tests.
+- Live Kubernetes flips readiness through the API server's pod proxy (`kubectl create --raw /api/v1/namespaces/<ns>/pods/<pod>:8000/proxy/__control`): a Service drops an unready pod, so the mock server's `/__control` is unreachable through it once health returns 503. The first version used `ApiClient.call_api`, whose signature changed in `kubernetes` 37 (`testing/live`) from 36 (`python`); it passed locally in the `python` venv and failed in kind run 40318064401.
+- Live Docker and kind passed locally (Docker Desktop, kind v0.33.0). Live Modal and RunPod have not run; RunPod may not route `/__control` to an unhealthy worker, which the status test would show as a timeout.

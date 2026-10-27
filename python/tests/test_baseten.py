@@ -13,10 +13,12 @@ from multihull.providers.base import Ref, ScaleRefused, Target, secret_env_name
 from multihull.providers.baseten import (
     API_KEY_ENV,
     INFERENCE_API_KEY_ENV,
+    SECRETS_LABEL,
     BasetenApiError,
     BasetenProvider,
     render_payload,
     render_truss_config,
+    secret_store_name,
     signed_s3_put,
 )
 from multihull.spec import ServiceSpec
@@ -455,6 +457,7 @@ def test_rediscover_finds_the_model_by_name(
         "url": created.ids["url"],
         "health_path": "/health",
         "deployment": created.ids["deployment"],
+        "secrets": STORE,
     }
     other = BasetenProvider(False, "baseten-eu", fake.client())
     assert other.rediscover("llama-8b") is None
@@ -589,3 +592,95 @@ def test_archive_upload_is_signed_like_botocore(bucket: str, url: str, signature
         "SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-security-token, "
         f"Signature={signature}"
     )
+
+
+def test_a_rediscovered_ref_destroys_only_the_mirrored_secrets(
+    provider: BasetenProvider, fake: FakeBaseten, target: Target
+) -> None:
+    fake.secrets["team_shared"] = "owned-by-the-user"
+    provider.apply(target, None)
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert (fake.models, list(fake.secrets)) == ({}, ["team_shared"])
+
+
+def named_target(llama_raw: dict[str, Any], service: str, provider: str) -> Target:
+    target = {"provider": provider, "type": "baseten", "priority": 9, "baseten": {}}
+    spec = ServiceSpec.model_validate(
+        {**llama_raw, "name": service, "targets": [*llama_raw["targets"], target]}
+    )
+    return Target(spec, spec.target(provider))
+
+
+@pytest.mark.parametrize(
+    ("ours", "theirs"),
+    [
+        (("llama-8b", "baseten"), ("llama-8b", "baseten-us")),
+        (("llama", "baseten"), ("llama-baseten", "us")),
+    ],
+)
+def test_rediscover_never_claims_another_targets_secrets(
+    fake: FakeBaseten,
+    llama_raw: dict[str, Any],
+    ours: tuple[str, str],
+    theirs: tuple[str, str],
+) -> None:
+    providers = {
+        pair: BasetenProvider(False, pair[1], fake.client(), clock=lambda: NOW)
+        for pair in (ours, theirs)
+    }
+    for (service, provider_name), provider in providers.items():
+        provider.apply(named_target(llama_raw, service, provider_name), None)
+    other = named_target(llama_raw, *theirs)
+    kept = sorted(secret_store_name(other, name) for name in other.service.container.secrets)
+    found = providers[ours].rediscover(ours[0])
+    assert found is not None
+    providers[ours].destroy(found)
+    assert sorted(fake.secrets) == kept
+
+
+def deployed_victim(fake: FakeBaseten, llama_raw: dict[str, Any]) -> str:
+    victim = BasetenProvider(False, "baseten-eu", fake.client(), clock=lambda: NOW)
+    return victim.apply(named_target(llama_raw, "llama-8b", "baseten-eu"), None).ids["model"]
+
+
+@pytest.mark.parametrize("plain", [True, False])
+def test_a_tampered_secrets_label_never_reaches_another_api_path(
+    provider: BasetenProvider,
+    fake: FakeBaseten,
+    llama_raw: dict[str, Any],
+    target: Target,
+    plain: bool,
+) -> None:
+    victim = deployed_victim(fake, llama_raw)
+    ours = provider.apply(target, None)
+    for deployment in fake.deployments.values():
+        if deployment["model_id"] == ours.ids["model"]:
+            entry = f"../models/{victim}"
+            deployment["labels"][SECRETS_LABEL] = entry if plain else json.dumps([entry])
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert victim in fake.models and ours.ids["model"] not in fake.models
+
+
+def test_destroy_refuses_a_state_name_outside_the_store_charset(
+    provider: BasetenProvider, fake: FakeBaseten, llama_raw: dict[str, Any], target: Target
+) -> None:
+    victim = deployed_victim(fake, llama_raw)
+    ours = provider.apply(target, None)
+    tampered = Ref(
+        ours.provider, ours.type, ours.service, {**ours.ids, "secrets": f"../models/{victim}"}
+    )
+    with pytest.raises(ValueError, match="refusing"):
+        provider.destroy(tampered)
+    assert {victim, ours.ids["model"]} <= set(fake.models)
+
+
+def test_labels_over_the_baseten_limit_are_noted_and_refused(llama_raw: dict[str, Any]) -> None:
+    many = [f"credential-{index:02d}-" + "x" * 60 for index in range(40)]
+    target = variant(llama_raw, container={"secrets": many})
+    assert any("2048-byte" in note for note in BasetenProvider().plan(target, None).notes)
+    with pytest.raises(ValueError, match="2048-byte"):
+        BasetenProvider().apply(target, None)

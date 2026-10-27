@@ -28,7 +28,7 @@ from multihull.providers.modal import (
 )
 from multihull.spec import GPU, ServiceSpec
 from tests.conftest import assert_golden
-from tests.fake_modal import FakeAuthError, FakeLogEntry, FakeModal
+from tests.fake_modal import FakeAuthError, FakeLogEntry, FakeModal, FakeNotFoundError
 
 REGISTRY_ENV = {"GHCR_USERNAME": "fixture-user", "GHCR_TOKEN": "fixture-registry-value"}
 FAKE_TOKEN_ID = "ak-fixture-token-id"
@@ -409,3 +409,26 @@ def test_destroy_stops_the_app_with_the_modal_cli(
     else:
         ModalProvider(dry_run=False).destroy(ref)
     assert calls[0][1:] == ["-m", "modal", "app", "stop", "multihull-x", "--env", "main", "--yes"]
+
+
+def test_rediscover_reads_the_deployed_web_url(
+    fake_modal: FakeModal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MODAL_WORKSPACE", raising=False)
+    provider = ModalProvider(dry_run=False, provider_name="modal-us")
+    ref = provider.rediscover("llama-8b")
+    assert ref is not None
+    assert provider.endpoint(ref).url == "https://ws--multihull-llama-8b-modal-us.modal.run"
+    assert ("multihull-llama-8b-modal-us/Server", None) in fake_modal.lookups
+
+
+def test_rediscover_falls_back_only_when_the_server_class_is_missing(
+    fake_modal: FakeModal,
+) -> None:
+    provider = ModalProvider(dry_run=False, provider_name="modal-us")
+    fake_modal.cls_error = FakeNotFoundError("no class Server")
+    ref = provider.rediscover("llama-8b")
+    assert ref is not None and "web_url" not in ref.ids
+    fake_modal.cls_error = FakeAuthError("token rejected")
+    with pytest.raises(FakeAuthError):
+        provider.rediscover("llama-8b")

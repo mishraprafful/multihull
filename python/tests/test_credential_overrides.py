@@ -1033,7 +1033,10 @@ def test_modal_status_and_rediscover_use_the_override_client(
     assert fake_modal.clients_used[-1] == ("cls", fake_modal.client)
     found = provider.rediscover("llama-8b")
     assert found is not None and found.ids["app"] == "multihull-llama-8b-modal-main"
-    assert fake_modal.clients_used[-1] == ("lookup", fake_modal.client)
+    assert fake_modal.clients_used[-2:] == [
+        ("lookup", fake_modal.client),
+        ("cls", fake_modal.client),
+    ]
 
 
 def test_docker_override_stays_out_of_output_state_plan_snapshot_and_logs(

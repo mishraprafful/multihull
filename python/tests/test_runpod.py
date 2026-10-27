@@ -289,6 +289,7 @@ def test_rediscover_pages_through_endpoints_by_name(
         "name": "multihull-llama-8b-runpod-eu",
         "url": created.ids["url"],
         "health_path": "/health",
+        "secrets": "multihull_llama_8b_runpod_eu_hf_token",
     }
     assert RunpodProvider(False, "runpod-us", fake.client()).rediscover("llama-8b") is None
 
@@ -360,3 +361,59 @@ def test_plan_payload_names_secrets_without_values(target: Target, runpod_env: N
         for name in target.service.container.secrets
     ]
     assert MIRRORED not in json.dumps(payload)
+
+
+def test_a_rediscovered_ref_destroys_the_mirrored_secrets(
+    provider: RunpodProvider, fake: FakeRunpod, target: Target
+) -> None:
+    provider.apply(target, None)
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert (fake.endpoints, fake.secrets) == ({}, {})
+
+
+def test_rediscover_leaves_secrets_the_spec_only_references(
+    provider: RunpodProvider, fake: FakeRunpod, llama_raw: dict[str, Any]
+) -> None:
+    env = {**llama_raw["container"]["env"], "SHARED": "{{ RUNPOD_SECRET_team_shared }}"}
+    target = variant(llama_raw, container={"env": env})
+    provider.api.put_secret("team_shared", "owned-by-the-user")
+    provider.apply(target, None)
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert [stored["name"] for stored in fake.secrets.values()] == ["team_shared"]
+
+
+def test_endpoint_repr_hides_the_injected_headers(provider: RunpodProvider, target: Target) -> None:
+    endpoint = provider.endpoint(provider.apply(target, None))
+    hidden = CALLER not in repr(endpoint)
+    assert endpoint.inject_headers
+    assert hidden
+
+
+def test_rediscover_leaves_a_reference_that_only_shares_the_endpoint_prefix(
+    provider: RunpodProvider, fake: FakeRunpod, llama_raw: dict[str, Any]
+) -> None:
+    lookalike = "multihull_llama_8b_runpod_eu_other_team"
+    env = {**llama_raw["container"]["env"], "SHARED": "{{ RUNPOD_SECRET_" + lookalike + " }}"}
+    provider.api.put_secret(lookalike, "owned-by-another-target")
+    provider.apply(variant(llama_raw, container={"env": env}), None)
+    found = provider.rediscover("llama-8b")
+    assert found is not None
+    provider.destroy(found)
+    assert [stored["name"] for stored in fake.secrets.values()] == [lookalike]
+
+
+def test_destroy_refuses_a_state_name_outside_the_store_charset(
+    provider: RunpodProvider, fake: FakeRunpod, target: Target, llama_raw: dict[str, Any]
+) -> None:
+    llama_raw["name"] = "other"
+    victim = provider.apply(variant(llama_raw), None).ids["endpoint"]
+    ours = provider.apply(target, None)
+    tampered_ids = {**ours.ids, "secrets": f"../serverless/{victim}"}
+    tampered = Ref(ours.provider, ours.type, ours.service, tampered_ids)
+    with pytest.raises(ValueError, match="refusing"):
+        provider.destroy(tampered)
+    assert {victim, ours.ids["endpoint"]} <= set(fake.endpoints)

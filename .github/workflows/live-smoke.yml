@@ -409,6 +409,87 @@ jobs:
             ${{ runner.temp }}/live/results.xml
           if-no-files-found: ignore
 
+  modal-conformance:
+    needs: gate
+    if: needs.gate.outputs.modal == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    concurrency:
+      group: live-smoke-conformance-modal
+      cancel-in-progress: false
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MULTIHULL_CONFORMANCE_PREFIX: live-c${{ github.run_id }}
+      MULTIHULL_CONFORMANCE_IMAGE: ${{ inputs.mock_image || 'ghcr.io/mishraprafful/multihull-mock-server:main' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Modal credential preflight
+        id: preflight
+        working-directory: testing/live
+        run: uv run python -m live.preflight
+      - name: Translator conformance against Modal
+        timeout-minutes: 35
+        working-directory: python
+        run: uv run --project ../testing/live pytest -v tests/test_conformance.py
+        env:
+          MULTIHULL_CONFORMANCE_LIVE: modal
+      - name: Stop Modal apps left by this run
+        if: always()
+        working-directory: testing/live
+        env:
+          CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
+        run: |
+          if [ "$CREDENTIALS" != accepted ]; then
+            echo "skipped, credentials ${CREDENTIALS:-unchecked}"
+            exit 0
+          fi
+          uv run python -m live.sweep --prefix "multihull-${MULTIHULL_CONFORMANCE_PREFIX}" \
+            --env "$MODAL_ENVIRONMENT"
+
+  runpod-conformance:
+    needs: gate
+    if: needs.gate.outputs.runpod == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    concurrency:
+      group: live-smoke-conformance-runpod
+      cancel-in-progress: false
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MULTIHULL_CONFORMANCE_PREFIX: live-c${{ github.run_id }}
+      MULTIHULL_CONFORMANCE_IMAGE: ${{ inputs.mock_image || 'ghcr.io/mishraprafful/multihull-mock-server:main' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            testing/live/uv.lock
+            python/uv.lock
+      - run: uv sync --locked --project testing/live
+      - name: Translator conformance against RunPod
+        timeout-minutes: 50
+        working-directory: python
+        run: uv run --project ../testing/live pytest -v tests/test_conformance.py
+        env:
+          MULTIHULL_CONFORMANCE_LIVE: runpod
+      - name: Delete RunPod endpoints left by this run
+        if: always()
+        working-directory: testing/live
+        run: uv run python -m live.runpod_sweep --prefix "multihull-${MULTIHULL_CONFORMANCE_PREFIX}"
+
   sweep:
     needs: gate
     if: needs.gate.outputs.modal == 'true' && github.event_name == 'schedule'

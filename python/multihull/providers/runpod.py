@@ -20,7 +20,9 @@ from multihull.providers.base import (
     Ref,
     ScaleRefused,
     Target,
+    api_path,
     credential_health,
+    mirrored_names,
     redact_env,
     redact_token,
     resolve_secret_values,
@@ -57,6 +59,7 @@ HEALTH_PATH_KEY = "health_path"
 DIGEST_KEY = "spec"
 SECRETS_KEY = "secrets"
 UNSAFE_SECRET_CHARS = re.compile(r"[^A-Za-z0-9_]")
+SECRET_REFERENCE = re.compile(r"\{\{ RUNPOD_SECRET_([A-Za-z0-9_]+) \}\}")
 
 
 class RunpodApiError(RuntimeError):
@@ -88,6 +91,15 @@ def secret_store_name(desired: Target, secret: str) -> str:
 
 def secret_reference(store_name: str) -> str:
     return "{{ RUNPOD_SECRET_" + store_name + " }}"
+
+
+def owned_secrets(env: Mapping[str, Any], endpoint: str) -> list[str]:
+    owned: list[str] = []
+    for key, value in env.items():
+        match = SECRET_REFERENCE.fullmatch(str(value))
+        if match and match.group(1) == UNSAFE_SECRET_CHARS.sub("_", f"{endpoint}_{key}"):
+            owned.append(match.group(1))
+    return owned
 
 
 def gpu_pools(desired: Target) -> list[str]:
@@ -354,17 +366,17 @@ class RunpodApi:
         if existing is None:
             self.call("POST", "/account/secrets", {"name": name, "value": value})
         else:
-            self.call("PATCH", f"/account/secrets/{existing['id']}", {"value": value})
+            self.call("PATCH", api_path("account", "secrets", existing["id"]), {"value": value})
 
     def delete_secret(self, name: str) -> None:
         existing = self.secret_named(name)
         if existing is not None:
-            self.call("DELETE", f"/account/secrets/{existing['id']}", missing_ok=True)
+            self.call("DELETE", api_path("account", "secrets", existing["id"]), missing_ok=True)
 
     def worker_logs(
         self, endpoint_id: str, worker_id: str, start: str, until: datetime
     ) -> Iterator[str]:
-        url = f"{API_URL}/serverless/{endpoint_id}/workers/{worker_id}/logs"
+        url = f"{API_URL}{api_path('serverless', endpoint_id, 'workers', worker_id, 'logs')}"
         timeout = httpx.Timeout(HTTP_TIMEOUT_SECONDS, read=LOG_IDLE_SECONDS)
         try:
             with self.http.stream(
@@ -452,7 +464,7 @@ class RunpodProvider:
     def current_endpoint(self, observed: Ref | None, name: str) -> dict[str, Any] | None:
         endpoint_id = observed.ids.get(ENDPOINT_KEY) if observed else None
         if endpoint_id:
-            found = self.api.call("GET", f"/serverless/{endpoint_id}", missing_ok=True)
+            found = self.api.call("GET", api_path("serverless", endpoint_id), missing_ok=True)
             if found is not None:
                 return dict(found)
         return self.api.endpoint_named(name)
@@ -473,18 +485,19 @@ class RunpodProvider:
         changes = autoscaler_drift(current, body) if unchanged else update_body(body)
         if not changes:
             return current
-        return dict(self.api.call("PATCH", f"/serverless/{current['id']}", changes))
+        return dict(self.api.call("PATCH", api_path("serverless", current["id"]), changes))
 
     def destroy(self, ref: Ref) -> None:
         if self.dry_run:
             return
+        mirrored = mirrored_names(ref.ids.get(SECRETS_KEY, ""))
         endpoint_id = ref.ids.get(ENDPOINT_KEY)
         if not endpoint_id and ref.ids.get(NAME_KEY):
             found = self.api.endpoint_named(ref.ids[NAME_KEY])
             endpoint_id = str(found["id"]) if found else None
         if endpoint_id:
-            self.api.call("DELETE", f"/serverless/{endpoint_id}", missing_ok=True)
-        for name in filter(None, ref.ids.get(SECRETS_KEY, "").split(",")):
+            self.api.call("DELETE", api_path("serverless", endpoint_id), missing_ok=True)
+        for name in mirrored:
             self.api.delete_secret(name)
 
     def status(self, ref: Ref) -> Observed:
@@ -494,10 +507,10 @@ class RunpodProvider:
         if not endpoint_id:
             return Observed(phase="Unknown", message="no RunPod endpoint id in state")
         try:
-            endpoint = self.api.call("GET", f"/serverless/{endpoint_id}", missing_ok=True)
+            endpoint = self.api.call("GET", api_path("serverless", endpoint_id), missing_ok=True)
             if endpoint is None:
                 return Observed(phase="Failed", message=f"RunPod endpoint {endpoint_id} not found")
-            listing = self.api.call("GET", f"/serverless/{endpoint_id}/workers")
+            listing = self.api.call("GET", api_path("serverless", endpoint_id, "workers"))
         except (httpx.HTTPError, RuntimeError) as exc:
             return Observed(phase="Unknown", message=redact(str(exc), self.credentials))
         summary = listing.get("summary") or {}
@@ -536,7 +549,7 @@ class RunpodProvider:
             raise ScaleRefused("no RunPod endpoint id in state")
         try:
             self.api.call(
-                "PATCH", f"/serverless/{endpoint_id}", {"workers": {"min": min, "max": max}}
+                "PATCH", api_path("serverless", endpoint_id), {"workers": {"min": min, "max": max}}
             )
         except RunpodApiError as exc:
             if exc.status in PERMANENT_SCALE_STATUSES:
@@ -551,7 +564,7 @@ class RunpodProvider:
             return
         until = datetime.now(UTC)
         start = (until - since).strftime("%Y-%m-%dT%H:%M:%SZ")
-        listing = self.api.call("GET", f"/serverless/{endpoint_id}/workers")
+        listing = self.api.call("GET", api_path("serverless", endpoint_id, "workers"))
         for worker in listing.get("workers") or []:
             yield from self.api.worker_logs(endpoint_id, str(worker["id"]), start, until)
 
@@ -598,4 +611,7 @@ class RunpodProvider:
             URL_KEY: base_url(found),
             HEALTH_PATH_KEY: str(env.get(HEALTH_CHECK_PATH_ENV) or DEFAULT_HEALTH_PATH),
         }
+        stored = owned_secrets(env, name)
+        if stored:
+            ids[SECRETS_KEY] = ",".join(stored)
         return Ref(provider=self.provider_name, type="runpod", service=service, ids=ids)

@@ -371,6 +371,16 @@ def server_instance(app_name: str, environment: str | None, client: Any = None) 
     )()
 
 
+def deployed_web_url(app_name: str, environment: str | None, client: Any = None) -> str | None:
+    import modal
+
+    try:
+        url = server_instance(app_name, environment, client).serve.get_web_url()
+    except modal.exception.NotFoundError:
+        return None
+    return str(url) if url else None
+
+
 def stop_app(app_name: str, environment: str, credentials: str | None = None) -> None:
     with tempfile.TemporaryDirectory() as config_dir:
         result = subprocess.run(
@@ -534,7 +544,11 @@ class ModalProvider:
             modal.App.lookup(name, client=self.client)
         except Exception:
             return None
-        return Ref(provider=self.provider_name, type="modal", service=service, ids={"app": name})
+        ids = {"app": name}
+        web_url = deployed_web_url(name, None, self.client)
+        if web_url:
+            ids["web_url"] = web_url
+        return Ref(provider=self.provider_name, type="modal", service=service, ids=ids)
 
 
 def fetch_logs_with_sdk(

@@ -28,7 +28,9 @@ from multihull.providers.base import (
     Ref,
     ScaleRefused,
     Target,
+    api_path,
     credential_health,
+    mirrored_names,
     redact_env,
     redact_token,
     resolve_secret_values,
@@ -51,6 +53,8 @@ AUTH_SCHEME = "Api-Key"
 ENVIRONMENT = "production"
 SPEC_LABEL = "multihull.dev/spec"
 HEALTH_PATH_LABEL = "multihull.dev/health-path"
+SECRETS_LABEL = "multihull.dev/secrets"
+LABELS_LIMIT_BYTES = 2048
 SECRETS_DIR = "/secrets"
 RESERVED_ENV = ("PORT", "HOST", "HOSTNAME", "PATH")
 SCALE_DOWN_DELAY_SECONDS = 300
@@ -106,8 +110,12 @@ def endpoint_url(model_id: str) -> str:
     return f"https://model-{model_id}.api.baseten.co/environments/{ENVIRONMENT}/sync"
 
 
+def store_name_for(model: str, secret: str) -> str:
+    return UNSAFE_SECRET_CHARS.sub("_", f"{model}_{secret}")
+
+
 def secret_store_name(desired: Target, secret: str) -> str:
-    return UNSAFE_SECRET_CHARS.sub("_", f"{model_name(desired)}_{secret}")
+    return store_name_for(model_name(desired), secret)
 
 
 def accelerator(desired: Target) -> str:
@@ -195,6 +203,41 @@ def config_digest(config: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
+def deployment_labels(desired: Target, config: dict[str, Any]) -> dict[str, str]:
+    labels = {
+        SERVICE_LABEL: desired.name,
+        PROVIDER_LABEL: desired.provider,
+        SPEC_LABEL: config_digest(config),
+        HEALTH_PATH_LABEL: desired.service.container.health.path,
+    }
+    if desired.service.container.secrets:
+        labels[SECRETS_LABEL] = json.dumps(desired.service.container.secrets, separators=(",", ":"))
+    return labels
+
+
+def labelled_names(labels: Mapping[str, Any]) -> list[str]:
+    try:
+        names = json.loads(str(labels.get(SECRETS_LABEL) or "[]"))
+    except ValueError:
+        return []
+    return [name for name in names if isinstance(name, str)] if isinstance(names, list) else []
+
+
+def label_problems(desired: Target) -> list[str]:
+    labels = deployment_labels(desired, render_truss_config(desired))
+    size = len(json.dumps(labels, separators=(",", ":")).encode())
+    if size <= LABELS_LIMIT_BYTES:
+        return []
+    return [
+        f"deployment labels take {size} bytes of JSON, over Baseten's {LABELS_LIMIT_BYTES}-byte "
+        "limit; shorten the service, provider or secret names, or declare fewer secrets"
+    ]
+
+
+def refusals(desired: Target) -> list[str]:
+    return command_problems(desired) + label_problems(desired)
+
+
 def render_deployment(desired: Target) -> dict[str, Any]:
     config = render_truss_config(desired)
     return {
@@ -202,12 +245,7 @@ def render_deployment(desired: Target) -> dict[str, Any]:
         "raw_config": yaml.safe_dump(config, sort_keys=False),
         "environment_name": ENVIRONMENT,
         "preserve_env_instance_type": False,
-        "labels": {
-            SERVICE_LABEL: desired.name,
-            PROVIDER_LABEL: desired.provider,
-            SPEC_LABEL: config_digest(config),
-            HEALTH_PATH_LABEL: desired.service.container.health.path,
-        },
+        "labels": deployment_labels(desired, config),
         "autoscaling_settings": autoscaling_settings(desired),
     }
 
@@ -231,7 +269,7 @@ def command_problems(desired: Target) -> list[str]:
 
 
 def plan_notes(desired: Target) -> list[str]:
-    notes = command_problems(desired)
+    notes = refusals(desired)
     dropped = [name for name in RESERVED_ENV if name in desired.service.container.env]
     if dropped:
         notes.append(
@@ -456,10 +494,12 @@ class BasetenApi:
         )
 
     def environment(self, model_id: str) -> dict[str, Any] | None:
-        return self.call("GET", f"/models/{model_id}/environments/{ENVIRONMENT}", missing_ok=True)
+        return self.call(
+            "GET", api_path("models", model_id, "environments", ENVIRONMENT), missing_ok=True
+        )
 
     def deployments(self, model_id: str) -> list[dict[str, Any]]:
-        listing = self.call("GET", f"/models/{model_id}/deployments")
+        listing = self.call("GET", api_path("models", model_id, "deployments"))
         return list(listing.get("deployments") or [])
 
     def push(
@@ -472,7 +512,9 @@ class BasetenApi:
         self.upload(prepared, truss_archive(str(deployment["raw_config"])), now)
         source = {"kind": "model_archive", "s3_key": prepared["s3_key"], "deployment": deployment}
         if model_id:
-            return dict(self.call("POST", f"/models/{model_id}/deployments", {"source": source}))
+            return dict(
+                self.call("POST", api_path("models", model_id, "deployments"), {"source": source})
+            )
         return dict(self.call("POST", "/models", {"source": {**source, "name": name}}))
 
     def upload(self, prepared: Mapping[str, Any], archive: bytes, now: datetime) -> None:
@@ -494,13 +536,15 @@ class BasetenApi:
             "environment_settings_update": {"autoscaling_settings": dict(autoscaling)},
         }
         return dict(
-            self.call("POST", f"/models/{model_id}/deployments/{deployment_id}/promote", body)
+            self.call(
+                "POST", api_path("models", model_id, "deployments", deployment_id, "promote"), body
+            )
         )
 
     def set_autoscaling(self, model_id: str, settings: Mapping[str, Any]) -> None:
         self.call(
             "PATCH",
-            f"/models/{model_id}/environments/{ENVIRONMENT}",
+            api_path("models", model_id, "environments", ENVIRONMENT),
             {"autoscaling_settings": dict(settings)},
         )
 
@@ -517,7 +561,9 @@ class BasetenApi:
                 "limit": LOG_LIMIT,
             }
             page = self.call(
-                "GET", f"/models/{model_id}/deployments/{deployment_id}/logs", params=params
+                "GET",
+                api_path("models", model_id, "deployments", deployment_id, "logs"),
+                params=params,
             )
             lines = list(page.get("logs") or [])
             yield from lines
@@ -562,7 +608,7 @@ class BasetenProvider:
         )
 
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
-        for problem in command_problems(desired):
+        for problem in refusals(desired):
             raise ValueError(problem)
         payload = render_deployment(desired)
         if self.dry_run:
@@ -591,7 +637,7 @@ class BasetenProvider:
     def current_model(self, observed: Ref | None, desired: Target) -> dict[str, Any] | None:
         model_id = observed.ids.get(MODEL_KEY) if observed else None
         if model_id:
-            found = self.api.call("GET", f"/models/{model_id}", missing_ok=True)
+            found = self.api.call("GET", api_path("models", model_id), missing_ok=True)
             if found is not None:
                 return dict(found)
         return self.api.owned_model(model_name(desired), desired.name, desired.provider)
@@ -622,11 +668,12 @@ class BasetenProvider:
     def destroy(self, ref: Ref) -> None:
         if self.dry_run:
             return
+        mirrored = mirrored_names(ref.ids.get(SECRETS_KEY, ""))
         model_id = self.model_id_for(ref)
         if model_id:
-            self.api.call("DELETE", f"/models/{model_id}", missing_ok=True)
-        for name in filter(None, ref.ids.get(SECRETS_KEY, "").split(",")):
-            self.api.call("DELETE", f"/secrets/{name}", missing_ok=True)
+            self.api.call("DELETE", api_path("models", model_id), missing_ok=True)
+        for name in mirrored:
+            self.api.call("DELETE", api_path("secrets", name), missing_ok=True)
 
     def status(self, ref: Ref) -> Observed:
         if self.dry_run:
@@ -681,7 +728,7 @@ class BasetenProvider:
         if not wanted:
             return Observed("Pending", 0, desired, serving)
         deployment = self.api.call(
-            "GET", f"/models/{model_id}/deployments/{wanted}", missing_ok=True
+            "GET", api_path("models", model_id, "deployments", wanted), missing_ok=True
         )
         status = "not found" if deployment is None else str(deployment.get("status"))
         if deployment is not None and status not in UNUSABLE_STATUSES:
@@ -792,4 +839,7 @@ class BasetenProvider:
         }
         if deployment:
             ids[DEPLOYMENT_KEY] = str(deployment["id"])
+        stored = [store_name_for(name, raw) for raw in labelled_names(labels)]
+        if stored:
+            ids[SECRETS_KEY] = ",".join(stored)
         return Ref(provider=self.provider_name, type="baseten", service=service, ids=ids)

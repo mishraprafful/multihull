@@ -36,8 +36,9 @@ def problem(status: int, title: str, detail: str) -> httpx.Response:
 
 
 class FakeRunpod:
-    def __init__(self, caller: str) -> None:
+    def __init__(self, caller: str, traffic_caller: str | None = None) -> None:
         self.caller = caller
+        self.traffic_caller = traffic_caller
         self.endpoints: dict[str, dict[str, Any]] = {}
         self.secrets: dict[str, dict[str, str]] = {}
         self.worker_states: dict[str, list[str]] = {}
@@ -53,12 +54,14 @@ class FakeRunpod:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.calls.append((request.method, request.url.path))
-        if request.headers.get("authorization") != f"Bearer {self.caller}":
+        host = request.url.host
+        traffic = host.endswith(TRAFFIC_SUFFIX)
+        expected = (self.traffic_caller or self.caller) if traffic else self.caller
+        if request.headers.get("authorization") != f"Bearer {expected}":
             return problem(401, "Unauthorized", "missing bearer token")
         if self.failure is not None:
             return self.failure
-        host = request.url.host
-        if host.endswith(TRAFFIC_SUFFIX):
+        if traffic:
             return httpx.Response(self.health.get(host.removesuffix(TRAFFIC_SUFFIX), 200))
         if host != API_HOST or not request.url.path.startswith("/v2/"):
             return problem(404, "Not Found", "unknown host or path")

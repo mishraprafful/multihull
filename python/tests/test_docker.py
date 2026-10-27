@@ -26,7 +26,7 @@ from multihull.providers.docker import (
 )
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState
-from tests.conftest import assert_golden
+from tests.conftest import assert_golden, llama_with_docker
 from tests.fake_docker import FakeDockerClient
 
 NO_SLEEP = lambda seconds: None  # noqa: E731
@@ -62,19 +62,6 @@ def provider_with(
 
 def docker_target(spec: ServiceSpec, provider: str) -> Target:
     return Target(spec, spec.target(provider))
-
-
-def llama_with_docker(llama_spec: ServiceSpec) -> ServiceSpec:
-    raw = llama_spec.model_dump(by_alias=True, exclude_none=True)
-    raw["targets"].append(
-        {
-            "provider": "docker-local",
-            "type": "docker",
-            "priority": 4,
-            "docker": {"hostPort": 18080, "network": "multihull", "env": {"MOCK": "1"}},
-        }
-    )
-    return ServiceSpec.model_validate(raw)
 
 
 def test_golden_run_kwargs_mock_fixture(mock_docker_spec: ServiceSpec) -> None:
