@@ -41,10 +41,11 @@ Health: the router probes the deployment URL itself (`GET`), not `container.heal
 
 - `apply` sends one `PATCH` with the fields that differ from the deployment's current release (version, hardware, instances), or nothing; every `PATCH` creates a new release. With no state, `apply` pushes and adopts the deployment by name.
 - `apply` fails before any call when `container.env` or `container.secrets` is set (the deployments API takes no environment; build configuration into the image), when `scaling.replicas` exceeds Replicate's limits (`min_instances` 5, `max_instances` 20), when no GPU class maps to hardware, or when the build context is unsafe (above). It checks the chosen hardware against `GET /v1/hardware` before pushing.
+- `hull status` reports Failed while `max_instances` is 0 (after a deferred `destroy`), so the controller's snapshot keeps the endpoint out of rotation too.
 - `hull deploy --wait` and `hull status` report Ready once the deployment's current release runs the applied version with `min_instances` of at least 1. That is configuration, not instance health (see Health above).
 - `scale` patches `min_instances` and `max_instances`; values above the limits, a 400 or a 422 are permanent refusals.
 - `hull logs` prints nothing: Replicate has logs per prediction, not per deployment.
-- `destroy` sets `min_instances` and `max_instances` to 0, then deletes the deployment. Replicate deletes only deployments offline and unused for 15 minutes; when it refuses (400, 409 or 422, assumed since Replicate documents no status), `destroy` keeps the state record marked Draining, the snapshot takes the endpoint out of rotation, and you run `destroy` again later. 401, 403, 429 and 5xx are errors. A 404 counts as gone. The model and its versions stay, like images in a registry.
+- `destroy` sets `min_instances` and `max_instances` to 0, then deletes the deployment. Replicate deletes only deployments offline and unused for 15 minutes; when it refuses (400, 409 or 422, assumed since Replicate documents no status), `destroy` keeps the state record marked Failed, which the snapshot publishes as down so the router sends it nothing (Draining would not: it only stops new sticky sessions), and you run `destroy` again later. 401, 403, 429 and 5xx are errors. A 404 counts as gone. The model and its versions stay, like images in a registry.
 
 ## Translation
 
