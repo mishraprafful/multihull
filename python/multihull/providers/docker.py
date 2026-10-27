@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 import httpx
-from docker.errors import DockerException, NotFound
+from docker.errors import DockerException, ImageNotFound, NotFound
 
 from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers.base import (
@@ -185,11 +185,11 @@ def registry_config(credentials: str) -> Any:
         raise CredentialError(f"credentials {source}: {type(exc).__name__}") from None
 
 
-def registry_auth(credentials: str, image: str) -> dict[str, Any] | None:
+def registry_auth(credentials: str, image: str) -> dict[str, Any]:
     from docker import auth
 
     registry, _ = auth.resolve_repository_name(image)
-    return registry_config(credentials).resolve_authconfig(registry)
+    return registry_config(credentials).resolve_authconfig(registry) or {}
 
 
 def default_client() -> Any:
@@ -222,8 +222,19 @@ class DockerProvider:
     def pull_auth(self, image: str) -> dict[str, Any]:
         if self.credentials is None:
             return {}
-        auth = registry_auth(self.credentials, image)
-        return {"auth_config": auth} if auth else {}
+        return {"auth_config": registry_auth(self.credentials, image)}
+
+    def has_image(self, image: str) -> bool:
+        try:
+            self.client.images.get(image)
+        except ImageNotFound:
+            return False
+        return True
+
+    def prepare_image(self, image: str, pull: bool) -> None:
+        if not pull and (self.credentials is None or self.has_image(image)):
+            return
+        self.client.images.pull(image, **self.pull_auth(image))
 
     @property
     def client(self) -> Any:
@@ -262,8 +273,7 @@ class DockerProvider:
                     existing, desired.name, desired.provider, container_port, block.host
                 )
             existing.remove(force=True)
-        if block.pull:
-            self.client.images.pull(kwargs["image"], **self.pull_auth(kwargs["image"]))
+        self.prepare_image(kwargs["image"], block.pull)
         run_kwargs = dict(kwargs)
         run_kwargs["labels"] = {**kwargs["labels"], CONFIG_HASH_LABEL: digest}
         if secrets:

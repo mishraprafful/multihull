@@ -46,7 +46,7 @@ targets:
   | `replicate` | `REPLICATE_API_TOKEN` | the API token |
   | `kubernetes` | kubeconfig (`KUBECONFIG`, `~/.kube/config`) or in-cluster | kubeconfig YAML; `kubernetes.context` picks the context, else its `current-context` |
   | `modal` | `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or `~/.modal.toml` | `.modal.toml` TOML: top-level `token_id` and `token_secret`, or one profile (the `active` one when there are several) |
-  | `docker` | `~/.docker/config.json` for image pulls | Docker `config.json` (`auths`, `credsStore` or `credHelpers`) |
+  | `docker` | `~/.docker/config.json` for image pulls | Docker `config.json` (`auths`, `credsStore` or `credHelpers`); a registry it has no entry for is pulled anonymously, and with `docker.pull: false` a missing image is pulled with it too |
 
 - An override replaces the native location; a missing or unreadable override fails, it never falls back. `hull doctor` names the variable or path that is missing.
 - The value is never logged, printed, stored in state or written to a plan; errors name only the variable or path. The one exception is RunPod traffic: without `RUNPOD_ENDPOINT_API_KEY`, the router signs requests with the target's key, so it reaches the snapshot as `Authorization: Bearer`, as `RUNPOD_API_KEY` does (see [Security](/docs/reference/security/)).

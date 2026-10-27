@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 import yaml
+from docker.errors import ImageNotFound
 from typer.testing import CliRunner
 
 from multihull import engine
@@ -424,7 +425,7 @@ def docker_config(registry: str, user: str, value: str) -> str:
     return json.dumps({"auths": {registry: {"auth": encoded}}})
 
 
-def recording_docker() -> tuple[FakeDockerClient, list[dict[str, Any]]]:
+def recording_docker(local: bool = False) -> tuple[FakeDockerClient, list[dict[str, Any]]]:
     fake = FakeDockerClient()
     pulls: list[dict[str, Any]] = []
     original = fake.images.pull
@@ -433,7 +434,13 @@ def recording_docker() -> tuple[FakeDockerClient, list[dict[str, Any]]]:
         pulls.append(kwargs)
         return original(repository, **kwargs)
 
+    def get(image: str) -> Any:
+        if not local:
+            raise ImageNotFound(image)
+        return image
+
     fake.images.pull = pull
+    fake.images.get = get
     return fake, pulls
 
 
@@ -470,8 +477,40 @@ def test_docker_registry_auth_resolves_by_image_registry(tmp_path: Path) -> None
     config = tmp_path / "config.json"
     config.write_text(docker_config("ghcr.io", user, value))
     auth = registry_auth(f"file:{config}", "ghcr.io/acme/model:1.0")
-    assert auth is not None and auth["username"] == user and value in auth.values()
-    assert registry_auth(f"file:{config}", "quay.io/acme/model:1.0") is None
+    assert auth["username"] == user and value in auth.values()
+    assert registry_auth(f"file:{config}", "quay.io/acme/model:1.0") == {}
+
+
+def test_docker_override_never_falls_back_to_the_native_config(
+    mock_docker_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    config = tmp_path / "config.json"
+    config.write_text(docker_config("ghcr.io", sentinel(), sentinel()))
+    reference = f"file:{config}"
+    pulled = Target(
+        mock_docker_spec, mock_docker_spec.targets[0].model_copy(update={"credentials": reference})
+    )
+    fake, pulls = recording_docker()
+    DockerProvider(client=fake, credentials=reference).apply(pulled, None)
+    assert pulls == [{"auth_config": {}}]
+
+    local_only = mock_docker_spec.target("docker-c").model_copy(update={"credentials": reference})
+    assert local_only.docker is not None and not local_only.docker.pull
+    missing, missing_pulls = recording_docker(local=False)
+    DockerProvider(client=missing, credentials=reference).apply(
+        Target(mock_docker_spec, local_only), None
+    )
+    assert missing_pulls == [{"auth_config": {}}]
+    present, present_pulls = recording_docker(local=True)
+    DockerProvider(client=present, credentials=reference).apply(
+        Target(mock_docker_spec, local_only), None
+    )
+    assert present_pulls == []
+    native, native_pulls = recording_docker(local=False)
+    DockerProvider(client=native).apply(
+        Target(mock_docker_spec, mock_docker_spec.target("docker-c")), None
+    )
+    assert native_pulls == []
 
 
 def test_docker_health_names_a_broken_override(tmp_path: Path) -> None:
