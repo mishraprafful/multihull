@@ -27,6 +27,7 @@ from multihull.providers.registry import PROVIDERS
 from multihull.providers.replicate import ReplicateProvider
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
+from multihull.state import LocalState
 from tests.fake_docker import FakeDockerClient
 from tests.fake_modal import FakeModal
 from tests.fake_runpod import FakeRunpod
@@ -486,3 +487,36 @@ def test_docker_health_names_a_broken_override(tmp_path: Path) -> None:
     ).credentials_health()
     assert missing.message.endswith("is unreadable: No such file or directory")
     assert marker not in health.message
+
+
+def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
+    monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], tmp_path: Path, fake_registry
+) -> None:
+    value = sentinel()
+    monkeypatch.setenv(OVERRIDE_ENV, value)
+    reference = f"env:{OVERRIDE_ENV}"
+    llama_raw["targets"] = llama_raw["targets"][:2]
+    llama_raw["targets"][1]["credentials"] = reference
+    llama_raw["reliability"]["minWarmProviders"] = 1
+    path = tmp_path / "multihull.yaml"
+    path.write_text(yaml.safe_dump(llama_raw))
+    state = ["--state", str(tmp_path / "state.db")]
+    deployed = runner.invoke(app, ["deploy", str(path), "--apply", "--no-wait", *state])
+    assert deployed.exit_code == 0, deployed.output
+    stored = (tmp_path / "state.db").read_bytes()
+    assert f'"credentials": "{reference}"'.encode() in stored
+    assert value.encode() not in stored
+    fake_registry["modal"].kwargs = {}
+    engine.refresh("llama-8b", LocalState(tmp_path / "state.db"))
+    assert fake_registry["modal"].kwargs == {"dry_run": False, "credentials": reference}
+
+    llama_raw["targets"] = llama_raw["targets"][:1]
+    path.write_text(yaml.safe_dump(llama_raw))
+    fake_registry["modal"].kwargs = {}
+    destroyed = runner.invoke(app, ["destroy", str(path), "--yes", *state])
+    assert destroyed.exit_code == 0, destroyed.output
+    assert fake_registry["modal"].kwargs == {"dry_run": False, "credentials": reference}
+    assert [ref.ids["credentials"] for ref in fake_registry["modal"].destroyed] == [reference]
+    native = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "multihull"})
+    engine.provider_for_ref(native)
+    assert "credentials" not in fake_registry["kubernetes"].kwargs
