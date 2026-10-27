@@ -20,9 +20,10 @@ pub fn safe_request_target(path_and_query: &str) -> bool {
 }
 
 fn dot_segment(segment: &str) -> bool {
-    percent_decode(segment)
-        .split(['/', '\\'])
-        .any(|piece| piece == "." || piece == "..")
+    percent_decode(segment).split(['/', '\\']).any(|piece| {
+        let name = piece.split(';').next().unwrap_or_default();
+        name == "." || name == ".."
+    })
 }
 
 fn percent_decode(raw: &str) -> String {
@@ -71,6 +72,8 @@ mod tests {
             "/a/.hidden/b",
             "/a/..b/c...",
             "/search?q=../..",
+            "/a;b/c",
+            "/v1/..x;y",
         ] {
             assert!(safe_request_target(target), "{target}");
         }
@@ -92,6 +95,10 @@ mod tests {
             "/x/..%2f..%2faccount",
             "/x/..%5caccount",
             "/x/..\\account",
+            "/..;/account",
+            "/x/.;jsessionid=1/y",
+            "/%2e%2e;x/account",
+            "/x/..%3b/account",
         ] {
             assert!(!safe_request_target(target), "{target}");
         }

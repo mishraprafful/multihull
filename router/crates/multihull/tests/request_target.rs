@@ -32,6 +32,7 @@ async fn targets_that_escape_the_endpoint_path_never_reach_the_upstream() {
         ("GET", "/../../../account"),
         ("GET", "/%2e%2e/%2e%2e/%2e%2e/account"),
         ("GET", "/x/..%2f..%2f..%2faccount"),
+        ("GET", "/..;/..;/..;/account"),
     ] {
         assert_eq!(
             raw_status(&proxy, method, target).await,
