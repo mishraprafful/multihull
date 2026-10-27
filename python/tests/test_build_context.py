@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -111,3 +112,26 @@ def test_a_credentials_file_inside_the_context_is_a_problem_unless_ignored(
     ]
     (context / ".dockerignore").write_text(".multihull\nkeys\n")
     assert scan_context(context, [named, outside]).problems == []
+
+
+def test_a_credentials_file_is_found_by_identity_not_by_spelling(
+    context: Path, tmp_path: Path
+) -> None:
+    outside = tmp_path / "keys" / "replicate.token"
+    outside.parent.mkdir()
+    outside.write_text("fixture value")
+    os.link(outside, context / "linked.token")
+    assert scan_context(context, [outside]).problems == [
+        "ships linked.token, a credentials file a target names"
+    ]
+    (context / "linked.token").unlink()
+    (context / "tok").write_text("fixture value")
+    (context / "sub").mkdir()
+    respelled = context / "sub" / ".." / "tok"
+    assert scan_context(context, [respelled]).problems == [
+        "ships tok, a credentials file a target names"
+    ]
+    if (context / "TOK").exists():
+        assert scan_context(context, [context / "TOK"]).problems == [
+            "ships tok, a credentials file a target names"
+        ]

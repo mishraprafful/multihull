@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from datetime import timedelta
@@ -708,3 +709,25 @@ def test_apply_refuses_to_push_a_credentials_file_from_the_context(
     ref = provider.apply(target, None)
     assert ref.ids["deployment"] == DEPLOYMENT
     assert len(cog.pushes) == 1
+
+
+def test_apply_refuses_a_hard_link_to_a_credentials_file_outside_the_context(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    keys = tmp_path / "keys"
+    keys.mkdir()
+    (keys / "replicate.token").write_text(CALLER)
+    os.link(keys / "replicate.token", context / "bundled.bin")
+    monkeypatch.chdir(context)
+    reference = f"file:{keys / 'replicate.token'}"
+    raw = echo_raw()
+    raw["targets"][1]["credentials"] = reference
+    spec = ServiceSpec.model_validate(raw)
+    provider = ReplicateProvider(
+        dry_run=False, http_client=fake.client(), cog=cog, credentials=reference
+    )
+    with pytest.raises(ValueError, match="ships bundled.bin, a credentials file"):
+        provider.apply(Target(spec, spec.target("replicate")), None)
+    assert fake.calls == [] and cog.pushes == []
