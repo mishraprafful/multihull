@@ -16,7 +16,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 
 ### Changed
 
-- The router answers `400` `bad_request_target` to a request target without a leading `/` or with a `.` or `..` segment, raw or percent-encoded, instead of appending it to the endpoint URL (#65).
+- The router answers `400` `bad_request_target` to a request target without a leading `/` or with a `.` or `..` segment (also `..;`), raw or percent-encoded, instead of appending it to the endpoint URL (#65).
 - Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
 
 ## [0.2.0] - 2026-10-12
