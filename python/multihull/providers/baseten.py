@@ -68,6 +68,7 @@ SIGNING_ALGORITHM = "AWS4-HMAC-SHA256"
 DNS_BUCKET = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 UNSAFE_SECRET_CHARS = re.compile(r"[^A-Za-z0-9_]")
 SHELL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+S3_ERROR_CODE = re.compile(r"<Code>([A-Za-z0-9.]{1,64})</Code>")
 MODEL_KEY = "model"
 DEPLOYMENT_KEY = "deployment"
 NAME_KEY = "name"
@@ -428,9 +429,9 @@ class BasetenApi:
             url, content=archive, headers=headers, timeout=UPLOAD_TIMEOUT_SECONDS
         )
         if response.is_error:
-            raise BasetenApiError(
-                response.status_code, f"archive upload refused by S3: {response.text[:200]}"
-            )
+            code = S3_ERROR_CODE.search(response.text)
+            reason = code.group(1) if code else response.reason_phrase
+            raise BasetenApiError(response.status_code, f"archive upload refused by S3: {reason}")
 
     def promote(
         self, model_id: str, deployment_id: str, autoscaling: Mapping[str, Any]

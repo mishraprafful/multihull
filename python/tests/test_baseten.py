@@ -457,10 +457,19 @@ def test_unreachable_api_reports_unknown(baseten_env: None) -> None:
 def test_a_refused_upload_stops_before_the_model_is_created(
     provider: BasetenProvider, fake: FakeBaseten, target: Target
 ) -> None:
-    fake.refuse_uploads = True
-    with pytest.raises(BasetenApiError, match="archive upload refused by S3"):
+    echoed = "z" * 40
+    fake.upload_refusal = (
+        "<Error><Code>ExpiredToken</Code><Message>The provided token has expired.</Message>"
+        f"<Token-0>{echoed}</Token-0></Error>"
+    )
+    with pytest.raises(BasetenApiError) as raised:
         provider.apply(target, None)
+    assert str(raised.value) == "Baseten API 400: archive upload refused by S3: ExpiredToken"
+    assert echoed not in str(raised.value)
     assert fake.models == {}
+    fake.upload_refusal = "not xml"
+    with pytest.raises(BasetenApiError, match="refused by S3: Bad Request$"):
+        provider.apply(target, None)
 
 
 def test_engine_builds_live_baseten_providers_per_target(target: Target) -> None:

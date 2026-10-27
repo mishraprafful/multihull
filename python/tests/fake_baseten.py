@@ -87,7 +87,7 @@ class FakeBaseten:
         self.calls: list[tuple[str, str]] = []
         self.failure: httpx.Response | None = None
         self.promote_on_create = True
-        self.refuse_uploads = False
+        self.upload_refusal: str | None = None
         self.counter = 0
         self.upload_key_id = "F" * 20
         self.upload_session = "s" * 48
@@ -235,7 +235,9 @@ class FakeBaseten:
         authorization = request.headers.get("authorization", "")
         signed = authorization.startswith(f"AWS4-HMAC-SHA256 Credential={self.upload_key_id}/")
         token = request.headers.get("x-amz-security-token") == self.upload_session
-        allowed = signed and token and key in self.issued and not self.refuse_uploads
+        if self.upload_refusal is not None:
+            return httpx.Response(400, text=self.upload_refusal)
+        allowed = signed and token and key in self.issued
         if request.method != "PUT" or not allowed:
             return httpx.Response(403, text="<Error><Code>AccessDenied</Code></Error>")
         self.uploads[key] = request.content
