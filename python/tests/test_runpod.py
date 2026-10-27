@@ -16,6 +16,7 @@ from multihull.providers.runpod import (
     RunpodProvider,
     render_endpoint,
     render_payload,
+    secret_store_name,
 )
 from multihull.spec import ServiceSpec
 from tests.conftest import assert_golden
@@ -289,7 +290,7 @@ def test_rediscover_pages_through_endpoints_by_name(
         "name": "multihull-llama-8b-runpod-eu",
         "url": created.ids["url"],
         "health_path": "/health",
-        "secrets": "multihull_llama_8b_runpod_eu_hf_token",
+        "secrets": secret_store_name(target, "hf-token"),
     }
     assert RunpodProvider(False, "runpod-us", fake.client()).rediscover("llama-8b") is None
 
@@ -357,8 +358,7 @@ def test_engine_builds_live_runpod_providers_per_target(target: Target) -> None:
 def test_plan_payload_names_secrets_without_values(target: Target, runpod_env: None) -> None:
     payload = render_payload(target)
     assert [entry["name"] for entry in payload["secrets"]] == [
-        f"multihull_llama_8b_runpod_eu_{secret_env_name(name).lower()}"
-        for name in target.service.container.secrets
+        secret_store_name(target, name) for name in target.service.container.secrets
     ]
     assert MIRRORED not in json.dumps(payload)
 

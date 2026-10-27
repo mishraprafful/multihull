@@ -34,6 +34,7 @@ from multihull.providers.base import (
     redact_env,
     redact_token,
     resolve_secret_values,
+    store_name,
 )
 from multihull.spec import GPU
 
@@ -72,7 +73,6 @@ ARCHIVE_CONFIG = "config.yaml"
 S3_SERVICE = "s3"
 SIGNING_ALGORITHM = "AWS4-HMAC-SHA256"
 DNS_BUCKET = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
-UNSAFE_SECRET_CHARS = re.compile(r"[^A-Za-z0-9_]")
 SHELL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 S3_ERROR_CODE = re.compile(r"<Code>([A-Za-z0-9.]{1,64})</Code>")
 MODEL_KEY = "model"
@@ -110,12 +110,8 @@ def endpoint_url(model_id: str) -> str:
     return f"https://model-{model_id}.api.baseten.co/environments/{ENVIRONMENT}/sync"
 
 
-def store_name_for(model: str, secret: str) -> str:
-    return UNSAFE_SECRET_CHARS.sub("_", f"{model}_{secret}")
-
-
 def secret_store_name(desired: Target, secret: str) -> str:
-    return store_name_for(model_name(desired), secret)
+    return store_name(desired.name, desired.provider, secret)
 
 
 def accelerator(desired: Target) -> str:
@@ -839,7 +835,7 @@ class BasetenProvider:
         }
         if deployment:
             ids[DEPLOYMENT_KEY] = str(deployment["id"])
-        stored = [store_name_for(name, raw) for raw in labelled_names(labels)]
+        stored = [store_name(service, self.provider_name, raw) for raw in labelled_names(labels)]
         if stored:
             ids[SECRETS_KEY] = ",".join(stored)
         return Ref(provider=self.provider_name, type="baseten", service=service, ids=ids)
