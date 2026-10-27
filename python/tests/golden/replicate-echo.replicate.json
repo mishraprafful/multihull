@@ -8,7 +8,7 @@
   "push": {
     "image": "r8.im/{owner}/multihull-replicate-echo",
     "context": ".",
-    "digest": "e3d93285de75901d"
+    "digest": "9622f96696ad78db"
   },
   "deployment": {
     "name": "multihull-replicate-echo-replicate",
