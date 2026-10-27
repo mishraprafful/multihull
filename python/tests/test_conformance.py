@@ -9,10 +9,9 @@ from typing import Any
 import pytest
 
 from multihull import discovery, engine
-from multihull.providers import create
+from multihull.providers import baseten, create
 from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref
-from multihull.providers.baseten import API_KEY_ENV as BASETEN_API_KEY_ENV
 from multihull.providers.docker import DockerProvider
 from multihull.providers.kubernetes import KubernetesProvider
 from multihull.providers.modal import (
@@ -39,6 +38,7 @@ from tests.conformance import (
 )
 from tests.conformance_live import LIVE_CASES, live_types
 from tests.conftest import assert_golden, llama_with_docker
+from tests.fake_baseten import FakeBaseten, with_baseten
 from tests.fake_docker import FakeDockerClient
 from tests.fake_kubernetes import FakeKubeClient
 from tests.fake_modal import FakeModal
@@ -48,6 +48,31 @@ from tests.test_render_only_providers import cog_spec
 
 def live_kwargs(spec: ServiceSpec, target: str) -> dict[str, Any]:
     return engine.provider_kwargs(spec.target(target), live=True)
+
+
+def baseten_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
+    spec = with_baseten(spec.model_dump(by_alias=True, exclude_none=True))
+    caller = sentinel("baseten-caller")
+    monkeypatch.setenv(baseten.API_KEY_ENV, caller)
+    monkeypatch.delenv(baseten.INFERENCE_API_KEY_ENV, raising=False)
+    mirrored = mirror_secrets(monkeypatch, spec)
+    fake = FakeBaseten(caller)
+
+    def set_serving(ref: Ref, serving: bool) -> None:
+        fake.health[ref.ids["model"]] = 200 if serving else 503
+
+    return Case(
+        spec=spec,
+        target="baseten-us",
+        golden="llama-8b.baseten.json",
+        provider=baseten.BasetenProvider(
+            http_client=fake.client(), **live_kwargs(spec, "baseten-us")
+        ),
+        resources=lambda: len(fake.models) + len(fake.secrets),
+        set_serving=set_serving,
+        secret_values=(mirrored,),
+        traffic_values=(caller,),
+    )
 
 
 def docker_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
@@ -154,7 +179,7 @@ def render_only(provider_type: str, credential_env: str, issue: int) -> CaseBuil
 
 
 CASES: dict[str, CaseBuilder] = {
-    "baseten": render_only("baseten", BASETEN_API_KEY_ENV, issue=64),
+    "baseten": baseten_case,
     "docker": docker_case,
     "kubernetes": kubernetes_case,
     "modal": modal_case,
