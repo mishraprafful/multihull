@@ -37,7 +37,7 @@ Requirements:
 | `scaling.replicas` | `production` autoscaling `min_replica`, `max_replica`, `scale_down_delay: 300` |
 | `scaling.concurrency` | `concurrency_target` and `runtime.predict_concurrency` |
 | `container.health` | `readiness_endpoint`, `liveness_endpoint`; `hull deploy --wait` and `hull status` report Ready only once the pushed deployment serves `production`, is `ACTIVE` with a replica, and `<url><path>` answers 2xx |
-| `container.secrets` | Baseten secrets named `multihull_<svc>_<provider>_<secret>`, declared in the Truss `secrets` and exported from `/secrets/<name>` into the variable the spec names by a `sh -c 'exec env ...'` wrapper around the command |
+| `container.secrets` | Baseten secrets named `multihull_<svc>_<provider>_<secret>`, declared in the Truss `secrets` and read from `/secrets/<name>` by a `sh -c` wrapper that exports the variable the spec names, then `exec`s the command. A name that is not a shell identifier, such as `hf-token`, goes through `exec env`, so its value sits in that process's arguments until it execs the command; name secrets like `HF_TOKEN` to avoid that |
 | endpoint | `https://model-<id>.api.baseten.co/environments/production/sync`, which forwards every path to the server, plus `Authorization: Api-Key` injected by the router |
 
 No edge error signature yet: Baseten's own errors carry a flat `{"error": ...}` body (502 or 503 when the container is unreachable), but a live run has to record them first.

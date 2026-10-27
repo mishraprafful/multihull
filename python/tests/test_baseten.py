@@ -98,6 +98,22 @@ def test_secrets_reach_the_server_as_env_read_from_the_mounted_files(target: Tar
     assert argv[2] == f'exec env hf-token="$(cat /secrets/{STORE})" "$@"'
 
 
+def test_identifier_secrets_are_exported_so_values_stay_out_of_argv(
+    llama_raw: dict[str, Any],
+) -> None:
+    mixed = variant(llama_raw, container={"secrets": ["HF_TOKEN", "hf-token"]})
+    argv = shlex.split(render_truss_config(mixed)["docker_server"]["start_command"])
+    read = "/secrets/multihull_llama_8b_baseten_us_"
+    assert argv[2] == (
+        f'HF_TOKEN="$(cat {read}HF_TOKEN)"; export HF_TOKEN; '
+        f'exec env hf-token="$(cat {read}hf_token)" "$@"'
+    )
+    exported = variant(llama_raw, container={"secrets": ["HF_TOKEN"]})
+    argv = shlex.split(render_truss_config(exported)["docker_server"]["start_command"])
+    assert argv[2] == f'HF_TOKEN="$(cat {read}HF_TOKEN)"; export HF_TOKEN; exec "$@"'
+    assert "env" not in argv[2].split()
+
+
 def test_command_without_secrets_is_joined_as_is(llama_raw: dict[str, Any]) -> None:
     plain = variant(llama_raw, container={"secrets": [], "command": ["serve", "--name", "a b"]})
     assert render_truss_config(plain)["docker_server"]["start_command"] == "serve --name 'a b'"

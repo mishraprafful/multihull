@@ -67,6 +67,7 @@ S3_SERVICE = "s3"
 SIGNING_ALGORITHM = "AWS4-HMAC-SHA256"
 DNS_BUCKET = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 UNSAFE_SECRET_CHARS = re.compile(r"[^A-Za-z0-9_]")
+SHELL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 MODEL_KEY = "model"
 DEPLOYMENT_KEY = "deployment"
 NAME_KEY = "name"
@@ -125,11 +126,18 @@ def start_command(desired: Target) -> str | None:
         return None
     if not container.secrets:
         return shlex.join(container.command)
-    exports = " ".join(
-        shlex.quote(f"{name}=") + f'"$(cat {SECRETS_DIR}/{secret_store_name(desired, name)})"'
-        for name in container.secrets
+    exported = [name for name in container.secrets if SHELL_NAME.match(name)]
+    passed = [name for name in container.secrets if not SHELL_NAME.match(name)]
+    steps = [f"{name}={secret_read(desired, name)}; export {name}" for name in exported]
+    assignments = "".join(
+        f"{shlex.quote(name + '=')}{secret_read(desired, name)} " for name in passed
     )
-    return shlex.join(["sh", "-c", f'exec env {exports} "$@"', "sh", *container.command])
+    launch = f'exec env {assignments}"$@"' if passed else 'exec "$@"'
+    return shlex.join(["sh", "-c", "; ".join([*steps, launch]), "sh", *container.command])
+
+
+def secret_read(desired: Target, name: str) -> str:
+    return f'"$(cat {SECRETS_DIR}/{secret_store_name(desired, name)})"'
 
 
 def docker_server(desired: Target) -> dict[str, Any]:
