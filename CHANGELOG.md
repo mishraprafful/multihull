@@ -23,6 +23,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Modal `rediscover` reads the deployed web URL from Modal; it derived the URL from `MODAL_WORKSPACE` (default `workspace`), so a rebuilt state routed to the wrong host (#66).
 - `Endpoint` leaves `inject_headers` out of its repr, so a logged or asserted endpoint never shows the provider credentials the router injects (#66).
 - The Baseten endpoint no longer ends in `/production/predict`, which sent probes and routed paths to the predict route; the Truss config no longer carries the unsupported `runtime.health_checks.initial_delay_seconds` (#64).
+- Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile, as Modal does (#67).
 
 ## [0.2.0] - 2026-10-12
 
