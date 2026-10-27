@@ -399,7 +399,7 @@ def test_rediscover_finds_the_model_by_name(
     [
         (200, True, "Baseten accepted BASETEN_API_KEY"),
         (401, False, "Baseten rejected BASETEN_API_KEY: Baseten API 401"),
-        (403, False, "Baseten rejected BASETEN_API_KEY: Baseten API 403"),
+        (403, False, "BASETEN_API_KEY lacks management access: Baseten API 403"),
         (500, False, "could not verify BASETEN_API_KEY: Baseten API 500"),
     ],
 )

@@ -695,8 +695,10 @@ class BasetenProvider:
         try:
             user = self.api.call("GET", "/users/me")
         except BasetenApiError as exc:
-            if exc.status in (401, 403):
+            if exc.status == 401:
                 return CredHealth(ok=False, message=f"Baseten rejected {API_KEY_ENV}: {exc}")
+            if exc.status == 403:
+                return CredHealth(ok=False, message=f"{API_KEY_ENV} lacks management access: {exc}")
             return CredHealth(ok=False, message=f"could not verify {API_KEY_ENV}: {exc}")
         except httpx.HTTPError as exc:
             return CredHealth(
