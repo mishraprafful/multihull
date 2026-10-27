@@ -861,3 +861,52 @@ def test_scale_back_never_revives_a_deployment_awaiting_deletion(
         assert health == {"local": "healthy", "replicate": "unhealthy"}
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("phase", ["Degraded", "Pending"])
+def test_scale_back_still_steps_down_a_degraded_or_pending_target(
+    llama_spec: ServiceSpec, tmp_path: Path, phase: str
+) -> None:
+    clock = FakeClock()
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    controller, state = make_controller(
+        llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=60)
+    )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        await controller.handle_degraded(pb.Degraded(service="llama-8b", provider="gke-prod"))
+        assert controller.min_replicas["modal-main"] == 2
+        providers["modal-main"].phases = [phase]
+        await controller.reconcile_once()
+        clock.advance(60)
+        actions = await controller.scale_back_once()
+        assert ("modal-main", 2, 1) in {(a.provider, a.previous_min, a.new_min) for a in actions}
+        assert providers["modal-main"].scaled[-1] == ("modal-main", 1, 8)
+        assert controller.pre_degraded_min == {}
+        assert state.list_floors("llama-8b") == []
+
+    asyncio.run(scenario())
+
+
+def test_scale_back_never_scales_a_failed_target(llama_spec: ServiceSpec, tmp_path: Path) -> None:
+    clock = FakeClock()
+    providers = {t.provider: FakeProvider() for t in llama_spec.targets}
+    controller, state = make_controller(
+        llama_spec, tmp_path, providers, clock=clock, cooldown=timedelta(seconds=60)
+    )
+
+    async def scenario() -> None:
+        await controller.reconcile_once()
+        await controller.handle_degraded(pb.Degraded(service="llama-8b", provider="gke-prod"))
+        providers["modal-main"].phases = ["Failed"]
+        await controller.reconcile_once()
+        raised = list(providers["modal-main"].scaled)
+        clock.advance(60)
+        actions = await controller.scale_back_once()
+        assert "modal-main" not in {a.provider for a in actions}
+        assert providers["modal-main"].scaled == raised
+        assert "modal-main" not in controller.pre_degraded_min
+        assert state.list_floors("llama-8b") == []
+
+    asyncio.run(scenario())
