@@ -396,10 +396,7 @@ def refresh(
 
     with state.lock():
         for record, result in zip(records, results, strict=True):
-            current = state.get(service, record.provider)
-            if not result.changed or current is None:
-                continue
-            if current.last_status != record.last_status:
+            if not result.changed or state.get(service, record.provider) != record:
                 continue
             record.last_status = result.observed.phase
             state.put(record)
