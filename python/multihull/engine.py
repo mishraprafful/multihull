@@ -378,8 +378,8 @@ def refresh(
         ref = Ref.from_json(record.ref)
         provider = providers.get(record.provider) if providers is not None else None
         if provider is None and CREDENTIALS_KEY in ref.ids:
-            observed = Observed(phase="Unknown", message=STORED_CREDENTIALS_NOT_REFRESHED)
-            return RefreshResult(record.provider, ref.type, ref, observed, False)
+            skipped = Observed(phase="Unknown", message=STORED_CREDENTIALS_NOT_REFRESHED)
+            return RefreshResult(record.provider, ref.type, ref, settled(record, skipped), False)
         try:
             observed = (provider or factory(ref)).status(ref)
         except Exception as exc:
@@ -394,7 +394,11 @@ def refresh(
 
     with state.lock():
         for record, result in zip(records, results, strict=True):
-            if result.changed:
-                record.last_status = result.observed.phase
-                state.put(record)
+            current = state.get(service, record.provider)
+            if not result.changed or current is None:
+                continue
+            if current.last_status != record.last_status:
+                continue
+            record.last_status = result.observed.phase
+            state.put(record)
     return results

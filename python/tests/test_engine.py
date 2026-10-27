@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from multihull import engine
-from multihull.providers.base import Ref
+from multihull.providers.base import Observed, Ref
 from multihull.spec import ServiceSpec
 from multihull.state import Floor, LocalState, StateRecord
 from tests.fakes import FakeProvider
@@ -157,3 +158,49 @@ def test_a_failed_destroy_restores_the_record_and_floor(
     assert [
         (f.provider, f.min_replicas, f.pre_degraded_min) for f in state.list_floors(llama_spec.name)
     ] == [("modal-main", 3, 1)]
+
+
+class RacingProvider(FakeProvider):
+    def __init__(self, state: LocalState, action: str) -> None:
+        super().__init__()
+        self.state = state
+        self.action = action
+
+    def status(self, ref: Ref) -> Observed:
+        record = self.state.get(ref.service, ref.provider)
+        assert record is not None
+        if self.action == "withdraw":
+            engine.withdraw(self.state, record)
+        else:
+            self.state.delete(ref.service, ref.provider)
+        return Observed("Ready", 1, 1)
+
+
+@pytest.mark.parametrize("action", ["withdraw", "delete"])
+def test_refresh_never_overwrites_a_concurrent_destroy(
+    llama_spec: ServiceSpec, tmp_path: Path, action: str
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    target = llama_spec.targets[1]
+    ref = Ref(target.provider, target.type, llama_spec.name, {"id": "1"})
+    state.put(StateRecord(llama_spec.name, target.provider, ref.to_json(), None, "h", "Pending"))
+    [result] = engine.refresh(
+        llama_spec.name, state, {target.provider: RacingProvider(state, action)}
+    )
+    assert result.observed.phase == "Ready"
+    record = state.get(llama_spec.name, target.provider)
+    if action == "withdraw":
+        assert record is not None and record.last_status == "Failed"
+    else:
+        assert record is None
+
+
+def test_a_skipped_refresh_keeps_a_failed_target_failed(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    ref = Ref("gone", "replicate", llama_spec.name, {"credentials": "env:GONE_TOKEN"})
+    state.put(StateRecord(llama_spec.name, "gone", ref.to_json(), None, "h", "Failed"))
+    [result] = engine.refresh(llama_spec.name, state, {})
+    assert (result.observed.phase, result.changed) == ("Failed", False)
+    assert result.observed.message.startswith(engine.STORED_CREDENTIALS_NOT_REFRESHED)
