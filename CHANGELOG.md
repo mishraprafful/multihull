@@ -25,6 +25,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 ### Fixed
 
 - The Baseten endpoint no longer ends in `/production/predict`, which sent probes and routed paths to the predict route; the Truss config no longer carries the unsupported `runtime.health_checks.initial_delay_seconds` (#64).
+- Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile, as Modal does (#67).
 
 ## [0.2.0] - 2026-10-12
 

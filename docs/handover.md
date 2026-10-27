@@ -146,6 +146,7 @@ If `cargo` is missing, add `$HOME/.cargo/bin` or `$(brew --prefix rustup)/bin` t
 - A controller with no reachable targets writes no snapshot file; wait for the listening log line (PR 111).
 - Open router streams held shutdown for the 5 s gRPC grace; close them before stopping the server. A warm Docker builder with a uv cache mount reused the cached wheel of the local project; build the project layer with `--no-cache` (PR 101).
 - Pydantic's `hide_input_in_errors` only counts on the model validated at the top; on a nested model the `ValidationError` still prints `input_value`, so a secret pasted into `credentials` was echoed until `SpecModel` set it for every spec model (issue 67).
+- A credentials reference stored in state is input too: refresh building a provider from it let a crafted record load a planted kubeconfig whose `exec` plugin runs a command, so only an explicit `hull destroy` uses a stored reference (issue 67).
 
 **CI and GitHub**
 - `pytest -x` hides later failures behind the first (PR 35); `timeout` does not exist on macOS, use a pytest timeout.

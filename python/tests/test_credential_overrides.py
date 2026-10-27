@@ -18,6 +18,7 @@ from docker.errors import ImageNotFound
 from typer.testing import CliRunner
 
 from multihull import engine
+from multihull import spec as specmod
 from multihull.cli import app
 from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers import modal as modal_provider
@@ -37,7 +38,7 @@ from multihull.providers.replicate import API_TOKEN_ENV as REPLICATE_API_TOKEN_E
 from multihull.providers.replicate import CLI_AUTH_TOKEN_ENV, ReplicateProvider
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
-from multihull.state import LocalState
+from multihull.state import LocalState, StateRecord
 from tests.fake_baseten import BASETEN_TARGET, FakeBaseten, with_baseten
 from tests.fake_docker import FakeDockerClient
 from tests.fake_modal import FakeModal
@@ -101,9 +102,26 @@ def cli_round_trip(path: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture)
     planned = runner.invoke(app, ["plan", str(path), "--out", str(plan_dir), *common])
     status = runner.invoke(app, ["status", str(path), *common])
     doctor = runner.invoke(app, ["doctor", str(path)])
-    assert (planned.exit_code, status.exit_code) == (0, 0), planned.output + status.output
-    texts = [deployed.output, planned.output, status.output, doctor.output, caplog.text]
+    provider = specmod.load(path).targets[0].provider
+    logs = runner.invoke(app, ["logs", str(path), "--provider", provider, *common])
     stored = tree_bytes(state_dir) + tree_bytes(plan_dir)
+    after_destroy = tmp_path / "after-destroy.json"
+    destroyed = runner.invoke(
+        app, ["destroy", str(path), "--yes", "--snapshot-out", str(after_destroy), *common]
+    )
+    exits = [planned.exit_code, status.exit_code, logs.exit_code, destroyed.exit_code]
+    assert exits == [0, 0, 0, 0], planned.output + status.output + logs.output + destroyed.output
+    texts = [
+        deployed.output,
+        planned.output,
+        status.output,
+        doctor.output,
+        logs.output,
+        destroyed.output,
+        after_destroy.read_text(),
+        caplog.text,
+    ]
+    stored += tree_bytes(state_dir)
     return RoundTrip(texts, stored, json.loads(snapshot.read_text()))
 
 
@@ -629,7 +647,8 @@ def test_modal_check_names_the_source_and_hides_tokens(
     )
     ambiguous = check_credentials(credentials=f"env:{OVERRIDE_ENV}")
     assert ambiguous.message == (
-        f"credentials env:{OVERRIDE_ENV} has several profiles and none is active"
+        f"credentials env:{OVERRIDE_ENV} has no active profile; mark one with active = true "
+        "or keep a single profile named default"
     )
     monkeypatch.setenv(OVERRIDE_ENV, f"[{first}")
     broken = check_credentials(credentials=f"env:{OVERRIDE_ENV}")
@@ -667,10 +686,16 @@ def test_modal_profile_selection_follows_the_modal_config_rules(
     assert modal_profile_message(top_level, monkeypatch) == (
         f"{source} must hold only .modal.toml profile tables"
     )
+    no_active = (
+        f"{source} has no active profile; mark one with active = true "
+        "or keep a single profile named default"
+    )
     with_default = modal_toml(("spare", *other, False), ("default", *good, False))
-    assert modal_profile_message(with_default, monkeypatch) == "tokens " + ",".join(good)
-    only = modal_toml(("prod", *good, False))
-    assert modal_profile_message(only, monkeypatch) == "tokens " + ",".join(good)
+    assert modal_profile_message(with_default, monkeypatch) == no_active
+    lone_other = modal_toml(("prod", *good, False))
+    assert modal_profile_message(lone_other, monkeypatch) == no_active
+    lone_default = modal_toml(("default", *good, False))
+    assert modal_profile_message(lone_default, monkeypatch) == "tokens " + ",".join(good)
     active = modal_toml(("default", *other, False), ("prod", *good, True))
     assert modal_profile_message(active, monkeypatch) == "tokens " + ",".join(good)
 
@@ -866,7 +891,7 @@ def test_docker_library_errors_become_credential_errors_naming_the_source(
         assert marker not in message and encoded not in message
 
 
-def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
+def test_a_removed_target_is_destroyed_with_its_override_but_never_refreshed_with_it(
     monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], tmp_path: Path, fake_registry
 ) -> None:
     value = sentinel()
@@ -888,13 +913,22 @@ def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
     stored = (tmp_path / "state.db").read_bytes()
     assert f'"credentials": "{reference}"'.encode() in stored
     assert value.encode() not in stored
-    fake_registry["modal"].kwargs = {}
-    engine.refresh("llama-8b", LocalState(tmp_path / "state.db"))
-    assert fake_registry["modal"].kwargs == {"dry_run": False, "credentials": reference}
 
     llama_raw["targets"] = llama_raw["targets"][:1]
     path.write_text(yaml.safe_dump(llama_raw))
     fake_registry["modal"].kwargs = {}
+    store = LocalState(tmp_path / "state.db")
+    before = store.get("llama-8b", "modal-main")
+    status_calls = fake_registry["modal"].status_calls
+    refreshed = engine.refresh("llama-8b", store, {"gke-prod": fake_registry["kubernetes"]})
+    skipped = next(r for r in refreshed if r.provider == "modal-main")
+    assert (skipped.observed.phase, skipped.changed) == ("Unknown", False)
+    assert skipped.observed.message == engine.STORED_CREDENTIALS_NOT_REFRESHED
+    assert fake_registry["modal"].kwargs == {}
+    assert fake_registry["modal"].status_calls == status_calls
+    after = store.get("llama-8b", "modal-main")
+    assert before is not None and after is not None
+    assert after.last_status == before.last_status
     destroyed = runner.invoke(app, ["destroy", str(path), "--yes", *state])
     assert destroyed.exit_code == 0, destroyed.output
     assert fake_registry["modal"].kwargs == {"dry_run": False, "credentials": reference}
@@ -902,6 +936,28 @@ def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
     native = Ref("gke-prod", "kubernetes", "llama-8b", {"namespace": "multihull"})
     engine.provider_for_ref(native)
     assert "credentials" not in fake_registry["kubernetes"].kwargs
+
+
+def test_refresh_never_loads_a_kubeconfig_named_only_by_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    planted = tmp_path / "planted-kubeconfig"
+    planted.write_text(kubeconfig("evil", current="evil"))
+    loaded: list[str | None] = []
+    monkeypatch.setattr(
+        DynamicKubeClient,
+        "from_context",
+        lambda context, credentials=None: loaded.append(credentials),
+    )
+    store = LocalState(tmp_path / "state.db")
+    ref = Ref("gone", "kubernetes", "svc", {"namespace": "x", "credentials": f"file:{planted}"})
+    store.put(StateRecord(service="svc", provider="gone", ref=ref.to_json(), last_status="Ready"))
+    for providers in (None, {}):
+        [result] = engine.refresh("svc", store, providers)
+        assert result.observed.message == engine.STORED_CREDENTIALS_NOT_REFRESHED
+    assert loaded == []
+    record = store.get("svc", "gone")
+    assert record is not None and record.last_status == "Ready"
 
 
 def healthy_http() -> httpx.Client:
@@ -927,7 +983,7 @@ def test_kubernetes_override_stays_out_of_output_state_plan_snapshot_and_logs(
     monkeypatch.setattr(DynamicKubeClient, "from_context", from_context)
     spec = single_target_spec(llama_raw, "gke-prod", credentials=f"env:{OVERRIDE_ENV}")
     round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
-    assert loaded == [marker]
+    assert loaded and set(loaded) == {marker}
     assert not round_trip.leaks(marker)
     assert marker not in json.dumps(round_trip.snapshot)
 
@@ -946,8 +1002,17 @@ def test_modal_override_stays_out_of_output_state_plan_snapshot_and_logs(
     monkeypatch.setitem(
         PROVIDERS, "modal", lambda **kwargs: ModalProvider(http_client=healthy_http(), **kwargs)
     )
+    stopped_with: list[str] = []
+
+    def stop(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        stopped_with.append(kwargs["env"]["MODAL_TOKEN_ID"])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(modal_provider.subprocess, "run", stop)
     spec = single_target_spec(llama_raw, "modal-main", credentials=reference)
     round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
+    assert stopped_with == [first]
+    assert ("lookup", fake_modal.client) in fake_modal.clients_used
     assert (first, second) in fake_modal.logins
     assert ("deploy", fake_modal.client) in fake_modal.clients_used
     assert ("cls", fake_modal.client) in fake_modal.clients_used

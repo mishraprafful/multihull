@@ -29,6 +29,9 @@ RefProviderFactory = Callable[[Ref], Provider]
 DEFAULT_PLAN_DIR = Path(".multihull/plan")
 APPLIED_CHANGES = {"new", "changed", "unchanged"}
 CREDENTIALS_KEY = "credentials"
+STORED_CREDENTIALS_NOT_REFRESHED = (
+    "not in the spec; its stored credentials reference is used only by hull destroy"
+)
 
 
 @dataclass
@@ -373,13 +376,12 @@ def refresh(
 
     def run(record: StateRecord) -> RefreshResult:
         ref = Ref.from_json(record.ref)
+        provider = providers.get(record.provider) if providers is not None else None
+        if provider is None and CREDENTIALS_KEY in ref.ids:
+            observed = Observed(phase="Unknown", message=STORED_CREDENTIALS_NOT_REFRESHED)
+            return RefreshResult(record.provider, ref.type, ref, observed, False)
         try:
-            provider = (
-                providers[record.provider]
-                if providers is not None and record.provider in providers
-                else factory(ref)
-            )
-            observed = provider.status(ref)
+            observed = (provider or factory(ref)).status(ref)
         except Exception as exc:
             observed = Observed(phase="Unknown", message=error_reason(exc))
         observed = settled(record, observed)
