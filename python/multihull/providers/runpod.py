@@ -226,14 +226,29 @@ def bearer(value: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {value}"}
 
 
+def endpoint_api_key() -> str:
+    return os.environ.get(ENDPOINT_API_KEY_ENV, "").strip()
+
+
+def traffic_key(credentials: str | None) -> str:
+    if credentials is None and endpoint_api_key():
+        return endpoint_api_key()
+    return api_key(credentials)
+
+
 def traffic_headers(credentials: str | None = None) -> dict[str, str]:
-    value = os.environ.get(ENDPOINT_API_KEY_ENV, "").strip()
-    if not value:
-        try:
-            value = api_key(credentials)
-        except CredentialError:
-            return {}
-    return bearer(value)
+    try:
+        return bearer(traffic_key(credentials))
+    except CredentialError:
+        return {}
+
+
+def traffic_note(credentials: str | None) -> str:
+    if credentials is None:
+        return ""
+    if endpoint_api_key():
+        return f", which also signs router traffic instead of {ENDPOINT_API_KEY_ENV}"
+    return ", which also signs router traffic"
 
 
 def problem_detail(response: httpx.Response) -> str:
@@ -562,7 +577,9 @@ class RunpodProvider:
         except httpx.HTTPError as exc:
             reason = f"could not reach RunPod: {type(exc).__name__}: {exc}"
             return CredHealth(ok=False, message=redact(reason, self.credentials))
-        return CredHealth(ok=True, message=f"RunPod accepted {origin}")
+        return CredHealth(
+            ok=True, message=f"RunPod accepted {origin}{traffic_note(self.credentials)}"
+        )
 
     def rediscover(self, service: str) -> Ref | None:
         if self.dry_run:

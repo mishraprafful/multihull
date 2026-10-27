@@ -123,17 +123,29 @@ def test_runpod_calls_the_api_and_signs_traffic_with_the_override(
     assert runpod_override not in json.dumps(provider.plan(target, None).payload)
     assert provider.status(ref).phase == "Ready"
     assert provider.endpoint(ref).inject_headers == {"Authorization": f"Bearer {runpod_override}"}
-    assert provider.credentials_health().message == f"RunPod accepted env:{OVERRIDE_ENV}"
+    assert provider.credentials_health().message == (
+        f"RunPod accepted env:{OVERRIDE_ENV}, which also signs router traffic"
+    )
 
 
-def test_runpod_endpoint_key_still_wins_for_traffic(
+def test_runpod_endpoint_key_signs_only_targets_without_an_override(
     monkeypatch: pytest.MonkeyPatch, runpod_override: str
 ) -> None:
     traffic = sentinel()
     monkeypatch.setenv(ENDPOINT_API_KEY_ENV, traffic)
-    provider = RunpodProvider(credentials=f"env:{OVERRIDE_ENV}")
-    headers = provider.endpoint(Ref("r", "runpod", "s", {"endpoint": "ep1"})).inject_headers
-    assert headers == {"Authorization": f"Bearer {traffic}"}
+    ref = Ref("r", "runpod", "s", {"endpoint": "ep1"})
+    overridden = RunpodProvider(
+        dry_run=False,
+        http_client=FakeRunpod(runpod_override).client(),
+        credentials=f"env:{OVERRIDE_ENV}",
+    )
+    assert overridden.endpoint(ref).inject_headers == {"Authorization": f"Bearer {runpod_override}"}
+    assert overridden.credentials_health().message == (
+        f"RunPod accepted env:{OVERRIDE_ENV}, which also signs router traffic "
+        f"instead of {ENDPOINT_API_KEY_ENV}"
+    )
+    native = RunpodProvider().endpoint(ref).inject_headers
+    assert native == {"Authorization": f"Bearer {traffic}"}
 
 
 def test_runpod_reads_a_key_file_and_names_it_when_rejected(
@@ -211,10 +223,11 @@ def test_deploy_keeps_the_override_out_of_output_state_plan_and_logs(
     assert runpod_override not in json.dumps(endpoints)
 
 
-def test_snapshot_carries_no_override_when_the_endpoint_key_is_set(
+def test_snapshot_signs_an_override_target_with_its_own_key(
     monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], tmp_path: Path, runpod_override: str
 ) -> None:
-    monkeypatch.setenv(ENDPOINT_API_KEY_ENV, sentinel())
+    endpoint_key = sentinel()
+    monkeypatch.setenv(ENDPOINT_API_KEY_ENV, endpoint_key)
     fake = FakeRunpod(runpod_override)
     monkeypatch.setitem(
         PROVIDERS, "runpod", lambda **kwargs: RunpodProvider(http_client=fake.client(), **kwargs)
@@ -226,7 +239,11 @@ def test_snapshot_carries_no_override_when_the_endpoint_key_is_set(
     args = ["deploy", str(path), "--apply", "--no-wait", "--snapshot-out", str(snapshot)]
     result = runner.invoke(app, [*args, "--state", str(tmp_path / "state.db")])
     assert result.exit_code == 0, result.output
-    assert runpod_override not in snapshot.read_text()
+    endpoints = json.loads(snapshot.read_text())["routes"][0]["endpoints"]
+    assert [e["inject_headers"] for e in endpoints] == [
+        {"Authorization": f"Bearer {runpod_override}"}
+    ]
+    assert endpoint_key not in snapshot.read_text()
 
 
 @pytest.mark.parametrize("kind", ["env", "file"])

@@ -49,7 +49,7 @@ targets:
   | `docker` | `~/.docker/config.json` for image pulls | Docker `config.json` (`auths`, `credsStore` or `credHelpers`); a registry it has no entry for is pulled anonymously, and with `docker.pull: false` a missing image is pulled with it too |
 
 - An override replaces the native location; a missing or unreadable override fails, it never falls back. `hull doctor` names the variable or path that is missing.
-- The value is never logged, printed, stored in state or written to a plan; errors name only the variable or path. The one exception is RunPod traffic: without `RUNPOD_ENDPOINT_API_KEY`, the router signs requests with the target's key, so it reaches the snapshot as `Authorization: Bearer`, as `RUNPOD_API_KEY` does (see [Security](/docs/reference/security/)).
+- The value is never logged, printed, stored in state or written to a plan; errors name only the variable or path. The one exception is RunPod traffic: the router signs a RunPod target's requests and probes with that target's key, so it reaches the snapshot as `Authorization: Bearer`. `RUNPOD_ENDPOINT_API_KEY` is process-wide and applies only to targets without `credentials`, since another account's endpoint would reject it; `hull doctor` says so (see [Security](/docs/reference/security/)).
 - Modal proxy auth tokens (`MODAL_PROXY_TOKEN_ID`, `MODAL_PROXY_TOKEN_SECRET`) are traffic credentials, not deploy credentials, and are not overridden.
 
 Service secrets are listed by name only and mirrored into each provider's native secret store.
