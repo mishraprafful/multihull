@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,9 @@ from multihull.cli import app
 from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref, Target, secret_env_name
+from multihull.providers.baseten import API_KEY_ENV as BASETEN_API_KEY_ENV
+from multihull.providers.baseten import INFERENCE_API_KEY_ENV as BASETEN_INFERENCE_API_KEY_ENV
+from multihull.providers.baseten import BasetenProvider
 from multihull.providers.docker import DockerProvider
 from multihull.providers.kubernetes import (
     DynamicKubeClient,
@@ -34,6 +37,7 @@ from multihull.providers.replicate import ReplicateProvider
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState
+from tests.fake_baseten import BASETEN_TARGET, FakeBaseten, with_baseten
 from tests.fake_docker import FakeDockerClient
 from tests.fake_modal import FakeModal
 from tests.fake_runpod import FakeRunpod
@@ -42,6 +46,7 @@ from tests.test_kubernetes import FakeKubeClient
 
 runner = CliRunner()
 MODAL_KEYS = ("token_id", "token_" + "secret")
+BASETEN_NOW = datetime(2026, 10, 26, 12, 0, tzinfo=UTC)
 
 
 def modal_toml(*profiles: tuple[str, str, str, bool]) -> str:
@@ -329,6 +334,111 @@ def test_render_only_replicate_checks_the_override(monkeypatch: pytest.MonkeyPat
     health = provider.credentials_health()
     assert health.ok and health.message == f"env:{OVERRIDE_ENV} is set"
     assert value not in health.message
+
+
+@pytest.fixture
+def baseten_override(monkeypatch: pytest.MonkeyPatch) -> str:
+    value = sentinel()
+    monkeypatch.setenv(OVERRIDE_ENV, value)
+    monkeypatch.setenv(BASETEN_API_KEY_ENV, sentinel())
+    monkeypatch.delenv(BASETEN_INFERENCE_API_KEY_ENV, raising=False)
+    return value
+
+
+def baseten_target(llama_raw: dict[str, Any], reference: str) -> Target:
+    llama_raw["container"]["secrets"] = []
+    spec = with_baseten(llama_raw)
+    return Target(spec, spec.target("baseten-us").model_copy(update={"credentials": reference}))
+
+
+def baseten_provider(fake: FakeBaseten, reference: str | None) -> BasetenProvider:
+    return BasetenProvider(
+        dry_run=False,
+        provider_name="baseten-us",
+        http_client=fake.client(),
+        clock=lambda: BASETEN_NOW,
+        credentials=reference,
+    )
+
+
+def test_baseten_calls_the_api_and_signs_traffic_with_the_override(
+    monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], baseten_override: str
+) -> None:
+    reference = f"env:{OVERRIDE_ENV}"
+    provider = baseten_provider(FakeBaseten(baseten_override), reference)
+    target = baseten_target(llama_raw, reference)
+    ref = provider.apply(target, None)
+    assert baseten_override not in ref.to_json()
+    assert baseten_override not in json.dumps(provider.plan(target, None).payload)
+    assert provider.status(ref).phase == "Ready"
+    signed = {"Authorization": f"Api-Key {baseten_override}"}
+    assert provider.endpoint(ref).inject_headers == signed
+    assert provider.credentials_health().message == (
+        f"Baseten accepted {reference}, which also signs router traffic"
+    )
+    inference = sentinel()
+    monkeypatch.setenv(BASETEN_INFERENCE_API_KEY_ENV, inference)
+    assert provider.endpoint(ref).inject_headers == signed
+    assert provider.credentials_health().message == (
+        f"Baseten accepted {reference}, which also signs router traffic "
+        f"instead of {BASETEN_INFERENCE_API_KEY_ENV}"
+    )
+    assert BasetenProvider().endpoint(ref).inject_headers == {
+        "Authorization": f"Api-Key {inference}"
+    }
+
+
+def test_baseten_names_a_missing_or_rejected_override_without_its_value(
+    monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], baseten_override: str
+) -> None:
+    reference = f"env:{OVERRIDE_ENV}"
+    rejected = baseten_provider(FakeBaseten(sentinel()), reference)
+    health = rejected.credentials_health()
+    assert health.message.startswith(f"Baseten rejected {reference}: ")
+    with pytest.raises(RuntimeError) as raised:
+        rejected.apply(baseten_target(llama_raw, reference), None)
+    for message in (health.message, str(raised.value)):
+        assert baseten_override not in message
+    monkeypatch.delenv(OVERRIDE_ENV)
+    native = os.environ[BASETEN_API_KEY_ENV]
+    missing = baseten_provider(FakeBaseten(native), reference)
+    assert missing.credentials_health().message == (
+        f"credentials {reference} is not set; baseten credentials missing"
+    )
+    with pytest.raises(CredentialError) as raised:
+        missing.apply(baseten_target(llama_raw, reference), None)
+    assert str(raised.value) == f"credentials {reference} is not set; Baseten credentials missing"
+    assert missing.endpoint(Ref("b", "baseten", "s", {"model": "m1"})).inject_headers == {}
+
+
+def test_baseten_override_stays_out_of_output_state_plan_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    llama_raw: dict[str, Any],
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    baseten_override: str,
+) -> None:
+    fake = FakeBaseten(baseten_override)
+    monkeypatch.setitem(
+        PROVIDERS,
+        "baseten",
+        lambda **kwargs: BasetenProvider(
+            http_client=fake.client(), clock=lambda: BASETEN_NOW, **kwargs
+        ),
+    )
+    reference = f"env:{OVERRIDE_ENV}"
+    llama_raw["targets"] = [{**BASETEN_TARGET, "credentials": reference}]
+    spec = single_target_spec(llama_raw, "baseten-us")
+    round_trip = cli_round_trip(write_spec(tmp_path, spec), tmp_path, caplog)
+    assert not round_trip.leaks(baseten_override)
+    assert f'"credentials": "{reference}"'.encode() in round_trip.stored
+    endpoints = round_trip.snapshot["routes"][0]["endpoints"]
+    assert [e["inject_headers"] for e in endpoints] == [
+        {"Authorization": f"Api-Key {baseten_override}"}
+    ]
+    for endpoint in endpoints:
+        endpoint.pop("inject_headers")
+    assert baseten_override not in json.dumps(endpoints)
 
 
 def test_kubernetes_health_reads_contexts_from_the_override(
