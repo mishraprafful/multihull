@@ -276,9 +276,11 @@ def server_instance(app_name: str, environment: str | None) -> Any:
 
 
 def deployed_web_url(app_name: str, environment: str | None) -> str | None:
+    import modal
+
     try:
         url = server_instance(app_name, environment).serve.get_web_url()
-    except Exception:
+    except modal.exception.NotFoundError:
         return None
     return str(url) if url else None
 

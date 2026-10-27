@@ -73,6 +73,7 @@ class FakeModal:
         self.log_since: datetime | None = None
         self.lookups: list[tuple[str, str | None]] = []
         self.deploy_error: BaseException | None = None
+        self.cls_error: BaseException | None = None
         self.stopped: set[str] = set()
         self.App = self._app_type()
         self.Image = SimpleNamespace(from_registry=self._from_registry)
@@ -143,6 +144,8 @@ class FakeModal:
 
     def _cls_from_name(self, app_name: str, name: str, environment_name: str | None) -> Any:
         self.lookups.append((f"{app_name}/{name}", environment_name))
+        if self.cls_error is not None:
+            raise self.cls_error
         fake = self
 
         def update_autoscaler(**kwargs: int) -> None:
