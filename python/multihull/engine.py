@@ -315,9 +315,11 @@ def destroy(
         results = list(pool.map(run, records))
 
     with state.lock():
-        for result in results:
+        for result, record in zip(results, records, strict=True):
             if result.ok:
                 state.delete(service, result.provider)
+            elif result.deferred:
+                state.put(replace(record, last_status="Failed"))
     return results
 
 

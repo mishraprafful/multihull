@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from multihull import engine
-from multihull.providers.base import Observed, Ref
+from multihull.providers.base import DestroyDeferred, Observed, Ref
 from multihull.spec import ServiceSpec
 from multihull.state import Floor, LocalState, StateRecord
 from tests.fakes import FakeProvider
@@ -204,3 +204,28 @@ def test_a_skipped_refresh_keeps_a_failed_target_failed(
     [result] = engine.refresh(llama_spec.name, state, {})
     assert (result.observed.phase, result.changed) == ("Failed", False)
     assert result.observed.message.startswith(engine.STORED_CREDENTIALS_NOT_REFRESHED)
+
+
+class OverwrittenDuringDestroy(FakeProvider):
+    def __init__(self, state: LocalState) -> None:
+        super().__init__()
+        self.state = state
+
+    def destroy(self, ref: Ref) -> None:
+        record = self.state.get(ref.service, ref.provider)
+        assert record is not None
+        record.last_status = "Ready"
+        self.state.put(record)
+        raise DestroyDeferred("deletion deferred")
+
+
+def test_a_deferred_destroy_ends_failed_even_if_a_refresh_wrote_ready_meanwhile(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = seeded(llama_spec, tmp_path)
+    [result] = engine.destroy(
+        llama_spec.name, state, providers={"modal-main": OverwrittenDuringDestroy(state)}
+    )
+    assert (result.ok, result.deferred) == (False, True)
+    record = state.get(llama_spec.name, "modal-main")
+    assert record is not None and record.last_status == "Failed"
