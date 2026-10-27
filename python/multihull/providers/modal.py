@@ -4,7 +4,9 @@ import asyncio
 import os
 import subprocess
 import sys
-from collections.abc import Iterable, Iterator
+import tempfile
+import tomllib
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -14,6 +16,7 @@ from typing import Any, ClassVar
 
 import httpx
 
+from multihull.credentials import CredentialError, CredentialSource
 from multihull.providers.base import (
     SERVICE_LABEL,
     CredHealth,
@@ -25,6 +28,7 @@ from multihull.providers.base import (
     Ref,
     Target,
     redact_env,
+    redact_values,
     resolve_secret_values,
     secret_env_name,
 )
@@ -62,6 +66,10 @@ HEALTH_PATH_KEY = "health_path"
 DEFAULT_HEALTH_PATH = "/health"
 HEALTH_TIMEOUT_SECONDS = 5.0
 EDGE_ERROR = EdgeError(statuses=(404,), body_prefix="modal-http:")
+DEFAULT_PROFILE = "default"
+PROFILE_ENV = "MODAL_PROFILE"
+CONFIG_PATH_ENV = "MODAL_CONFIG_PATH"
+NATIVE_CREDENTIAL_PREFIXES = ("MODAL_TOKEN_", "MODAL_OAUTH_")
 
 
 class CredentialStatus(StrEnum):
@@ -91,8 +99,65 @@ def credentials_source() -> str | None:
     return None
 
 
-def redact(text: str, env_names: Iterable[str] = ()) -> str:
-    return redact_env(text, [TOKEN_ID_ENV, TOKEN_SECRET_ENV, *env_names])
+def redact(text: str, env_names: Iterable[str] = (), tokens: Iterable[str] = ()) -> str:
+    return redact_values(redact_env(text, [TOKEN_ID_ENV, TOKEN_SECRET_ENV, *env_names]), tokens)
+
+
+def profile_name(document: dict[str, Any], source: CredentialSource) -> str:
+    if not document or not all(isinstance(profile, dict) for profile in document.values()):
+        raise CredentialError(f"credentials {source} must hold only .modal.toml profile tables")
+    active = [name for name, profile in document.items() if profile.get("active") is True]
+    if len(active) > 1:
+        raise CredentialError(f"credentials {source} has more than one active profile")
+    if active:
+        return active[0]
+    if len(document) == 1:
+        return next(iter(document))
+    if DEFAULT_PROFILE in document:
+        return DEFAULT_PROFILE
+    raise CredentialError(f"credentials {source} has several profiles and none is active")
+
+
+def modal_tokens(credentials: str) -> tuple[str, str]:
+    source = CredentialSource.parse(credentials)
+    try:
+        document = tomllib.loads(source.read())
+    except tomllib.TOMLDecodeError:
+        raise CredentialError(f"credentials {source} is not .modal.toml TOML") from None
+    name = profile_name(document, source)
+    profile = document[name]
+    if not (profile.get("token_id") and profile.get("token_secret")):
+        raise CredentialError(
+            f"profile {name} of credentials {source} has no token_id and token_secret; "
+            "only token profiles are supported, not OAuth"
+        )
+    return str(profile["token_id"]), str(profile["token_secret"])
+
+
+def credential_tokens(credentials: str | None) -> list[str]:
+    if credentials is None:
+        return []
+    try:
+        return list(modal_tokens(credentials))
+    except CredentialError:
+        return []
+
+
+def token_environment(credentials: str | None, config_dir: str) -> dict[str, str] | None:
+    if credentials is None:
+        return None
+    token_id, token_secret = modal_tokens(credentials)
+    inherited = {
+        name: value
+        for name, value in os.environ.items()
+        if name != PROFILE_ENV and not name.startswith(NATIVE_CREDENTIAL_PREFIXES)
+    }
+    return {
+        **inherited,
+        CONFIG_PATH_ENV: str(Path(config_dir) / ".modal.toml"),
+        TOKEN_ID_ENV: token_id,
+        TOKEN_SECRET_ENV: token_secret,
+    }
 
 
 def secret_env_names(spec: dict[str, Any]) -> list[str]:
@@ -109,12 +174,38 @@ async def hello_from_env(modal: Any) -> None:
     await client.hello.aio()
 
 
-def check_credentials(timeout: float = CREDENTIALS_TIMEOUT_SECONDS) -> CredentialCheck:
-    source = credentials_source()
-    if source is None:
-        return CredentialCheck(
-            CredentialStatus.MISSING, f"no {ENV_CREDENTIALS} and no {CONFIG_CREDENTIALS}"
-        )
+def hello_with_tokens(token_id: str, token_secret: str) -> Callable[[Any], Awaitable[None]]:
+    async def hello(modal: Any) -> None:
+        client = await modal.Client.from_credentials.aio(token_id, token_secret)
+        await client.hello.aio()
+
+    return hello
+
+
+def check_credentials(
+    timeout: float = CREDENTIALS_TIMEOUT_SECONDS, credentials: str | None = None
+) -> CredentialCheck:
+    if credentials is None:
+        source = credentials_source()
+        if source is None:
+            return CredentialCheck(
+                CredentialStatus.MISSING, f"no {ENV_CREDENTIALS} and no {CONFIG_CREDENTIALS}"
+            )
+        return verify_credentials(source, hello_from_env, [], timeout)
+    try:
+        tokens = modal_tokens(credentials)
+    except CredentialError as exc:
+        return CredentialCheck(CredentialStatus.MISSING, str(exc))
+    source = str(CredentialSource.parse(credentials))
+    return verify_credentials(source, hello_with_tokens(*tokens), list(tokens), timeout)
+
+
+def verify_credentials(
+    source: str,
+    hello: Callable[[Any], Awaitable[None]],
+    tokens: list[str],
+    timeout: float,
+) -> CredentialCheck:
     try:
         import modal
     except ImportError:
@@ -124,22 +215,24 @@ def check_credentials(timeout: float = CREDENTIALS_TIMEOUT_SECONDS) -> Credentia
             "install multihull[modal] to verify them",
         )
     try:
-        asyncio.run(asyncio.wait_for(hello_from_env(modal), timeout))
+        asyncio.run(asyncio.wait_for(hello(modal), timeout))
     except TimeoutError:
         return CredentialCheck(
             CredentialStatus.UNREACHABLE, f"no answer from Modal within {timeout:g} s"
         )
     except modal.exception.AuthError as exc:
-        return CredentialCheck(CredentialStatus.REJECTED, redact(f"Modal rejected {source}: {exc}"))
+        return CredentialCheck(
+            CredentialStatus.REJECTED, redact(f"Modal rejected {source}: {exc}", tokens=tokens)
+        )
     except (ValueError, modal.exception.InvalidError) as exc:
         return CredentialCheck(
             CredentialStatus.INVALID,
-            redact(f"the modal SDK refused {source} before sending: {exc}"),
+            redact(f"the modal SDK refused {source} before sending: {exc}", tokens=tokens),
         )
     except Exception as exc:
         return CredentialCheck(
             CredentialStatus.UNREACHABLE,
-            redact(f"could not verify {source}: {type(exc).__name__}: {exc}"),
+            redact(f"could not verify {source}: {type(exc).__name__}: {exc}", tokens=tokens),
         )
     return CredentialCheck(CredentialStatus.ACCEPTED, f"Modal accepted {source}")
 
@@ -269,35 +362,40 @@ def default_http_client() -> httpx.Client:
     return httpx.Client(timeout=HEALTH_TIMEOUT_SECONDS)
 
 
-def server_instance(app_name: str, environment: str | None) -> Any:
+def server_instance(app_name: str, environment: str | None, client: Any = None) -> Any:
     import modal
 
-    return modal.Cls.from_name(app_name, SERVER_CLASS_NAME, environment_name=environment)()
+    return modal.Cls.from_name(
+        app_name, SERVER_CLASS_NAME, environment_name=environment, client=client
+    )()
 
 
-def deployed_web_url(app_name: str, environment: str | None) -> str | None:
+def deployed_web_url(app_name: str, environment: str | None, client: Any = None) -> str | None:
     import modal
 
     try:
-        url = server_instance(app_name, environment).serve.get_web_url()
+        url = server_instance(app_name, environment, client).serve.get_web_url()
     except modal.exception.NotFoundError:
         return None
     return str(url) if url else None
 
 
-def stop_app(app_name: str, environment: str) -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "modal", "app", "stop", app_name, "--env", environment, "--yes"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def stop_app(app_name: str, environment: str, credentials: str | None = None) -> None:
+    with tempfile.TemporaryDirectory() as config_dir:
+        result = subprocess.run(
+            [sys.executable, "-m", "modal", "app", "stop", app_name, "--env", environment, "--yes"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=token_environment(credentials, config_dir),
+        )
     if result.returncode == 0:
         return
     output = f"{result.stdout}\n{result.stderr}".strip()
     if any(marker in output.lower() for marker in APP_GONE_MARKERS):
         return
     detail = output.splitlines()[-1] if output else f"exit code {result.returncode}"
+    detail = redact(detail, tokens=credential_tokens(credentials))
     raise RuntimeError(f"modal app stop {app_name} failed: {detail}")
 
 
@@ -310,17 +408,33 @@ class ModalProvider:
         workspace: str | None = None,
         provider_name: str = "modal",
         http_client: httpx.Client | None = None,
+        credentials: str | None = None,
     ) -> None:
         self.dry_run = dry_run
         self.workspace = workspace or os.environ.get("MODAL_WORKSPACE", "workspace")
         self.provider_name = provider_name
         self._http = http_client
+        self.credentials = credentials
+        self._client: Any = None
 
     @property
     def http(self) -> httpx.Client:
         if self._http is None:
             self._http = default_http_client()
         return self._http
+
+    @property
+    def client(self) -> Any:
+        if self.credentials is None:
+            return None
+        if self._client is None:
+            import modal
+
+            self._client = modal.Client.from_credentials(*modal_tokens(self.credentials))
+        return self._client
+
+    def redact(self, text: str, env_names: Iterable[str] = ()) -> str:
+        return redact(text, env_names, credential_tokens(self.credentials))
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         return Plan(
@@ -337,24 +451,24 @@ class ModalProvider:
         if self.dry_run:
             return ref_for(desired)
         try:
-            web_url = deploy_with_sdk(spec)
+            web_url = deploy_with_sdk(spec, self.client)
         except Exception as exc:
-            raise RuntimeError(redact(str(exc), secret_env_names(spec))) from None
+            raise RuntimeError(self.redact(str(exc), secret_env_names(spec))) from None
         return ref_for(desired, web_url)
 
     def destroy(self, ref: Ref) -> None:
         if self.dry_run:
             return
-        stop_app(ref.ids["app"], ref.ids.get("environment", "main"))
+        stop_app(ref.ids["app"], ref.ids.get("environment", "main"), self.credentials)
 
     def status(self, ref: Ref) -> Observed:
         if self.dry_run:
             return Observed(phase="Unknown", message="dry run")
         try:
-            server = server_instance(ref.ids["app"], ref.ids.get("environment"))
+            server = server_instance(ref.ids["app"], ref.ids.get("environment"), self.client)
             stats = server.serve.get_current_stats()
         except Exception as exc:
-            return Observed(phase="Unknown", message=str(exc))
+            return Observed(phase="Unknown", message=self.redact(str(exc)))
         running = int(getattr(stats, "num_total_runners", 0))
         if not running:
             return Observed(phase="Pending", message="no running container")
@@ -384,13 +498,15 @@ class ModalProvider:
     def scale(self, ref: Ref, min: int, max: int) -> None:
         if self.dry_run:
             return
-        server = server_instance(ref.ids["app"], ref.ids.get("environment"))
+        server = server_instance(ref.ids["app"], ref.ids.get("environment"), self.client)
         server.update_autoscaler(min_containers=min, max_containers=max)
 
     def logs(self, ref: Ref, since: timedelta) -> Iterator[str]:
         if self.dry_run:
             return
-        yield from fetch_logs_with_sdk(ref.ids["app"], ref.ids.get("environment"), since)
+        yield from fetch_logs_with_sdk(
+            ref.ids["app"], ref.ids.get("environment"), since, self.client
+        )
 
     def endpoint(self, ref: Ref) -> Endpoint:
         url = ref.ids.get("web_url") or derive_web_url(
@@ -412,7 +528,7 @@ class ModalProvider:
         return [GPUOffer(gpu=gpu, region=None, available=True) for gpu in MODAL_GPU]
 
     def credentials_health(self) -> CredHealth:
-        check = check_credentials()
+        check = check_credentials(credentials=self.credentials)
         return CredHealth(ok=check.ok, message=check.message)
 
     def rediscover(self, service: str) -> Ref | None:
@@ -424,29 +540,31 @@ class ModalProvider:
             return None
         name = f"multihull-{service}-{self.provider_name}"
         try:
-            modal.App.lookup(name)
+            modal.App.lookup(name, client=self.client)
         except Exception:
             return None
         ids = {"app": name}
-        web_url = deployed_web_url(name, None)
+        web_url = deployed_web_url(name, None, self.client)
         if web_url:
             ids["web_url"] = web_url
         return Ref(provider=self.provider_name, type="modal", service=service, ids=ids)
 
 
-def fetch_logs_with_sdk(app_name: str, environment: str | None, since: timedelta) -> Iterator[str]:
+def fetch_logs_with_sdk(
+    app_name: str, environment: str | None, since: timedelta, client: Any = None
+) -> Iterator[str]:
     try:
         import modal
     except ImportError as exc:
         raise RuntimeError("modal SDK not installed; install multihull[modal]") from exc
-    app = modal.App.lookup(app_name, environment_name=environment)
+    app = modal.App.lookup(app_name, environment_name=environment, client=client)
     for entry in app.logs.fetch(since=datetime.now(UTC) - since):
         context = entry.context_ids[-1] if entry.context_ids else app_name
         for line in entry.message.splitlines():
             yield f"{context} {line}"
 
 
-def deploy_with_sdk(spec: dict[str, Any]) -> str:
+def deploy_with_sdk(spec: dict[str, Any], client: Any = None) -> str:
     import modal
 
     registry_secret = spec["image"]["secret"]
@@ -492,5 +610,5 @@ def deploy_with_sdk(spec: dict[str, Any]) -> str:
             return None
 
     with env_override(IMAGE_BUILDER_VERSION_ENV, spec["image"]["builder_version"]):
-        app.deploy(name=spec["app_name"], environment_name=spec["environment"])
+        app.deploy(name=spec["app_name"], environment_name=spec["environment"], client=client)
     return str(Server().serve.get_web_url())

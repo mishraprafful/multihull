@@ -12,7 +12,7 @@ from multihull.providers.base import (
     Plan,
     Ref,
     Target,
-    env_credential_health,
+    credential_health,
 )
 from multihull.spec import GPU, ReplicateBlock
 
@@ -64,6 +64,9 @@ def render_payload(desired: Target) -> dict[str, Any]:
 class ReplicateProvider:
     type: ClassVar = "replicate"
 
+    def __init__(self, credentials: str | None = None) -> None:
+        self.credentials = credentials
+
     def plan(self, desired: Target, observed: Ref | None) -> Plan:
         return Plan(provider=desired.provider, type=self.type, payload=render_payload(desired))
 
@@ -93,7 +96,7 @@ class ReplicateProvider:
         return [GPUOffer(gpu=gpu, available=True) for gpu in REPLICATE_HARDWARE]
 
     def credentials_health(self) -> CredHealth:
-        return env_credential_health(API_TOKEN_ENV, self.type)
+        return credential_health(self.credentials, API_TOKEN_ENV, self.type)
 
     def rediscover(self, service: str) -> Ref | None:
         return None

@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections.abc import Callable, Collection, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -20,6 +20,7 @@ ProviderFactory = Callable[[TargetSpec], Provider]
 RefProviderFactory = Callable[[Ref], Provider]
 DEFAULT_PLAN_DIR = Path(".multihull/plan")
 APPLIED_CHANGES = {"new", "changed", "unchanged"}
+CREDENTIALS_KEY = "credentials"
 
 
 @dataclass
@@ -78,8 +79,12 @@ def provider_kwargs(target: TargetSpec, live: bool) -> dict[str, Any]:
     return {}
 
 
+def credential_kwargs(target: TargetSpec) -> dict[str, str]:
+    return {} if target.credentials is None else {"credentials": target.credentials}
+
+
 def provider_for(target: TargetSpec, live: bool = False) -> Provider:
-    return create(target.type, **provider_kwargs(target, live))
+    return create(target.type, **provider_kwargs(target, live), **credential_kwargs(target))
 
 
 def live_provider_for(target: TargetSpec) -> Provider:
@@ -90,14 +95,26 @@ def default_factory(target: TargetSpec) -> Provider:
     return provider_for(target, live=False)
 
 
+def with_credentials(ref: Ref, target: TargetSpec) -> Ref:
+    if target.credentials is None:
+        return ref
+    return replace(ref, ids={**ref.ids, CREDENTIALS_KEY: target.credentials})
+
+
+def ref_credential_kwargs(ref: Ref) -> dict[str, str]:
+    reference = ref.ids.get(CREDENTIALS_KEY)
+    return {"credentials": reference} if reference else {}
+
+
 def provider_for_ref(ref: Ref) -> Provider:
+    credentials = ref_credential_kwargs(ref)
     if ref.type == "kubernetes":
-        return create("kubernetes", context=ref.ids.get("context"), connect=True)
+        return create("kubernetes", context=ref.ids.get("context"), connect=True, **credentials)
     if ref.type == "modal":
-        return create("modal", dry_run=False)
+        return create("modal", dry_run=False, **credentials)
     if ref.type in ("runpod", "baseten"):
-        return create(ref.type, dry_run=False, provider_name=ref.provider)
-    return create(ref.type)
+        return create(ref.type, dry_run=False, provider_name=ref.provider, **credentials)
+    return create(ref.type, **credentials)
 
 
 def resolve_providers(
@@ -190,7 +207,8 @@ def apply(
         target = targets[target_plan.provider]
         provider = resolved[target.provider]
         try:
-            ref = provider.apply(Target(spec, target, image_digest), target_plan.ref)
+            applied = provider.apply(Target(spec, target, image_digest), target_plan.ref)
+            ref = with_credentials(applied, target)
         except Exception as exc:
             return ApplyResult(
                 target.provider, target.type, target_plan.change, False, None, error_reason(exc)
@@ -292,6 +310,7 @@ def rediscover(
         if ref is None or ref.provider != target.provider:
             results.append(RediscoverResult(target.provider, target.type, None, "nothing found"))
             continue
+        ref = with_credentials(ref, target)
         rendered = provider.plan(Target(spec, target, image_digest), ref)
         with state.lock():
             state.put(
