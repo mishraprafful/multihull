@@ -111,11 +111,12 @@ def profile_name(document: dict[str, Any], source: CredentialSource) -> str:
         raise CredentialError(f"credentials {source} has more than one active profile")
     if active:
         return active[0]
-    if len(document) == 1:
-        return next(iter(document))
-    if DEFAULT_PROFILE in document:
+    if list(document) == [DEFAULT_PROFILE]:
         return DEFAULT_PROFILE
-    raise CredentialError(f"credentials {source} has several profiles and none is active")
+    raise CredentialError(
+        f"credentials {source} has no active profile; mark one with active = true "
+        f"or keep a single profile named {DEFAULT_PROFILE}"
+    )
 
 
 def modal_tokens(credentials: str) -> tuple[str, str]:
