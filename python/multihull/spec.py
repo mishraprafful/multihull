@@ -17,14 +17,6 @@ PROVIDER_TYPES: tuple[ProviderType, ...] = (
     "replicate",
     "docker",
 )
-GPU_OPTIONAL_TYPES: tuple[ProviderType, ...] = (
-    "docker",
-    "kubernetes",
-    "modal",
-    "runpod",
-    "baseten",
-    "replicate",
-)
 ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
 
@@ -291,20 +283,6 @@ class ServiceSpec(SpecModel):
         for target in self.targets:
             if target.type == "replicate" and (build is None or build.target != "cog"):
                 raise ValueError(f"target {target.provider}: replicate requires build.target: cog")
-        return self
-
-    @model_validator(mode="after")
-    def gpu_required_unless_all_targets_gpu_optional(self) -> ServiceSpec:
-        if self.resources.gpu:
-            return self
-        needing_gpu = [t for t in self.targets if t.type not in GPU_OPTIONAL_TYPES]
-        if needing_gpu:
-            names = ", ".join(f"{t.provider} ({t.type})" for t in needing_gpu)
-            optional = ", ".join(GPU_OPTIONAL_TYPES)
-            raise ValueError(
-                f"resources.gpu is empty but these targets need a GPU class: {names}; "
-                f"an empty gpu list runs on CPU and is allowed only for target types {optional}"
-            )
         return self
 
     @model_validator(mode="after")

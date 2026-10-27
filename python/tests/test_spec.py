@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from multihull import spec as specmod
-from multihull.spec import GPU, GPU_OPTIONAL_TYPES, PROVIDER_TYPES, ServiceSpec
+from multihull.spec import GPU, ServiceSpec
 
 
 def test_fixture_loads(llama_spec: ServiceSpec) -> None:
@@ -114,7 +114,6 @@ def test_empty_gpu_runs_every_target_type_on_cpu(llama_raw: dict[str, Any]) -> N
         "baseten",
         "replicate",
     ]
-    assert set(GPU_OPTIONAL_TYPES) == set(PROVIDER_TYPES)
 
 
 def test_kubernetes_service_options(llama_raw: dict[str, Any]) -> None:
