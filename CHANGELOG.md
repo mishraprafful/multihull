@@ -9,11 +9,16 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - RunPod translator deploys for real through RunPod's REST API v2: `apply` creates or updates one `LOAD_BALANCER` Serverless endpoint (`workers.min`/`workers.max`, GPU pools, CPU workers when `resources.gpu` is empty) and mirrors service secrets into RunPod secrets; `status`, `scale`, `logs`, `destroy`, `rediscover` and an authenticated `hull doctor` check. `status` is Ready only once a worker is up and the health path answers 2xx; 204 is warming. The router injects `Authorization: Bearer` from `RUNPOD_ENDPOINT_API_KEY` or `RUNPOD_API_KEY` on traffic and probes. Not yet run against RunPod (#63).
 - Translator conformance suite, starting with RunPod: golden payload, idempotent apply and destroy, rediscover, ready and not ready, no secret values in plan, state or snapshot (#66).
 - `live-smoke.yml` job `runpod-smoke` (spec `kind-runpod`) and a daily RunPod endpoint sweep, both skipped without the `RUNPOD_API_KEY` secret (#63).
+- Baseten translator deploys for real through Baseten's management API: `apply` uploads a custom-server Truss config and pushes it to the `production` environment of model `multihull-<svc>-<provider>` with `min_replica`/`max_replica`, promotes an earlier deployment of the same config instead of pushing again, restores autoscaling drift and mirrors service secrets into Baseten secrets; `status`, `scale`, `logs`, `destroy`, `rediscover` and an authenticated `hull doctor` check. CPU-only specs are allowed. The endpoint is the `production` sync URL, so probes and routed paths reach the server unchanged, and the router injects `Authorization: Api-Key` from `BASETEN_INFERENCE_API_KEY` or `BASETEN_API_KEY` on traffic and probes. Baseten joins the conformance suite and `live-smoke.yml` gets `baseten-smoke` (spec `kind-baseten`) and a daily model sweep, skipped without the `BASETEN_API_KEY` secret. Not yet run against Baseten (#64).
 - `live-k8s-gpu.yml`: a manual run of Llama 3.1 8B on a real GPU Kubernetes cluster (priority 1) with Modal (priority 2): cluster preflight, failover to Modal and back with zero client errors, forced cleanup of both providers and a final check that nothing is left. A least-privilege `rbac.yaml`, a kubeconfig script and the runbook at `docs/testing/kubernetes-gpu`. Skipped without `GPU_KUBECONFIG`; not yet run (#68).
 
 ### Changed
 
 - Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
+
+### Fixed
+
+- The Baseten endpoint no longer ends in `/production/predict`, which sent probes and routed paths to the predict route; the Truss config no longer carries the unsupported `runtime.health_checks.initial_delay_seconds` (#64).
 
 ## [0.2.0] - 2026-10-12
 

@@ -102,12 +102,15 @@ def test_block_must_match_type(llama_raw: dict[str, Any]) -> None:
 def test_empty_gpu_rejected_for_gpu_only_targets(llama_raw: dict[str, Any]) -> None:
     raw = copy.deepcopy(llama_raw)
     raw["resources"]["gpu"] = []
-    raw["targets"].append({"provider": "baseten-x", "type": "baseten", "priority": 9})
-    with pytest.raises(ValidationError, match="need a GPU class: baseten-x \\(baseten\\);"):
+    raw["container"].pop("image")
+    raw["container"]["build"] = {"target": "cog"}
+    raw["targets"].append({"provider": "replicate-x", "type": "replicate", "priority": 9})
+    with pytest.raises(ValidationError, match="need a GPU class: replicate-x \\(replicate\\);"):
         ServiceSpec.model_validate(raw)
-    raw["targets"] = [t for t in raw["targets"] if t["type"] != "baseten"]
+    raw["targets"] = [t for t in raw["targets"] if t["type"] != "replicate"]
+    raw["targets"].append({"provider": "baseten-x", "type": "baseten", "priority": 9})
     spec = ServiceSpec.model_validate(raw)
-    assert [t.type for t in spec.targets] == ["kubernetes", "modal", "runpod"]
+    assert [t.type for t in spec.targets] == ["kubernetes", "modal", "runpod", "baseten"]
 
 
 def test_kubernetes_service_options(llama_raw: dict[str, Any]) -> None:
