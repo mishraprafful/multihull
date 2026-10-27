@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
+from urllib.parse import quote
 
 from multihull.credentials import CredentialError, read_credential, read_token, token_origin
 from multihull.spec import GPU, ProviderType, Replicas, ServiceSpec, TargetSpec
@@ -14,6 +16,8 @@ SERVICE_LABEL = "multihull.dev/service"
 PROVIDER_LABEL = "multihull.dev/provider"
 GPU_CLASS_LABEL = "multihull.dev/gpu-class"
 REDACTED = "<redacted>"
+MIRRORED_NAME = re.compile(r"[A-Za-z0-9_]+")
+DOT_SEGMENTS = frozenset({"", ".", ".."})
 
 Phase = Literal["Pending", "Ready", "Degraded", "Draining", "Failed", "Unknown"]
 
@@ -204,6 +208,22 @@ def redact_token(text: str, reference: str | None) -> str:
 
 def secret_env_name(secret: str) -> str:
     return secret.upper().replace("-", "_").replace(".", "_")
+
+
+def api_path(*segments: object) -> str:
+    parts = [str(segment) for segment in segments]
+    if any(part in DOT_SEGMENTS for part in parts):
+        raise ValueError("refusing an API path with an empty or dot segment")
+    return "/" + "/".join(quote(part, safe="") for part in parts)
+
+
+def mirrored_names(joined: str) -> list[str]:
+    names = [name for name in joined.split(",") if name]
+    if not all(MIRRORED_NAME.fullmatch(name) for name in names):
+        raise ValueError(
+            "state names a mirrored secret outside [A-Za-z0-9_]; refusing to delete anything"
+        )
+    return names
 
 
 def resolve_secret_values(names: list[str]) -> dict[str, str]:

@@ -28,7 +28,9 @@ from multihull.providers.base import (
     Ref,
     ScaleRefused,
     Target,
+    api_path,
     credential_health,
+    mirrored_names,
     redact_env,
     redact_token,
     resolve_secret_values,
@@ -465,10 +467,12 @@ class BasetenApi:
         )
 
     def environment(self, model_id: str) -> dict[str, Any] | None:
-        return self.call("GET", f"/models/{model_id}/environments/{ENVIRONMENT}", missing_ok=True)
+        return self.call(
+            "GET", api_path("models", model_id, "environments", ENVIRONMENT), missing_ok=True
+        )
 
     def deployments(self, model_id: str) -> list[dict[str, Any]]:
-        listing = self.call("GET", f"/models/{model_id}/deployments")
+        listing = self.call("GET", api_path("models", model_id, "deployments"))
         return list(listing.get("deployments") or [])
 
     def push(
@@ -481,7 +485,9 @@ class BasetenApi:
         self.upload(prepared, truss_archive(str(deployment["raw_config"])), now)
         source = {"kind": "model_archive", "s3_key": prepared["s3_key"], "deployment": deployment}
         if model_id:
-            return dict(self.call("POST", f"/models/{model_id}/deployments", {"source": source}))
+            return dict(
+                self.call("POST", api_path("models", model_id, "deployments"), {"source": source})
+            )
         return dict(self.call("POST", "/models", {"source": {**source, "name": name}}))
 
     def upload(self, prepared: Mapping[str, Any], archive: bytes, now: datetime) -> None:
@@ -503,13 +509,15 @@ class BasetenApi:
             "environment_settings_update": {"autoscaling_settings": dict(autoscaling)},
         }
         return dict(
-            self.call("POST", f"/models/{model_id}/deployments/{deployment_id}/promote", body)
+            self.call(
+                "POST", api_path("models", model_id, "deployments", deployment_id, "promote"), body
+            )
         )
 
     def set_autoscaling(self, model_id: str, settings: Mapping[str, Any]) -> None:
         self.call(
             "PATCH",
-            f"/models/{model_id}/environments/{ENVIRONMENT}",
+            api_path("models", model_id, "environments", ENVIRONMENT),
             {"autoscaling_settings": dict(settings)},
         )
 
@@ -526,7 +534,9 @@ class BasetenApi:
                 "limit": LOG_LIMIT,
             }
             page = self.call(
-                "GET", f"/models/{model_id}/deployments/{deployment_id}/logs", params=params
+                "GET",
+                api_path("models", model_id, "deployments", deployment_id, "logs"),
+                params=params,
             )
             lines = list(page.get("logs") or [])
             yield from lines
@@ -600,7 +610,7 @@ class BasetenProvider:
     def current_model(self, observed: Ref | None, desired: Target) -> dict[str, Any] | None:
         model_id = observed.ids.get(MODEL_KEY) if observed else None
         if model_id:
-            found = self.api.call("GET", f"/models/{model_id}", missing_ok=True)
+            found = self.api.call("GET", api_path("models", model_id), missing_ok=True)
             if found is not None:
                 return dict(found)
         return self.api.owned_model(model_name(desired), desired.name, desired.provider)
@@ -631,11 +641,12 @@ class BasetenProvider:
     def destroy(self, ref: Ref) -> None:
         if self.dry_run:
             return
+        mirrored = mirrored_names(ref.ids.get(SECRETS_KEY, ""))
         model_id = self.model_id_for(ref)
         if model_id:
-            self.api.call("DELETE", f"/models/{model_id}", missing_ok=True)
-        for name in filter(None, ref.ids.get(SECRETS_KEY, "").split(",")):
-            self.api.call("DELETE", f"/secrets/{name}", missing_ok=True)
+            self.api.call("DELETE", api_path("models", model_id), missing_ok=True)
+        for name in mirrored:
+            self.api.call("DELETE", api_path("secrets", name), missing_ok=True)
 
     def status(self, ref: Ref) -> Observed:
         if self.dry_run:
@@ -690,7 +701,7 @@ class BasetenProvider:
         if not wanted:
             return Observed("Pending", 0, desired, serving)
         deployment = self.api.call(
-            "GET", f"/models/{model_id}/deployments/{wanted}", missing_ok=True
+            "GET", api_path("models", model_id, "deployments", wanted), missing_ok=True
         )
         status = "not found" if deployment is None else str(deployment.get("status"))
         if deployment is not None and status not in UNUSABLE_STATUSES:

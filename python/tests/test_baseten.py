@@ -637,3 +637,21 @@ def test_rediscover_never_claims_another_targets_secrets(
     assert found is not None
     providers[ours].destroy(found)
     assert sorted(fake.secrets) == kept
+
+
+def deployed_victim(fake: FakeBaseten, llama_raw: dict[str, Any]) -> str:
+    victim = BasetenProvider(False, "baseten-eu", fake.client(), clock=lambda: NOW)
+    return victim.apply(named_target(llama_raw, "llama-8b", "baseten-eu"), None).ids["model"]
+
+
+def test_destroy_refuses_a_state_name_outside_the_store_charset(
+    provider: BasetenProvider, fake: FakeBaseten, llama_raw: dict[str, Any], target: Target
+) -> None:
+    victim = deployed_victim(fake, llama_raw)
+    ours = provider.apply(target, None)
+    tampered = Ref(
+        ours.provider, ours.type, ours.service, {**ours.ids, "secrets": f"../models/{victim}"}
+    )
+    with pytest.raises(ValueError, match="refusing"):
+        provider.destroy(tampered)
+    assert {victim, ours.ids["model"]} <= set(fake.models)
