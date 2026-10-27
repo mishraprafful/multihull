@@ -83,6 +83,10 @@ NO_COMMAND = (
     "Baseten needs container.command: docker_server.start_command replaces the image "
     "entrypoint and is required for custom servers"
 )
+PERCENT_IN_COMMAND = (
+    "Baseten writes docker_server.start_command into supervisord.conf, where % starts an "
+    "interpolation and fails the build; remove % from container.command"
+)
 
 
 class BasetenApiError(RuntimeError):
@@ -216,8 +220,15 @@ def render_payload(desired: Target) -> dict[str, Any]:
     }
 
 
+def command_problems(desired: Target) -> list[str]:
+    command = desired.service.container.command
+    if not command:
+        return [NO_COMMAND]
+    return [PERCENT_IN_COMMAND] if any("%" in part for part in command) else []
+
+
 def plan_notes(desired: Target) -> list[str]:
-    notes = [] if desired.service.container.command else [NO_COMMAND]
+    notes = command_problems(desired)
     dropped = [name for name in RESERVED_ENV if name in desired.service.container.env]
     if dropped:
         notes.append(
@@ -504,8 +515,8 @@ class BasetenProvider:
         )
 
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
-        if not desired.service.container.command:
-            raise ValueError(NO_COMMAND)
+        for problem in command_problems(desired):
+            raise ValueError(problem)
         payload = render_deployment(desired)
         if self.dry_run:
             return ref_for(desired, None, None, payload)

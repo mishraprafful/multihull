@@ -136,6 +136,14 @@ def test_a_missing_command_is_noted_and_refused(llama_raw: dict[str, Any]) -> No
         BasetenProvider().apply(bare, None)
 
 
+def test_a_percent_in_the_command_is_noted_and_refused(llama_raw: dict[str, Any]) -> None:
+    percent = variant(llama_raw, container={"command": ["serve", "--fraction", "90%"]})
+    [note] = BasetenProvider().plan(percent, None).notes
+    assert note.startswith("Baseten writes docker_server.start_command into supervisord.conf")
+    with pytest.raises(ValueError, match="remove % from container.command"):
+        BasetenProvider().apply(percent, None)
+
+
 def test_reserved_environment_variables_are_noted(llama_raw: dict[str, Any]) -> None:
     ported = variant(llama_raw, container={"env": {"PORT": "8000", "MODE": "x"}})
     [note] = BasetenProvider().plan(ported, None).notes
