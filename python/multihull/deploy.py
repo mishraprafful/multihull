@@ -24,6 +24,7 @@ READY_TIMEOUTS: dict[str, timedelta] = {
 }
 FALLBACK_TIMEOUT = timedelta(minutes=15)
 TERMINAL_PHASES = {"Ready", "Failed"}
+APPLIED_STATUS = "Pending"
 
 
 @dataclass
@@ -148,9 +149,12 @@ def deploy(
     with state.lock():
         for result in applied:
             record = state.get(spec.name, result.provider)
-            if record is not None:
-                record.last_status = observations[result.provider].phase
-                state.put(record)
+            if record is None or result.ref is None:
+                continue
+            if record.ref != result.ref.to_json() or record.last_status != APPLIED_STATUS:
+                continue
+            record.last_status = observations[result.provider].phase
+            state.put(record)
 
     outcomes: list[TargetOutcome] = []
     for result in results:
