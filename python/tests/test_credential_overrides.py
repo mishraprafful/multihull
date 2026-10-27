@@ -455,10 +455,18 @@ def test_modal_destroy_passes_tokens_to_the_cli_only(
     monkeypatch: pytest.MonkeyPatch, modal_override: tuple[str, str, str]
 ) -> None:
     reference, first, second = modal_override
+    native = sentinel()
+    monkeypatch.setenv("MODAL_TOKEN_ID", native)
+    monkeypatch.setenv("MODAL_PROFILE", "native")
+    monkeypatch.setenv("MODAL_OAUTH_CLIENT_ID", native)
     seen: list[dict[str, str] | None] = []
+    config_seen: list[bool] = []
 
     def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        seen.append(kwargs.get("env"))
+        env = kwargs.get("env") or {}
+        seen.append(env)
+        config = Path(env["MODAL_CONFIG_PATH"])
+        config_seen.append(config.parent.is_dir() and not config.exists())
         return subprocess.CompletedProcess(command, 1, "", f"denied {second}")
 
     monkeypatch.setattr(modal_provider.subprocess, "run", run)
@@ -468,8 +476,10 @@ def test_modal_destroy_passes_tokens_to_the_cli_only(
         )
     env = seen[0]
     assert env is not None and env["MODAL_TOKEN_ID"] == first
-    assert second in env.values()
-    assert "MODAL_TOKEN_ID" not in os.environ
+    assert second in env.values() and native not in env.values()
+    assert "MODAL_PROFILE" not in env and "MODAL_OAUTH_CLIENT_ID" not in env
+    assert config_seen == [True]
+    assert os.environ["MODAL_TOKEN_ID"] == native
     assert second not in str(raised.value)
 
 

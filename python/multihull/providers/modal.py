@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import tempfile
 import tomllib
 from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import contextmanager
@@ -66,6 +67,9 @@ DEFAULT_HEALTH_PATH = "/health"
 HEALTH_TIMEOUT_SECONDS = 5.0
 EDGE_ERROR = EdgeError(statuses=(404,), body_prefix="modal-http:")
 DEFAULT_PROFILE = "default"
+PROFILE_ENV = "MODAL_PROFILE"
+CONFIG_PATH_ENV = "MODAL_CONFIG_PATH"
+NATIVE_CREDENTIAL_PREFIXES = ("MODAL_TOKEN_", "MODAL_OAUTH_")
 
 
 class CredentialStatus(StrEnum):
@@ -139,11 +143,21 @@ def credential_tokens(credentials: str | None) -> list[str]:
         return []
 
 
-def token_environment(credentials: str | None) -> dict[str, str] | None:
+def token_environment(credentials: str | None, config_dir: str) -> dict[str, str] | None:
     if credentials is None:
         return None
     token_id, token_secret = modal_tokens(credentials)
-    return {**os.environ, TOKEN_ID_ENV: token_id, TOKEN_SECRET_ENV: token_secret}
+    inherited = {
+        name: value
+        for name, value in os.environ.items()
+        if name != PROFILE_ENV and not name.startswith(NATIVE_CREDENTIAL_PREFIXES)
+    }
+    return {
+        **inherited,
+        CONFIG_PATH_ENV: str(Path(config_dir) / ".modal.toml"),
+        TOKEN_ID_ENV: token_id,
+        TOKEN_SECRET_ENV: token_secret,
+    }
 
 
 def secret_env_names(spec: dict[str, Any]) -> list[str]:
@@ -357,13 +371,14 @@ def server_instance(app_name: str, environment: str | None, client: Any = None) 
 
 
 def stop_app(app_name: str, environment: str, credentials: str | None = None) -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "modal", "app", "stop", app_name, "--env", environment, "--yes"],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=token_environment(credentials),
-    )
+    with tempfile.TemporaryDirectory() as config_dir:
+        result = subprocess.run(
+            [sys.executable, "-m", "modal", "app", "stop", app_name, "--env", environment, "--yes"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=token_environment(credentials, config_dir),
+        )
     if result.returncode == 0:
         return
     output = f"{result.stdout}\n{result.stderr}".strip()
