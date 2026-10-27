@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from multihull import engine
-from multihull.providers.base import Ref
+from multihull.providers.base import DestroyDeferred, Observed, Ref
 from multihull.spec import ServiceSpec
-from multihull.state import LocalState, StateRecord
+from multihull.state import Floor, LocalState, StateRecord
 from tests.fakes import FakeProvider
 
 
@@ -87,3 +88,144 @@ def test_apply_isolates_failures(llama_spec: ServiceSpec, tmp_path: Path) -> Non
         "modal-main": "new",
         "runpod-eu": "unchanged",
     }
+
+
+def test_refresh_never_turns_a_failed_target_unknown(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    for target, status in zip(llama_spec.targets, ["Failed", "Ready", "Failed"], strict=True):
+        ref = Ref(target.provider, target.type, llama_spec.name, {"id": "1"})
+        state.put(StateRecord(llama_spec.name, target.provider, ref.to_json(), None, "h", status))
+    providers = {
+        "gke-prod": FakeProvider(phases=["Unknown"]),
+        "modal-main": FakeProvider(phases=["Unknown"]),
+        "runpod-eu": FakeProvider(phases=["Ready"]),
+    }
+    results = engine.refresh(llama_spec.name, state, providers)
+    assert {r.provider: r.observed.phase for r in results} == {
+        "gke-prod": "Failed",
+        "modal-main": "Unknown",
+        "runpod-eu": "Ready",
+    }
+
+
+class WatchingProvider(FakeProvider):
+    def __init__(self, state: LocalState, failure: Exception | None = None) -> None:
+        super().__init__()
+        self.state = state
+        self.failure = failure
+        self.seen: list[tuple[str | None, list[str]]] = []
+
+    def destroy(self, ref: Ref) -> None:
+        record = self.state.get(ref.service, ref.provider)
+        floors = [f.provider for f in self.state.list_floors(ref.service)]
+        self.seen.append((record.last_status if record else None, floors))
+        if self.failure is not None:
+            raise self.failure
+
+
+def seeded(spec: ServiceSpec, tmp_path: Path) -> LocalState:
+    state = LocalState(tmp_path / "state.db")
+    target = spec.targets[1]
+    ref = Ref(target.provider, target.type, spec.name, {"id": "1"})
+    state.put(StateRecord(spec.name, target.provider, ref.to_json(), None, "h", "Ready"))
+    state.put_floor(Floor(spec.name, target.provider, 3, 1))
+    return state
+
+
+def test_destroy_marks_the_target_failed_and_drops_its_floor_before_the_provider_call(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = seeded(llama_spec, tmp_path)
+    provider = WatchingProvider(state)
+    [result] = engine.destroy(llama_spec.name, state, providers={"modal-main": provider})
+    assert result.ok
+    assert provider.seen == [("Failed", [])]
+    assert state.list(llama_spec.name) == []
+
+
+def test_a_failed_destroy_restores_the_record_and_floor(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = seeded(llama_spec, tmp_path)
+    provider = WatchingProvider(state, RuntimeError("provider API down"))
+    [result] = engine.destroy(llama_spec.name, state, providers={"modal-main": provider})
+    assert not result.ok
+    assert provider.seen == [("Failed", [])]
+    record = state.get(llama_spec.name, "modal-main")
+    assert record is not None and record.last_status == "Ready"
+    assert [
+        (f.provider, f.min_replicas, f.pre_degraded_min) for f in state.list_floors(llama_spec.name)
+    ] == [("modal-main", 3, 1)]
+
+
+class RacingProvider(FakeProvider):
+    def __init__(self, state: LocalState, action: str) -> None:
+        super().__init__()
+        self.state = state
+        self.action = action
+
+    def status(self, ref: Ref) -> Observed:
+        record = self.state.get(ref.service, ref.provider)
+        assert record is not None
+        if self.action == "withdraw":
+            engine.withdraw(self.state, record)
+        else:
+            self.state.delete(ref.service, ref.provider)
+        return Observed("Ready", 1, 1)
+
+
+@pytest.mark.parametrize("action", ["withdraw", "delete"])
+def test_refresh_never_overwrites_a_concurrent_destroy(
+    llama_spec: ServiceSpec, tmp_path: Path, action: str
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    target = llama_spec.targets[1]
+    ref = Ref(target.provider, target.type, llama_spec.name, {"id": "1"})
+    state.put(StateRecord(llama_spec.name, target.provider, ref.to_json(), None, "h", "Pending"))
+    [result] = engine.refresh(
+        llama_spec.name, state, {target.provider: RacingProvider(state, action)}
+    )
+    assert result.observed.phase == "Ready"
+    record = state.get(llama_spec.name, target.provider)
+    if action == "withdraw":
+        assert record is not None and record.last_status == "Failed"
+    else:
+        assert record is None
+
+
+def test_a_skipped_refresh_keeps_a_failed_target_failed(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+    ref = Ref("gone", "replicate", llama_spec.name, {"credentials": "env:GONE_TOKEN"})
+    state.put(StateRecord(llama_spec.name, "gone", ref.to_json(), None, "h", "Failed"))
+    [result] = engine.refresh(llama_spec.name, state, {})
+    assert (result.observed.phase, result.changed) == ("Failed", False)
+    assert result.observed.message.startswith(engine.STORED_CREDENTIALS_NOT_REFRESHED)
+
+
+class OverwrittenDuringDestroy(FakeProvider):
+    def __init__(self, state: LocalState) -> None:
+        super().__init__()
+        self.state = state
+
+    def destroy(self, ref: Ref) -> None:
+        record = self.state.get(ref.service, ref.provider)
+        assert record is not None
+        record.last_status = "Ready"
+        self.state.put(record)
+        raise DestroyDeferred("deletion deferred")
+
+
+def test_a_deferred_destroy_ends_failed_even_if_a_refresh_wrote_ready_meanwhile(
+    llama_spec: ServiceSpec, tmp_path: Path
+) -> None:
+    state = seeded(llama_spec, tmp_path)
+    [result] = engine.destroy(
+        llama_spec.name, state, providers={"modal-main": OverwrittenDuringDestroy(state)}
+    )
+    assert (result.ok, result.deferred) == (False, True)
+    record = state.get(llama_spec.name, "modal-main")
+    assert record is not None and record.last_status == "Failed"

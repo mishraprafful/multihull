@@ -5,6 +5,7 @@ use crate::core::retry::{decide, RetryContext, RetryDecision};
 use crate::core::score::{select, Candidate, Preset};
 use crate::core::snapshot::{Endpoint, EndpointId, FailoverPolicy, Health, Route, Sticky};
 use crate::core::sticky::{hash_key, owner, owner_in_provider, rank, KeyHash};
+use crate::core::target::safe_request_target;
 use http::header::HeaderName;
 use http::{header, HeaderValue, Method, Request, Response};
 use http_body_util::{BodyExt, Limited};
@@ -45,6 +46,10 @@ async fn proxy(
 ) -> Result<Response<ProxyBody>, (ProxyError, u32)> {
     let started = Instant::now();
     let (parts, body) = request.into_parts();
+    let target = parts.uri.path_and_query().map_or("/", |pq| pq.as_str());
+    if !safe_request_target(target) {
+        return Err((ProxyError::BadRequestTarget, 0));
+    }
     let host = parts
         .headers
         .get(header::HOST)
@@ -75,6 +80,7 @@ async fn proxy_route(
     let deadline = started + state.config.timeouts.total;
     let error_trailers = accepts_error_trailers(parts.version, &parts.headers);
     authorize(&route, &parts.headers)?;
+    let route = forwarding(&route, &parts).ok_or((ProxyError::NotForwarded, 0))?;
 
     let limit = state.config.max_buffered_body_bytes;
     let body = Limited::new(body, limit)
@@ -506,6 +512,27 @@ fn take_preferred(
     runtime
         .try_admit(now, rng)
         .map(|guard| (endpoint.clone(), guard))
+}
+
+fn forwarding(route: &Arc<Route>, parts: &http::request::Parts) -> Option<Arc<Route>> {
+    let method = parts.method.as_str();
+    let target = parts.uri.path_and_query().map_or("/", |pq| pq.as_str());
+    if route.endpoints.iter().all(|e| e.forwards(method, target)) {
+        return Some(route.clone());
+    }
+    let endpoints: Vec<Endpoint> = route
+        .endpoints
+        .iter()
+        .filter(|e| e.forwards(method, target))
+        .cloned()
+        .collect();
+    if endpoints.is_empty() {
+        return None;
+    }
+    Some(Arc::new(Route {
+        endpoints,
+        ..(**route).clone()
+    }))
 }
 
 fn authorize(route: &Route, headers: &http::HeaderMap) -> Result<(), (ProxyError, u32)> {

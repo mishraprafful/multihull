@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
+from urllib.parse import quote
 
 from multihull.credentials import CredentialError, read_credential, read_token, token_origin
 from multihull.spec import GPU, ProviderType, Replicas, ServiceSpec, TargetSpec
@@ -19,6 +20,8 @@ REDACTED = "<redacted>"
 UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9_]")
 STORE_NAME_READABLE_LENGTH = 100
 STORE_NAME_DIGEST_LENGTH = 12
+MIRRORED_NAME = re.compile(r"[A-Za-z0-9_]+")
+DOT_SEGMENTS = frozenset({"", ".", ".."})
 
 Phase = Literal["Pending", "Ready", "Degraded", "Draining", "Failed", "Unknown"]
 
@@ -142,6 +145,10 @@ class ScaleRefused(ValueError):
     pass
 
 
+class DestroyDeferred(RuntimeError):
+    pass
+
+
 @runtime_checkable
 class Provider(Protocol):
     type: ClassVar[ProviderType]
@@ -215,6 +222,22 @@ def store_name(service: str, provider: str, secret: str) -> str:
     readable = UNSAFE_NAME_CHARS.sub("_", f"multihull-{service}-{provider}_{secret}")
     digest = hashlib.sha256(json.dumps([service, provider, secret]).encode()).hexdigest()
     return f"{readable[:STORE_NAME_READABLE_LENGTH]}_{digest[:STORE_NAME_DIGEST_LENGTH]}"
+
+
+def api_path(*segments: object) -> str:
+    parts = [str(segment) for segment in segments]
+    if any(part in DOT_SEGMENTS for part in parts):
+        raise ValueError("refusing an API path with an empty or dot segment")
+    return "/" + "/".join(quote(part, safe="") for part in parts)
+
+
+def mirrored_names(joined: str) -> list[str]:
+    names = [name for name in joined.split(",") if name]
+    if not all(MIRRORED_NAME.fullmatch(name) for name in names):
+        raise ValueError(
+            "state names a mirrored secret outside [A-Za-z0-9_]; refusing to delete anything"
+        )
+    return names
 
 
 def resolve_secret_values(names: list[str]) -> dict[str, str]:

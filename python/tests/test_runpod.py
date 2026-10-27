@@ -404,3 +404,16 @@ def test_rediscover_leaves_a_reference_that_only_shares_the_endpoint_prefix(
     assert found is not None
     provider.destroy(found)
     assert [stored["name"] for stored in fake.secrets.values()] == [lookalike]
+
+
+def test_destroy_refuses_a_state_name_outside_the_store_charset(
+    provider: RunpodProvider, fake: FakeRunpod, target: Target, llama_raw: dict[str, Any]
+) -> None:
+    llama_raw["name"] = "other"
+    victim = provider.apply(variant(llama_raw), None).ids["endpoint"]
+    ours = provider.apply(target, None)
+    tampered_ids = {**ours.ids, "secrets": f"../serverless/{victim}"}
+    tampered = Ref(ours.provider, ours.type, ours.service, tampered_ids)
+    with pytest.raises(ValueError, match="refusing"):
+        provider.destroy(tampered)
+    assert {victim, ours.ids["endpoint"]} <= set(fake.endpoints)

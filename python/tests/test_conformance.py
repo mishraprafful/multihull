@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from multihull import discovery, engine
-from multihull.providers import baseten, create
+from multihull.providers import baseten, replicate
 from multihull.providers import modal as modal_provider
 from multihull.providers.base import Ref
 from multihull.providers.docker import DockerProvider
@@ -23,7 +24,6 @@ from multihull.providers.modal import (
     ModalProvider,
 )
 from multihull.providers.registry import PROVIDERS
-from multihull.providers.replicate import API_TOKEN_ENV as REPLICATE_API_TOKEN_ENV
 from multihull.providers.runpod import API_KEY_ENV, ENDPOINT_API_KEY_ENV, RunpodProvider
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState
@@ -42,8 +42,8 @@ from tests.fake_baseten import FakeBaseten, with_baseten
 from tests.fake_docker import FakeDockerClient
 from tests.fake_kubernetes import FakeKubeClient
 from tests.fake_modal import FakeModal
+from tests.fake_replicate import EXAMPLE, FakeCog, FakeReplicate, echo_raw
 from tests.fake_runpod import FakeRunpod
-from tests.test_render_only_providers import cog_spec
 
 
 def live_kwargs(spec: ServiceSpec, target: str) -> dict[str, Any]:
@@ -159,23 +159,30 @@ def runpod_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
     )
 
 
-def render_only(provider_type: str, credential_env: str, issue: int) -> CaseBuilder:
-    def build(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
-        spec = cog_spec(spec, provider_type)
-        credential = sentinel(f"{provider_type}-key")
-        monkeypatch.setenv(credential_env, credential)
-        return Case(
-            spec=spec,
-            target=f"{provider_type}-x",
-            golden=f"llama-8b.{provider_type}.json",
-            provider=create(provider_type),
-            resources=lambda: 0,
-            set_serving=lambda ref, serving: None,
-            secret_values=(credential, mirror_secrets(monkeypatch, spec)),
-            render_only=f"render-only until issue {issue} implements apply",
-        )
+def replicate_case(monkeypatch: pytest.MonkeyPatch, _: ServiceSpec) -> Case:
+    caller, login = sentinel("replicate-caller"), sentinel("cog-login")
+    monkeypatch.setenv(replicate.API_TOKEN_ENV, caller)
+    monkeypatch.setenv(replicate.CLI_AUTH_TOKEN_ENV, login)
+    monkeypatch.chdir(EXAMPLE)
+    fake = FakeReplicate(caller, grace=timedelta(0))
+    spec = ServiceSpec.model_validate(echo_raw())
 
-    return build
+    def set_serving(ref: Ref, serving: bool) -> None:
+        deployment = fake.deployments[f"{ref.ids['owner']}/{ref.ids['deployment']}"]
+        deployment.releases[-1]["configuration"]["min_instances"] = 1 if serving else 0
+
+    return Case(
+        spec=spec,
+        target="replicate",
+        golden="replicate-echo.replicate.json",
+        provider=replicate.ReplicateProvider(
+            http_client=fake.client(), cog=FakeCog(fake), **live_kwargs(spec, "replicate")
+        ),
+        resources=lambda: len(fake.deployments),
+        set_serving=set_serving,
+        secret_values=(login,),
+        traffic_values=(caller,),
+    )
 
 
 CASES: dict[str, CaseBuilder] = {
@@ -183,7 +190,7 @@ CASES: dict[str, CaseBuilder] = {
     "docker": docker_case,
     "kubernetes": kubernetes_case,
     "modal": modal_case,
-    "replicate": render_only("replicate", REPLICATE_API_TOKEN_ENV, issue=65),
+    "replicate": replicate_case,
     "runpod": runpod_case,
 }
 LIVE = live_types()
@@ -201,21 +208,11 @@ def case(
 
 
 @pytest.fixture
-def lifecycle(case: Case, request: pytest.FixtureRequest) -> Case:
-    if case.render_only:
-        xfail = pytest.mark.xfail(raises=NotImplementedError, reason=case.render_only, strict=True)
-        request.applymarker(xfail)
-    return case
-
-
-@pytest.fixture
 def state(tmp_path: Path) -> LocalState:
     return LocalState(tmp_path / "state" / "state.db")
 
 
 def deploy(case: Case, state: LocalState) -> Ref:
-    if case.render_only:
-        case.provider.apply(case.desired, None)
     [result] = [
         r
         for r in engine.apply(
@@ -264,15 +261,6 @@ def test_every_registry_provider_has_a_case() -> None:
     assert sorted(CASES) == sorted(PROVIDERS)
 
 
-def test_render_only_cases_still_raise_not_implemented(
-    monkeypatch: pytest.MonkeyPatch, llama_spec: ServiceSpec
-) -> None:
-    built = [build(monkeypatch, llama_spec) for build in CASES.values()]
-    for render_only_case in (case for case in built if case.render_only):
-        with pytest.raises(NotImplementedError):
-            render_only_case.provider.apply(render_only_case.desired, None)
-
-
 def test_case_repr_hides_credential_values(case: Case) -> None:
     shown = repr(case)
     hidden = not any(value in shown for value in (*case.secret_values, *case.traffic_values))
@@ -294,40 +282,38 @@ def test_plan_output_never_holds_credential_values(
     assert found == []
 
 
-def test_apply_twice_creates_nothing_new_and_plans_unchanged(
-    lifecycle: Case, state: LocalState
-) -> None:
-    first = deploy(lifecycle, state)
-    created = lifecycle.resources()
-    second = deploy(lifecycle, state)
+def test_apply_twice_creates_nothing_new_and_plans_unchanged(case: Case, state: LocalState) -> None:
+    first = deploy(case, state)
+    created = case.resources()
+    second = deploy(case, state)
     assert created > 0
     assert second.ids == first.ids
-    assert lifecycle.resources() == created
-    assert change_of(lifecycle, state) == "unchanged"
+    assert case.resources() == created
+    assert change_of(case, state) == "unchanged"
 
 
-def test_destroy_twice_leaves_nothing(lifecycle: Case, state: LocalState) -> None:
-    ref = deploy(lifecycle, state)
-    assert lifecycle.resources() > 0
-    lifecycle.provider.destroy(ref)
-    lifecycle.provider.destroy(ref)
-    assert lifecycle.eventually(lambda: lifecycle.resources() == 0)
+def test_destroy_twice_leaves_nothing(case: Case, state: LocalState) -> None:
+    ref = deploy(case, state)
+    assert case.resources() > 0
+    case.provider.destroy(ref)
+    case.provider.destroy(ref)
+    assert case.eventually(lambda: case.resources() == 0)
 
 
-def test_status_is_ready_only_while_serving(lifecycle: Case, state: LocalState) -> None:
-    ref = deploy(lifecycle, state)
-    serve(lifecycle, ref)
-    lifecycle.set_serving(ref, False)
-    assert reaches(lifecycle, ref, NOT_SERVING), lifecycle.provider.status(ref)
-    serve(lifecycle, ref)
+def test_status_is_ready_only_while_serving(case: Case, state: LocalState) -> None:
+    ref = deploy(case, state)
+    serve(case, ref)
+    case.set_serving(ref, False)
+    assert reaches(case, ref, NOT_SERVING), case.provider.status(ref)
+    serve(case, ref)
 
 
-def test_rediscover_rebuilds_lost_state(lifecycle: Case, state: LocalState) -> None:
-    applied = deploy(lifecycle, state)
-    serve(lifecycle, applied)
-    result = rediscover(lifecycle, state)
+def test_rediscover_rebuilds_lost_state(case: Case, state: LocalState) -> None:
+    applied = deploy(case, state)
+    serve(case, applied)
+    result = rediscover(case, state)
     assert result.message == "rediscovered"
-    record = state.get(lifecycle.spec.name, lifecycle.target)
+    record = state.get(case.spec.name, case.target)
     assert record is not None
     found = Ref.from_json(record.ref)
     assert (found.provider, found.type, found.service) == (
@@ -335,31 +321,31 @@ def test_rediscover_rebuilds_lost_state(lifecycle: Case, state: LocalState) -> N
         applied.type,
         applied.service,
     )
-    provider = lifecycle.provider
+    provider = case.provider
     found_url, applied_url = provider.endpoint(found).url, provider.endpoint(applied).url
     assert found_url == applied_url
     assert provider.status(found).phase == "Ready"
-    assert change_of(lifecycle, state) == "unchanged"
+    assert change_of(case, state) == "unchanged"
 
 
-def test_destroying_a_rediscovered_ref_leaves_nothing(lifecycle: Case, state: LocalState) -> None:
-    deploy(lifecycle, state)
-    found = rediscover(lifecycle, state).ref
+def test_destroying_a_rediscovered_ref_leaves_nothing(case: Case, state: LocalState) -> None:
+    deploy(case, state)
+    found = rediscover(case, state).ref
     assert found is not None
-    lifecycle.provider.destroy(found)
-    assert lifecycle.eventually(lambda: lifecycle.resources() == 0)
-    result = rediscover(lifecycle, state)
+    case.provider.destroy(found)
+    assert case.eventually(lambda: case.resources() == 0)
+    result = rediscover(case, state)
     assert (result.ref, result.message) == (None, "nothing found")
 
 
 def test_secret_values_never_reach_plan_state_or_snapshot(
-    lifecycle: Case, state: LocalState, tmp_path: Path
+    case: Case, state: LocalState, tmp_path: Path
 ) -> None:
-    providers = {lifecycle.target: lifecycle.provider}
-    deploy(lifecycle, state)
-    plans = engine.plan(lifecycle.spec, state, providers)
+    providers = {case.target: case.provider}
+    deploy(case, state)
+    plans = engine.plan(case.spec, state, providers)
     snapshot_path = tmp_path / "snapshot.json"
-    snapshot = discovery.file_snapshot(lifecycle.spec, state, providers, snapshot_path)
+    snapshot = discovery.file_snapshot(case.spec, state, providers, snapshot_path)
     discovery.write_snapshot(snapshot, snapshot_path)
     outputs = {
         "plan": plan_output(plans, tmp_path / "plan"),
@@ -368,9 +354,9 @@ def test_secret_values_never_reach_plan_state_or_snapshot(
     }
     routes = json.loads(outputs["snapshot"])["routes"]
     published = [str(e["provider"]) for route in routes for e in route["endpoints"]]
-    assert published == [lifecycle.target]
-    secrets_found = leaks(outputs, lifecycle.secret_values)
+    assert published == [case.target]
+    secrets_found = leaks(outputs, case.secret_values)
     assert secrets_found == []
     del outputs["snapshot"]
-    traffic_found = leaks(outputs, lifecycle.traffic_values)
+    traffic_found = leaks(outputs, case.traffic_values)
     assert traffic_found == []

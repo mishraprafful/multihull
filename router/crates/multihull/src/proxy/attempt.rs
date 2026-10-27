@@ -1,5 +1,6 @@
 use crate::core::outcome::AttemptError;
-use crate::core::snapshot::Endpoint;
+use crate::core::snapshot::{Endpoint, EndpointType};
+use crate::core::target::sync_wait_preference;
 use crate::tls::TlsError;
 use bytes::Bytes;
 use http::{HeaderMap, Method, Request, Response, Uri};
@@ -135,6 +136,13 @@ pub async fn send(
                 map.insert(name, value);
             }
         }
+        if endpoint.kind == EndpointType::Replicate {
+            if let Ok(value) =
+                http::header::HeaderValue::from_str(&sync_wait_preference(first_byte_timeout))
+            {
+                map.insert(http::header::HeaderName::from_static("prefer"), value);
+            }
+        }
     }
     let request = match builder.body(Full::new(body)) {
         Ok(request) => request,
@@ -177,6 +185,26 @@ mod tests {
         };
         let uri = upstream_uri(&endpoint, "/v1/chat?x=1").unwrap();
         assert_eq!(uri.to_string(), "http://10.0.0.1:8000/v1/chat?x=1");
+    }
+
+    #[test]
+    fn a_replicate_probe_targets_the_deployment_and_traffic_its_predictions() {
+        let endpoint = Endpoint {
+            kind: EndpointType::Replicate,
+            url: "https://api.replicate.com/v1/deployments/acme/echo".into(),
+            health_path: "/health-check".into(),
+            ..Default::default()
+        };
+        let probe = upstream_uri(&endpoint, &endpoint.health_path()).unwrap();
+        assert_eq!(
+            probe.to_string(),
+            "https://api.replicate.com/v1/deployments/acme/echo"
+        );
+        let traffic = upstream_uri(&endpoint, "/predictions").unwrap();
+        assert_eq!(
+            traffic.to_string(),
+            "https://api.replicate.com/v1/deployments/acme/echo/predictions"
+        );
     }
 
     #[test]
