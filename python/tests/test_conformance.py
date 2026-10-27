@@ -52,11 +52,11 @@ def live_kwargs(spec: ServiceSpec, target: str) -> dict[str, Any]:
 
 def baseten_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
     spec = with_baseten(spec.model_dump(by_alias=True, exclude_none=True))
-    caller = sentinel("baseten-caller")
+    caller, traffic = sentinel("baseten-caller"), sentinel("baseten-traffic")
     monkeypatch.setenv(baseten.API_KEY_ENV, caller)
-    monkeypatch.delenv(baseten.INFERENCE_API_KEY_ENV, raising=False)
+    monkeypatch.setenv(baseten.INFERENCE_API_KEY_ENV, traffic)
     mirrored = mirror_secrets(monkeypatch, spec)
-    fake = FakeBaseten(caller)
+    fake = FakeBaseten(caller, traffic_caller=traffic)
 
     def set_serving(ref: Ref, serving: bool) -> None:
         fake.health[ref.ids["model"]] = 200 if serving else 503
@@ -70,8 +70,8 @@ def baseten_case(monkeypatch: pytest.MonkeyPatch, spec: ServiceSpec) -> Case:
         ),
         resources=lambda: len(fake.models) + len(fake.secrets),
         set_serving=set_serving,
-        secret_values=(mirrored,),
-        traffic_values=(caller,),
+        secret_values=(caller, fake.upload_key_id, fake.upload_session, mirrored),
+        traffic_values=(traffic,),
     )
 
 

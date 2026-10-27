@@ -74,8 +74,9 @@ def error(status: int, message: str) -> httpx.Response:
 
 
 class FakeBaseten:
-    def __init__(self, caller: str) -> None:
+    def __init__(self, caller: str, traffic_caller: str | None = None) -> None:
         self.caller = caller
+        self.traffic_caller = traffic_caller
         self.models: dict[str, dict[str, Any]] = {}
         self.deployments: dict[str, dict[str, Any]] = {}
         self.environments: dict[str, dict[str, Any]] = {}
@@ -100,11 +101,13 @@ class FakeBaseten:
         host = request.url.host
         if host == UPLOAD_HOST:
             return self.upload(request)
-        if request.headers.get("authorization") != f"Api-Key {self.caller}":
+        traffic = host.startswith(TRAFFIC_PREFIX) and host.endswith(TRAFFIC_SUFFIX)
+        expected = (self.traffic_caller or self.caller) if traffic else self.caller
+        if request.headers.get("authorization") != f"Api-Key {expected}":
             return error(401, "Unauthorized")
         if self.failure is not None:
             return self.failure
-        if host.startswith(TRAFFIC_PREFIX) and host.endswith(TRAFFIC_SUFFIX):
+        if traffic:
             return self.traffic(
                 request, host.removeprefix(TRAFFIC_PREFIX).removesuffix(TRAFFIC_SUFFIX)
             )
