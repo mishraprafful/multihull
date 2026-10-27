@@ -674,7 +674,12 @@ def test_a_removed_target_is_destroyed_and_refreshed_with_its_override(
     llama_raw["reliability"]["minWarmProviders"] = 1
     path = tmp_path / "multihull.yaml"
     path.write_text(yaml.safe_dump(llama_raw))
-    state = ["--state", str(tmp_path / "state.db")]
+    state = [
+        "--state",
+        str(tmp_path / "state.db"),
+        "--snapshot-out",
+        str(tmp_path / "snapshot.json"),
+    ]
     deployed = runner.invoke(app, ["deploy", str(path), "--apply", "--no-wait", *state])
     assert deployed.exit_code == 0, deployed.output
     stored = (tmp_path / "state.db").read_bytes()
