@@ -428,9 +428,8 @@ def test_replicate_override_stays_out_of_output_state_plan_and_logs(
     caplog: pytest.LogCaptureFixture,
     replicate_override: str,
 ) -> None:
-    monkeypatch.setitem(
-        PROVIDERS, "replicate", replicate_factory(FakeReplicate(replicate_override))
-    )
+    fake = FakeReplicate(replicate_override, grace=timedelta(0))
+    monkeypatch.setitem(PROVIDERS, "replicate", replicate_factory(fake))
     reference = f"env:{OVERRIDE_ENV}"
     raw = echo_raw()
     raw["container"]["build"]["context"] = str(EXAMPLE)
@@ -447,6 +446,7 @@ def test_replicate_override_stays_out_of_output_state_plan_and_logs(
     for endpoint in endpoints:
         endpoint.pop("inject_headers")
     assert replicate_override not in json.dumps(endpoints)
+    assert fake.deployments == {}
 
 
 @pytest.fixture
