@@ -45,7 +45,7 @@ const yaml = ['name: llama-8b', 'container:', `${indent}image: ghcr.io/acme/vllm
         <text class="t2 key" x="470" y={r.y + 0.5}>{r.key}</text>
         <line class="sp-fan" x1="540" y1={r.y} x2="602" y2={r.y} />
         <text class="t1 name" x="650" y={r.y - 7}>{r.name}</text>
-        <text class="t2 payload c-ok" x="650" y={r.y + 9}>{r.payload}</text>
+        <text class="t2 payload" x="650" y={r.y + 9}>{r.payload}</text>
       </>
     ))}
 
@@ -121,10 +121,7 @@ const yaml = ['name: llama-8b', 'container:', `${indent}image: ghcr.io/acme/vllm
 
   .payload {
     text-anchor: start;
-  }
-
-  .c-ok {
-    fill: var(--mh-ok);
+    fill: var(--sl-color-text-accent);
   }
 
   .sp-card,
@@ -135,7 +132,7 @@ const yaml = ['name: llama-8b', 'container:', `${indent}image: ghcr.io/acme/vllm
   }
 
   .sp-card {
-    stroke: var(--mh-ok);
+    stroke: var(--sl-color-accent);
   }
 
   .sp-card-rule {
@@ -156,13 +153,13 @@ const yaml = ['name: llama-8b', 'container:', `${indent}image: ghcr.io/acme/vllm
 
   .sp-glyph {
     fill: var(--mh-surface);
-    stroke: var(--mh-ok);
+    stroke: var(--sl-color-gray-2);
     stroke-width: 2;
     stroke-linejoin: round;
   }
 
   .sp-glyph .dot {
-    fill: var(--mh-ok);
+    fill: var(--sl-color-gray-2);
     stroke: none;
   }
 
