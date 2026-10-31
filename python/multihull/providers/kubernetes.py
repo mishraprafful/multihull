@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 from collections.abc import Callable, Iterator
 from datetime import timedelta
@@ -8,7 +9,7 @@ from typing import Any, ClassVar, Protocol
 
 import yaml
 
-from multihull.credentials import CredentialError, CredentialSource
+from multihull.credentials import CredentialError, CredentialSource, base64_text, read_small_text
 from multihull.providers.base import (
     GPU_CLASS_LABEL,
     SERVICE_LABEL,
@@ -33,6 +34,8 @@ SCALEDOWN_STABILIZATION_SECONDS = 300
 CPU_TARGET_UTILIZATION = 80
 IN_CLUSTER_HOST_ENV = "KUBERNETES_SERVICE_HOST"
 SERVICE_ACCOUNT_TOKEN = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+KUBECONFIG_INLINE_SECRETS = ("token", "password", "client-key-data")
+KUBECONFIG_SECRET_FILES = ("tokenFile", "client-key")
 
 
 def kubeconfig_paths() -> list[Path]:
@@ -40,6 +43,36 @@ def kubeconfig_paths() -> list[Path]:
     if configured:
         return [Path(entry) for entry in configured.split(os.pathsep) if entry]
     return [Path.home() / ".kube" / "config"]
+
+
+def kubeconfig_users(content: str) -> list[dict[str, Any]]:
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return []
+    entries = document.get("users") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [
+        entry["user"]
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("user"), dict)
+    ]
+
+
+def kubeconfig_parts(content: str, base: Path) -> list[str]:
+    parts: list[str] = []
+    for user in kubeconfig_users(content):
+        parts.extend(str(user[field]) for field in KUBECONFIG_INLINE_SECRETS if user.get(field))
+        key = base64_text(user["client-key-data"]) if user.get("client-key-data") else None
+        if key:
+            parts.append(key)
+        for field in KUBECONFIG_SECRET_FILES:
+            named = user.get(field)
+            text = read_small_text(base / Path(str(named)).expanduser()) if named else None
+            if text:
+                parts.extend([text, base64.b64encode(text.encode()).decode()])
+    return parts
 
 
 def uses_in_cluster_config(context: str | None) -> bool:
@@ -457,6 +490,10 @@ class KubernetesProvider:
     @staticmethod
     def native_credential_files() -> list[Path]:
         return [*kubeconfig_paths(), Path.home() / ".kube" / "config", SERVICE_ACCOUNT_TOKEN]
+
+    @staticmethod
+    def credential_parts(content: str, base: Path) -> list[str]:
+        return kubeconfig_parts(content, base)
 
     def __init__(
         self,

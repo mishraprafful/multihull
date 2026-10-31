@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import re
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from typing import Literal
 
 CREDENTIALS_PATTERN = r"^(env:[A-Za-z_][A-Za-z0-9_]*|file:\S.*)$"
 CREDENTIALS_FORMAT = "env:NAME (an environment variable name) or file:PATH"
+SMALL_FILE_BYTES = 1 << 20
 
 
 class CredentialError(RuntimeError):
@@ -77,3 +79,19 @@ def credential_problem(reference: str) -> str | None:
     except CredentialError as exc:
         return str(exc)
     return None
+
+
+def read_small_text(path: Path) -> str | None:
+    try:
+        if not path.is_file() or path.stat().st_size > SMALL_FILE_BYTES:
+            return None
+        return path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def base64_text(value: object) -> str | None:
+    try:
+        return base64.b64decode(str(value), validate=True).decode()
+    except ValueError:
+        return None

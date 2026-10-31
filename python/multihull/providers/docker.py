@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 import httpx
 from docker.errors import ImageNotFound, NotFound
 
-from multihull.credentials import CredentialError, CredentialSource
+from multihull.credentials import CredentialError, CredentialSource, base64_text
 from multihull.providers.base import (
     PROVIDER_LABEL,
     SERVICE_LABEL,
@@ -42,6 +42,7 @@ RUNNING_STATES = frozenset({"running"})
 STARTING_STATES = frozenset({"created", "restarting", "paused"})
 DOCKER_HEALTH_STARTING = "starting"
 CONFIG_DIR_ENV = "DOCKER_CONFIG"
+AUTH_SECRET_FIELDS = ("auth", "identitytoken", "registrytoken", "password")
 
 
 def docker_block(desired: Target) -> DockerBlock:
@@ -190,6 +191,22 @@ def registry_config(credentials: str) -> Any:
         ) from None
 
 
+def docker_config_parts(content: str) -> list[str]:
+    try:
+        document = json.loads(content)
+    except ValueError:
+        return []
+    auths = document.get("auths", document) if isinstance(document, dict) else None
+    entries = [e for e in auths.values() if isinstance(e, dict)] if isinstance(auths, dict) else []
+    parts: list[str] = []
+    for entry in entries:
+        parts.extend(str(entry[field]) for field in AUTH_SECRET_FIELDS if entry.get(field))
+        decoded = base64_text(entry["auth"]) if entry.get("auth") else None
+        if decoded:
+            parts.append(decoded.partition(":")[2])
+    return parts
+
+
 def registry_auth(credentials: str, image: str) -> dict[str, Any]:
     from docker import auth
 
@@ -227,6 +244,10 @@ class DockerProvider:
             home / ".docker" / "config.json",
             home / ".dockercfg",
         ]
+
+    @staticmethod
+    def credential_parts(content: str, base: Path) -> list[str]:
+        return docker_config_parts(content)
 
     def __init__(
         self,
