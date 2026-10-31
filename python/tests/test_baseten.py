@@ -16,6 +16,7 @@ from multihull.providers.baseten import (
     SECRETS_LABEL,
     BasetenApiError,
     BasetenProvider,
+    command_problems,
     render_payload,
     render_truss_config,
     secret_store_name,
@@ -146,6 +147,33 @@ def test_a_percent_in_the_command_is_noted_and_refused(llama_raw: dict[str, Any]
     assert note.startswith("Baseten writes docker_server.start_command into supervisord.conf")
     with pytest.raises(ValueError, match="remove % from container.command"):
         BasetenProvider().apply(percent, None)
+
+
+def test_a_percent_in_a_secret_name_is_noted_and_refused(llama_raw: dict[str, Any]) -> None:
+    percent = variant(llama_raw, container={"secrets": ["HF_TOKEN", "hf%token", "a%b"]})
+    [note] = BasetenProvider().plan(percent, None).notes
+    assert note.startswith("Baseten passes secret names that are not shell identifiers")
+    assert note.endswith("remove % from container.secrets: hf%token, a%b")
+    with pytest.raises(ValueError, match="remove % from container.secrets: hf%token, a%b"):
+        BasetenProvider().apply(percent, None)
+
+
+@pytest.mark.parametrize(
+    ("command", "names"),
+    [
+        (["serve", "--name", "a b"], []),
+        (["serve"], ["HF_TOKEN", "hf-token", "x.y/z"]),
+        (["serve", "--fraction", "90%"], []),
+        (["serve"], ["hf%token"]),
+        (["serve"], ["HF_TOKEN", "a%b"]),
+    ],
+)
+def test_start_command_is_refused_exactly_when_it_carries_a_percent(
+    llama_raw: dict[str, Any], command: list[str], names: list[str]
+) -> None:
+    candidate = variant(llama_raw, container={"command": command, "secrets": names})
+    rendered = render_truss_config(candidate)["docker_server"]["start_command"]
+    assert bool(command_problems(candidate)) == ("%" in rendered)
 
 
 def test_reserved_environment_variables_are_noted(llama_raw: dict[str, Any]) -> None:
