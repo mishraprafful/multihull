@@ -78,7 +78,7 @@ def wait_ready(
             observed = provider.status(ref)
         except Exception as exc:
             observed = Observed(phase="Unknown", message=error_reason(exc))
-        if observed.phase in TERMINAL_PHASES:
+        if observed.phase in TERMINAL_PHASES or observed.rollout_failed:
             return observed
         if clock() >= deadline:
             return Observed(

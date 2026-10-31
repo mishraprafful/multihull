@@ -97,6 +97,7 @@ class Observed:
     ready_replicas: int = 0
     desired_replicas: int = 0
     message: str = ""
+    rollout_failed: bool = False
 
 
 @dataclass(frozen=True)
