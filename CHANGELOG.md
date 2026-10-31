@@ -15,6 +15,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Replicate in the translator conformance suite, and `examples/replicate-echo`, a Cog echo model on Docker and Replicate (#65).
 - `live-smoke.yml` job `replicate-smoke` (suite `testing/live/replicate`) and a daily Replicate deployment sweep, both skipped without the `REPLICATE_API_TOKEN` and `REPLICATE_CLI_AUTH_TOKEN` secrets (#65).
 - `live-k8s-gpu.yml`: a manual run of Llama 3.1 8B on a real GPU Kubernetes cluster (priority 1) with Modal (priority 2): cluster preflight, failover to Modal and back with zero client errors, forced cleanup of both providers and a final check that nothing is left. A least-privilege `rbac.yaml`, a kubeconfig script and the runbook at `docs/testing/kubernetes-gpu`. Skipped without `GPU_KUBECONFIG`; not yet run (#68).
+- `hull validate`, `plan` and `deploy` warn when a `container.secrets` name is not a valid environment variable name and a Kubernetes, Modal, RunPod or Baseten target passes it to the container under exactly that name (#190).
 
 ### Changed
 
@@ -32,6 +33,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Baseten `hull plan` notes and `apply` refuses a `container.secrets` name containing `%`: a name that is not a shell identifier reaches `docker_server.start_command` through `exec env`, where `%` fails the `supervisord.conf` build as it does in `container.command` (#185).
 - `hull deploy --wait` returns as soon as a Baseten rollout has failed (new deployment `BUILD_FAILED`, `DEPLOY_FAILED` or `INACTIVE`) instead of waiting out the 20 minute timeout; the target stays Degraded and not ok while the router keeps routing to the previous deployment. Kubernetes Degraded still waits for Ready (#184).
 - Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile, as Modal does (#67).
+- The `llama-8b` example names its Hugging Face secret `HF_TOKEN`; `hf-token` reached containers as env `hf-token`, which Hugging Face ignores, so the gated model failed to download (#190).
 
 ## [0.2.0] - 2026-10-12
 
