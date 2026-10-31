@@ -6,6 +6,7 @@ import os
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, ClassVar
 
 import httpx
@@ -404,6 +405,11 @@ class RunpodApi:
 
 class RunpodProvider:
     type: ClassVar = "runpod"
+    native_credential_env: ClassVar[tuple[str, ...]] = (API_KEY_ENV, ENDPOINT_API_KEY_ENV)
+
+    @staticmethod
+    def native_credential_files() -> list[Path]:
+        return []
 
     def __init__(
         self,

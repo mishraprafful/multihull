@@ -410,6 +410,17 @@ def stop_app(app_name: str, environment: str, credentials: str | None = None) ->
 
 class ModalProvider:
     type: ClassVar = "modal"
+    native_credential_env: ClassVar[tuple[str, ...]] = (
+        TOKEN_ID_ENV,
+        TOKEN_SECRET_ENV,
+        PROXY_TOKEN_ID_ENV,
+        PROXY_TOKEN_SECRET_ENV,
+    )
+
+    @staticmethod
+    def native_credential_files() -> list[Path]:
+        configured = os.environ.get(CONFIG_PATH_ENV)
+        return [*([Path(configured)] if configured else []), Path.home() / ".modal.toml"]
 
     def __init__(
         self,
