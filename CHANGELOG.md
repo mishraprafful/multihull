@@ -21,6 +21,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - The router answers `400` `bad_request_target` to a request target without a leading `/` or with a `.` or `..` segment (also `..;`), raw or percent-encoded, instead of appending it to the endpoint URL (#65).
 - Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
 - A provider key or token that is only whitespace (`RUNPOD_API_KEY`, `BASETEN_API_KEY`, `REPLICATE_API_TOKEN`) now counts as missing, so `hull doctor` fails on it (#67).
+- `hull destroy` uses a stored `credentials` reference only for a target named with `--target`, and its confirmation shows the reference. A plain `hull destroy` (and SDK `Service.destroy()` without `target`) that covers a target outside the spec with a stored reference stops before destroying anything, names it and prints the `--target` command, so a crafted state record cannot make a routine teardown load a planted kubeconfig (#187).
 
 ### Fixed
 
