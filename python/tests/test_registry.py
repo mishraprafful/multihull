@@ -17,8 +17,9 @@ from multihull.providers.kubernetes import (
     KUBECONFIG_INLINE_SECRETS,
     KUBECONFIG_SECRET_FILES,
     SERVICE_ACCOUNT_TOKEN,
+    KubernetesProvider,
 )
-from multihull.providers.modal import PROFILE_TOKEN_FIELDS
+from multihull.providers.modal import PROFILE_TOKEN_FIELDS, ModalProvider
 from multihull.providers.registry import (
     credential_parts,
     native_credential_env,
@@ -140,6 +141,29 @@ def test_native_credential_values_hold_each_file_and_its_secret_parts(
         home / ".modal.toml": {(home / ".modal.toml").read_text(), *profile.values()},
         docker_config: {docker_config.read_text(), encoded(f"robot:{password}"), password},
     }
+
+
+def test_unresolvable_or_failing_sources_are_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bearer = sentinel()
+    user = {KUBECONFIG_INLINE_SECRETS[0]: bearer, KUBECONFIG_SECRET_FILES[0]: "~nosuchuser-xyz/t"}
+    kubeconfig = yaml.safe_dump({"users": [{"name": "u", "user": user}]})
+    assert credential_parts("kubernetes", kubeconfig, tmp_path) == [bearer]
+
+    def broken(*_: object) -> list[Path]:
+        raise RuntimeError("Could not determine home directory.")
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".modal.toml").write_text("[default]\n")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("MODAL_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(KubernetesProvider, "native_credential_files", staticmethod(broken))
+    monkeypatch.setattr(ModalProvider, "credential_parts", staticmethod(broken))
+    assert home / ".modal.toml" in native_credential_files()
+    assert native_credential_values() == [(home / ".modal.toml", "[default]\n")]
+    assert credential_parts("modal", "[default]\n", tmp_path) == []
 
 
 def test_credential_parts_skip_unparsable_or_foreign_content(tmp_path: Path) -> None:

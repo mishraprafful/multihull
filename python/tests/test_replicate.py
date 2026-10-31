@@ -991,3 +991,38 @@ def test_apply_refuses_a_secret_part_of_a_kubeconfig_override(
         f"build.context {context} ships notes.txt, which holds the value of file:{override}; "
         "exclude it in .dockerignore"
     ]
+
+
+def native_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(kubernetes_provider, "SERVICE_ACCOUNT_TOKEN", tmp_path / "absent")
+    for name in ("KUBECONFIG", "DOCKER_CONFIG", "MODAL_CONFIG_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    return home
+
+
+def test_an_unresolvable_kubeconfig_path_never_breaks_plan_or_apply(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = native_home(tmp_path, monkeypatch)
+    bearer_value = uuid.uuid4().hex
+    user = {
+        KUBECONFIG_INLINE_SECRETS[0]: bearer_value,
+        KUBECONFIG_SECRET_FILES[0]: "~nosuchuser-xyz/t",
+    }
+    (home / ".kube").mkdir()
+    (home / ".kube" / "config").write_text(yaml.safe_dump({"users": [{"name": "u", "user": user}]}))
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    monkeypatch.chdir(context)
+    target = echo_target()
+    provider = ReplicateProvider(dry_run=False, http_client=fake.client(), cog=cog)
+    assert provider.plan(target, None).notes == []
+    assert provider.apply(target, None).ids["deployment"] == DEPLOYMENT
+    (context / "pasted.txt").write_text(f"{bearer_value}\n")
+    assert provider.plan(target, None).notes == [
+        f"build.context {context} ships pasted.txt, which holds the value of a credential in "
+        f"{home / '.kube' / 'config'}; exclude it in .dockerignore"
+    ]

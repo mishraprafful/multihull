@@ -60,6 +60,16 @@ def kubeconfig_users(content: str) -> list[dict[str, Any]]:
     ]
 
 
+def referenced_text(base: Path, named: object) -> str | None:
+    if not named:
+        return None
+    try:
+        path = base / Path(str(named)).expanduser()
+    except (RuntimeError, ValueError):
+        return None
+    return read_small_text(path)
+
+
 def kubeconfig_parts(content: str, base: Path) -> list[str]:
     parts: list[str] = []
     for user in kubeconfig_users(content):
@@ -68,8 +78,7 @@ def kubeconfig_parts(content: str, base: Path) -> list[str]:
         if key:
             parts.append(key)
         for field in KUBECONFIG_SECRET_FILES:
-            named = user.get(field)
-            text = read_small_text(base / Path(str(named)).expanduser()) if named else None
+            text = referenced_text(base, user.get(field))
             if text:
                 parts.extend([text, base64.b64encode(text.encode()).decode()])
     return parts
