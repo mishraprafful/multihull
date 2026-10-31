@@ -42,3 +42,36 @@ def test_sweeper_reports_a_failed_listing_without_a_traceback(
     monkeypatch.setattr(sweep, "list_apps", rejected)
     assert main(["--prefix", "multihull-live-1"]) == 1
     assert capsys.readouterr().out == "skipped, modal app list failed: Token validation failed\n"
+
+
+def test_check_fails_while_an_app_of_the_run_still_runs_and_stops_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    listed = [
+        app("multihull-live-7-modal-a", "deployed", "2026-10-07 09:00:00+00:00"),
+        app("multihull-live-7-modal-b", "stopped", "2026-10-07 09:00:00+00:00"),
+        app("multihull-live-8-modal-a", "deployed", "2026-10-07 09:00:00+00:00"),
+    ]
+    monkeypatch.setattr(sweep, "list_apps", lambda environment: listed)
+
+    def refuse(*args: str) -> None:
+        raise AssertionError(f"check must not run modal {args}")
+
+    monkeypatch.setattr(sweep, "modal", refuse)
+    assert main(["--prefix", "multihull-live-7", "--check"]) == 1
+    assert capsys.readouterr().out == (
+        "::error title=Left after the run::Modal main: multihull-live-7-modal-a still running\n"
+    )
+    assert main(["--prefix", "multihull-live-9", "--check"]) == 0
+    assert capsys.readouterr().out == "no running Modal app named multihull-live-9*\n"
+
+
+def test_check_fails_when_it_cannot_list_the_apps(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def rejected(environment: str) -> list[dict[str, str]]:
+        raise RuntimeError("modal app list failed: Token validation failed")
+
+    monkeypatch.setattr(sweep, "list_apps", rejected)
+    assert main(["--prefix", "multihull-live-1", "--check"]) == 1
+    assert "Modal not checked: modal app list failed" in capsys.readouterr().out

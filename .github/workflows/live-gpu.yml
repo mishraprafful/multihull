@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   MODAL_ENVIRONMENT: main
   APP_PREFIX: multihull-live-
@@ -46,7 +50,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Modal credential preflight
         id: preflight
         working-directory: testing/live
@@ -67,12 +72,12 @@ jobs:
           LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
           LIVE_WORKDIR: ${{ runner.temp }}/live
       - name: Destroy
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         timeout-minutes: 10
         working-directory: testing/live
         run: uv run python -m live.kubernetes_gpu destroy --workdir "$RUNNER_TEMP/live"
       - name: Stop Modal apps left by this run
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         env:
           CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
@@ -85,8 +90,15 @@ jobs:
           fi
           uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" \
             --env "$MODAL_ENVIRONMENT" | tee "$log"
+      - name: Assert nothing is left on Modal
+        if: always() && steps.sync.outcome == 'success' && steps.preflight.outputs.credentials == 'accepted'
+        timeout-minutes: 5
+        working-directory: testing/live
+        run: >
+          uv run python -m live.sweep --check --prefix "${APP_PREFIX}${GITHUB_RUN_ID}"
+          --env "$MODAL_ENVIRONMENT"
       - name: Job summary
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: >
           uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"

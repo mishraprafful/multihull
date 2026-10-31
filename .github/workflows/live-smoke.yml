@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   KIND_CLUSTER: multihull-live
   MODAL_ENVIRONMENT: main
@@ -102,7 +106,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Modal credential preflight
         id: preflight
         working-directory: testing/live
@@ -132,7 +137,7 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Destroy
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         run: |
           workdir="$RUNNER_TEMP/live"
           mkdir -p "$workdir/logs"
@@ -145,7 +150,7 @@ jobs:
             echo "no rendered spec; nothing to destroy" | tee "$workdir/logs/workflow-destroy.log"
           fi
       - name: Stop Modal apps left by this run
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         env:
           CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
@@ -159,7 +164,7 @@ jobs:
           uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" \
             --env "$MODAL_ENVIRONMENT" | tee "$log"
       - name: Job summary
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: >
           uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
@@ -202,7 +207,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - uses: helm/kind-action@v1.15.1
         with:
           cluster_name: ${{ env.KIND_CLUSTER }}
@@ -226,7 +232,7 @@ jobs:
           LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
           LIVE_WORKDIR: ${{ runner.temp }}/live
       - name: Destroy
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         run: |
           workdir="$RUNNER_TEMP/live"
           mkdir -p "$workdir/logs"
@@ -239,14 +245,14 @@ jobs:
             echo "no rendered spec; nothing to destroy" | tee "$workdir/logs/workflow-destroy.log"
           fi
       - name: Delete RunPod endpoints left by this run
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: |
           log="$RUNNER_TEMP/live/logs/runpod-backstop.log"
           mkdir -p "$(dirname "$log")"
           uv run python -m live.runpod_sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" | tee "$log"
       - name: Job summary
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: >
           uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
@@ -289,7 +295,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - uses: helm/kind-action@v1.15.1
         with:
           cluster_name: ${{ env.KIND_CLUSTER }}
@@ -313,7 +320,7 @@ jobs:
           LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
           LIVE_WORKDIR: ${{ runner.temp }}/live
       - name: Destroy
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         run: |
           workdir="$RUNNER_TEMP/live"
           mkdir -p "$workdir/logs"
@@ -326,14 +333,14 @@ jobs:
             echo "no rendered spec; nothing to destroy" | tee "$workdir/logs/workflow-destroy.log"
           fi
       - name: Delete Baseten models left by this run
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: |
           log="$RUNNER_TEMP/live/logs/baseten-backstop.log"
           mkdir -p "$(dirname "$log")"
           uv run python -m live.baseten_sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" | tee "$log"
       - name: Job summary
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: >
           uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
@@ -374,7 +381,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - uses: replicate/setup-cog@v2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -392,7 +400,7 @@ jobs:
           LIVE_ROUTER_BIN: ${{ github.workspace }}/router/target/release/multihull
           LIVE_WORKDIR: ${{ runner.temp }}/live
       - name: Scale down and delete the live Replicate deployment
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: |
           log="$RUNNER_TEMP/live/logs/replicate-backstop.log"
@@ -432,7 +440,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Modal credential preflight
         id: preflight
         working-directory: testing/live
@@ -444,7 +453,7 @@ jobs:
         env:
           MULTIHULL_CONFORMANCE_LIVE: modal
       - name: Stop Modal apps left by this run
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         env:
           CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
@@ -478,7 +487,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Translator conformance against RunPod
         timeout-minutes: 50
         working-directory: python
@@ -486,7 +496,7 @@ jobs:
         env:
           MULTIHULL_CONFORMANCE_LIVE: runpod
       - name: Delete RunPod endpoints left by this run
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: uv run python -m live.runpod_sweep --prefix "multihull-${MULTIHULL_CONFORMANCE_PREFIX}"
 
@@ -506,13 +516,14 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Modal credential preflight
         id: preflight
         working-directory: testing/live
         run: uv run python -m live.preflight
       - name: Stop live apps older than two hours
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         working-directory: testing/live
         env:
           CREDENTIALS: ${{ steps.preflight.outputs.credentials }}
@@ -539,7 +550,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Delete live RunPod endpoints older than two hours
         working-directory: testing/live
         run: |
@@ -561,7 +573,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Delete live Baseten models older than two hours
         working-directory: testing/live
         run: |
@@ -583,7 +596,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Scale down, then delete, live Replicate deployments released two hours ago
         working-directory: testing/live
         run: |

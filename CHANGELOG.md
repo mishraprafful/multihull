@@ -25,6 +25,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - The Replicate client builds every API path and the deployment endpoint URL with `api_path`, as the Baseten and RunPod clients do: each owner, model and deployment name is one quoted segment, and an empty, `.` or `..` name is refused before any request (#189).
 - `hull destroy` uses a stored `credentials` reference only for a target named with `--target`, and its confirmation shows the reference. A plain `hull destroy` (and SDK `Service.destroy()` without `target`) that covers a target outside the spec with a stored reference stops before destroying anything, names it and prints the `--target` command (asking to repeat any `--state` or `--snapshot-out` instead of printing them), so a crafted state record cannot make a routine teardown load a planted kubeconfig (#187).
 - A Modal `credentials` override picks its profile from its own file only (`active = true`, else a lone `default`) and ignores `MODAL_PROFILE`, which is process-wide while overrides are per target; the docs no longer claim Modal's own order. `hull doctor` names the profile it checked, and the no-active-profile error says when `MODAL_PROFILE` was set but not used (#186).
+- The `llama-8b` example's secret is renamed from `hf-token` to `HF_TOKEN`. If you deployed the example, run `hull destroy` before redeploying it: `hull deploy` mirrors the new name only, so the RunPod secret mirrored under the old name would stay behind, and the Baseten one too if you added a Baseten target (#190).
 
 ### Fixed
 

@@ -52,14 +52,32 @@ def running_apps(
     )
 
 
+def check(prefix: str, environment: str) -> int:
+    try:
+        left = running_apps(prefix, environment, list_apps)
+    except RuntimeError as exc:
+        print(f"::error title=Left after the run::Modal not checked: {exc}")
+        return 1
+    for name in left:
+        print(f"::error title=Left after the run::Modal {environment}: {name} still running")
+    if not left:
+        print(f"no running Modal app named {prefix}*")
+    return 1 if left else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stop Modal apps left by live runs")
     parser.add_argument("--prefix", required=True)
     parser.add_argument("--older-than", type=int, default=0, help="seconds since creation")
     parser.add_argument("--env", default="main")
+    parser.add_argument(
+        "--check", action="store_true", help="stop nothing; fail while a matching app runs"
+    )
     args = parser.parse_args(argv)
     if not args.prefix.startswith("multihull-live-"):
         parser.error("--prefix must start with multihull-live-")
+    if args.check:
+        return check(args.prefix, args.env)
     try:
         apps = list_apps(args.env)
     except RuntimeError as exc:

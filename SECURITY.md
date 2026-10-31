@@ -52,7 +52,7 @@ Out of scope:
 ## Security notes for operators
 
 - Provider deploy credentials come from environment variables (`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, `RUNPOD_API_KEY`, `BASETEN_API_KEY`, `REPLICATE_API_TOKEN`) or native config files (kubeconfig, `~/.modal.toml`). They are never written to the spec, the state database or the snapshot.
-- Service secrets appear in the spec by name only. Values are read at apply time from environment variables named after them (`hf-token` from `HF_TOKEN`) and stored in the provider's own secret store. `hull plan` output carries no secret values.
+- Service secrets appear in the spec by name only. Values are read at apply time from environment variables named after them (`HF_TOKEN` from `HF_TOKEN`; other names in upper case with `-` and `.` as `_`) and stored in the provider's own secret store. `hull plan` output carries no secret values.
 - The snapshot does carry the headers the router injects upstream, such as Modal proxy auth tokens from `MODAL_PROXY_TOKEN_ID` and `MODAL_PROXY_TOKEN_SECRET`. Protect `snapshot.json`, any snapshot URL and the controller stream like a secret.
 - A snapshot file (`hull deploy`, `hull snapshot`, `hull controller --snapshot-out`) that carries credentials must be mode `0600` and owned by the router's user.
 - Route API keys never reach the snapshot in plain text, only their hashes. The router compares blake3 hashes in constant time. A route without `auth.apiKeys` accepts every request.
