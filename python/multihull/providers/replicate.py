@@ -29,6 +29,7 @@ from multihull.providers.base import (
     Ref,
     ScaleRefused,
     Target,
+    api_path,
     credential_health,
     redact_env,
     redact_token,
@@ -170,8 +171,12 @@ def image_name(owner: str, model: str) -> str:
     return f"{REGISTRY}/{owner}/{model}"
 
 
+def deployment_path(owner: str, deployment: str) -> str:
+    return api_path("deployments", owner, deployment)
+
+
 def deployment_url(owner: str, deployment: str) -> str:
-    return f"{API_URL}/deployments/{owner}/{deployment}"
+    return f"{API_URL}{deployment_path(owner, deployment)}"
 
 
 def hardware_choices(desired: Target) -> list[str]:
@@ -386,10 +391,10 @@ class ReplicateApi:
         return [str(item["sku"]) for item in self.call("GET", "/hardware") or []]
 
     def model(self, owner: str, name: str) -> dict[str, Any] | None:
-        return self.call("GET", f"/models/{owner}/{name}", missing_ok=True)
+        return self.call("GET", api_path("models", owner, name), missing_ok=True)
 
     def deployment(self, owner: str, name: str) -> dict[str, Any] | None:
-        return self.call("GET", f"/deployments/{owner}/{name}", missing_ok=True)
+        return self.call("GET", deployment_path(owner, name), missing_ok=True)
 
     def deployments(self) -> Iterator[dict[str, Any]]:
         page: str | None = "/deployments"
@@ -528,7 +533,7 @@ class ReplicateProvider:
             )
         drift = deployment_drift(current, body)
         if drift:
-            self.api.call("PATCH", f"/deployments/{owner}/{body['name']}", drift)
+            self.api.call("PATCH", deployment_path(owner, body["name"]), drift)
 
     def located(self, ref: Ref) -> tuple[str, str] | None:
         owner = ref.ids.get(OWNER_KEY)
@@ -550,9 +555,9 @@ class ReplicateProvider:
         offline = {"min_instances": 0, "max_instances": 0}
         settings = live_settings(current)
         if any(settings.get(field) != value for field, value in offline.items()):
-            self.api.call("PATCH", f"/deployments/{owner}/{name}", offline)
+            self.api.call("PATCH", deployment_path(owner, name), offline)
         try:
-            self.api.call("DELETE", f"/deployments/{owner}/{name}", missing_ok=True)
+            self.api.call("DELETE", deployment_path(owner, name), missing_ok=True)
         except ReplicateApiError as exc:
             if exc.status not in DEFERRED_DELETE_STATUSES:
                 raise
@@ -618,7 +623,7 @@ class ReplicateProvider:
         try:
             self.api.call(
                 "PATCH",
-                f"/deployments/{owner}/{name}",
+                deployment_path(owner, name),
                 {"min_instances": min, "max_instances": max},
             )
         except ReplicateApiError as exc:
