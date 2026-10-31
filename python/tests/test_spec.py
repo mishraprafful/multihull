@@ -258,3 +258,24 @@ def test_capacity_warning_rounds_the_overprovision_product_exactly(
     raw["scaling"]["replicas"] = {"min": 1, "max": 5}
     raw["targets"][1]["replicas"] = {"max": 7}
     assert ServiceSpec.model_validate(raw).capacity_warnings() == []
+
+
+def test_secret_names_that_are_not_env_names_warn_for_targets_that_pass_them_verbatim(
+    llama_raw: dict[str, Any],
+) -> None:
+    raw = copy.deepcopy(llama_raw)
+    raw["container"]["secrets"] = ["HF_TOKEN", "hf-token", "hf.home"]
+    warnings = ServiceSpec.model_validate(raw).secret_name_warnings()
+    assert len(warnings) == 2
+    assert "'hf-token' is not an environment variable name" in warnings[0]
+    assert "targets (gke-prod, modal-main, runpod-eu)" in warnings[0]
+    assert "'hf.home'" in warnings[1]
+
+
+def test_env_name_secrets_and_docker_only_specs_do_not_warn(
+    llama_spec: ServiceSpec, mock_docker_spec: ServiceSpec
+) -> None:
+    assert llama_spec.secret_name_warnings() == []
+    raw = mock_docker_spec.model_dump(mode="json", exclude_none=True)
+    raw["container"]["secrets"] = ["hf-token"]
+    assert ServiceSpec.model_validate(raw).secret_name_warnings() == []

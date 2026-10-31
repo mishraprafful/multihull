@@ -7,7 +7,7 @@ container:
   port: 8000
   health: {path: /health, initialDelaySeconds: 120}
   env: {VLLM_LOGGING_LEVEL: INFO}
-  secrets: [hf-token]                          # names only, resolved per provider
+  secrets: [HF_TOKEN]                          # names only, resolved per provider
 
 resources:
   gpu: [L4, A10G, A100-40]                     # any-of, in order of preference

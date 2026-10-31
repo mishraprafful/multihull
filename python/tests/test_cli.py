@@ -72,6 +72,14 @@ def test_validate_warns_when_fallbacks_cannot_absorb_the_primary(tmp_path: Path)
     assert "warning" not in clean.output
 
 
+def test_validate_warns_when_a_secret_name_is_not_an_env_name(tmp_path: Path) -> None:
+    path = copy_fixture(tmp_path)
+    path.write_text(path.read_text().replace("[HF_TOKEN]", "[hf-token]"))
+    result = runner.invoke(app, ["validate", str(path)], env={"COLUMNS": "200"})
+    assert result.exit_code == 0, result.output
+    assert "'hf-token' is not an environment variable name" in result.output
+
+
 def test_validate_rejects_bad_spec(tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text("apiVersion: multihull/v1\nname: x\n")

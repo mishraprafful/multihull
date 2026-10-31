@@ -54,7 +54,7 @@ targets:
 - Modal proxy auth tokens (`MODAL_PROXY_TOKEN_ID`, `MODAL_PROXY_TOKEN_SECRET`) are traffic credentials, not deploy credentials, and are not overridden.
 - With a Modal override, the `modal app stop` that `hull destroy` runs sees only the override: the native `~/.modal.toml`, `MODAL_PROFILE`, `MODAL_TOKEN_*` and `MODAL_OAUTH_*` are hidden from it. Deploy, status, scale, logs and `hull doctor` run the Modal SDK inside `hull`, and it still reads the native config (`MODAL_CONFIG_PATH`, default `~/.modal.toml`) even with an override: a malformed native file or one with several active profiles fails every Modal target, and a native `server_url` (or `MODAL_SERVER_URL`) also applies to override targets. Only the tokens come from the override.
 
-Service secrets are listed by name only and mirrored into each provider's native secret store.
+Service secrets are listed by name only and mirrored into each provider's native secret store. `hull deploy` reads each value from the environment variable named after the secret in upper case, with `-` and `.` as `_`. Kubernetes, Modal, RunPod and Baseten pass it to the container under exactly the listed name (Docker uses that upper-case form instead; Replicate refuses secrets), so list the variable the program reads, such as `HF_TOKEN`. `hull validate`, `plan` and `deploy` warn about a name that is not a valid environment variable name.
 
 ## Route API keys
 

@@ -738,15 +738,20 @@ class BasetenProvider:
         if deployment is not None and status not in UNUSABLE_STATUSES:
             return Observed("Pending", 0, desired, f"deployment {wanted} {status}; {serving}")
         if not current:
-            return Observed("Failed", 0, desired, f"deployment {wanted} {status}; {serving}")
+            failed = f"deployment {wanted} {status}; {serving}"
+            return Observed("Failed", 0, desired, failed, rollout_failed=True)
         previous = self.serving(ref, model_id, current, desired)
         message = (
             f"rollout failed: deployment {wanted} {status}; "
             f"serving the previous config from {current['id']}"
         )
         if previous.phase == "Ready":
-            return Observed("Degraded", previous.ready_replicas, desired, message)
-        return Observed(previous.phase, 0, desired, f"{message}, {previous.message}")
+            return Observed(
+                "Degraded", previous.ready_replicas, desired, message, rollout_failed=True
+            )
+        return Observed(
+            previous.phase, 0, desired, f"{message}, {previous.message}", rollout_failed=True
+        )
 
     def probe(self, url: str, ready: int, desired: int) -> Observed:
         try:

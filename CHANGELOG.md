@@ -15,12 +15,14 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Replicate in the translator conformance suite, and `examples/replicate-echo`, a Cog echo model on Docker and Replicate (#65).
 - `live-smoke.yml` job `replicate-smoke` (suite `testing/live/replicate`) and a daily Replicate deployment sweep, both skipped without the `REPLICATE_API_TOKEN` and `REPLICATE_CLI_AUTH_TOKEN` secrets (#65).
 - `live-k8s-gpu.yml`: a manual run of Llama 3.1 8B on a real GPU Kubernetes cluster (priority 1) with Modal (priority 2): cluster preflight, failover to Modal and back with zero client errors, forced cleanup of both providers and a final check that nothing is left. A least-privilege `rbac.yaml`, a kubeconfig script and the runbook at `docs/testing/kubernetes-gpu`. Skipped without `GPU_KUBECONFIG`; not yet run (#68).
+- `hull validate`, `plan` and `deploy` warn when a `container.secrets` name is not a valid environment variable name and a Kubernetes, Modal, RunPod or Baseten target passes it to the container under exactly that name (#190).
 
 ### Changed
 
 - The router answers `400` `bad_request_target` to a request target without a leading `/` or with a `.` or `..` segment (also `..;`), raw or percent-encoded, instead of appending it to the endpoint URL (#65).
 - Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
 - A provider key or token that is only whitespace (`RUNPOD_API_KEY`, `BASETEN_API_KEY`, `REPLICATE_API_TOKEN`) now counts as missing, so `hull doctor` fails on it (#67).
+- The Replicate client builds every API path and the deployment endpoint URL with `api_path`, as the Baseten and RunPod clients do: each owner, model and deployment name is one quoted segment, and an empty, `.` or `..` name is refused before any request (#189).
 - `hull destroy` uses a stored `credentials` reference only for a target named with `--target`, and its confirmation shows the reference. A plain `hull destroy` (and SDK `Service.destroy()` without `target`) that covers a target outside the spec with a stored reference stops before destroying anything, names it and prints the `--target` command, so a crafted state record cannot make a routine teardown load a planted kubeconfig (#187).
 
 ### Fixed
@@ -30,7 +32,9 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - The Replicate build-context scan matches a `credentials: file:` by file identity, so hard links and other spellings are caught, and refuses any shipped file holding a target's credential value or `REPLICATE_API_TOKEN` or `REPLICATE_CLI_AUTH_TOKEN`, naming the file, never the value. Refresh and `hull deploy --wait` no longer overwrite a record another apply or destroy changed meanwhile (#65).
 - The Baseten endpoint no longer ends in `/production/predict`, which sent probes and routed paths to the predict route; the Truss config no longer carries the unsupported `runtime.health_checks.initial_delay_seconds` (#64).
 - Baseten `hull plan` notes and `apply` refuses a `container.secrets` name containing `%`: a name that is not a shell identifier reaches `docker_server.start_command` through `exec env`, where `%` fails the `supervisord.conf` build as it does in `container.command` (#185).
+- `hull deploy --wait` returns as soon as a Baseten rollout has failed (new deployment `BUILD_FAILED`, `DEPLOY_FAILED` or `INACTIVE`) instead of waiting out the 20 minute timeout; the target stays Degraded and not ok while the router keeps routing to the previous deployment. Kubernetes Degraded still waits for Ready (#184).
 - Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile, as Modal does (#67).
+- The `llama-8b` example names its Hugging Face secret `HF_TOKEN`; `hf-token` reached containers as env `hf-token`, which Hugging Face ignores, so the gated model failed to download (#190).
 
 ## [0.2.0] - 2026-10-12
 
