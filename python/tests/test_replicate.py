@@ -111,7 +111,7 @@ def test_plan_notes_refusals_skipped_classes_and_the_ignored_command(
     notes = ReplicateProvider().plan(cog_llama(llama_raw), None).notes
     assert notes == [
         "Replicate deployments take no environment, so container env and secrets "
-        "(VLLM_LOGGING_LEVEL, hf-token) cannot reach the model; build them into the Cog image "
+        "(VLLM_LOGGING_LEVEL, HF_TOKEN) cannot reach the model; build them into the Cog image "
         "or drop the Replicate target",
         "Replicate has no hardware for H200; those classes are skipped",
         "container.command is ignored; the Cog image runs its predictor",

@@ -55,7 +55,7 @@ def test_app_spec_fields(target_for) -> None:
         "startup_timeout": 120,
         "label": "multihull-llama-8b-modal-main",
     }
-    assert spec["secret"] == {"name": "multihull-llama-8b-modal-main", "keys": ["hf-token"]}
+    assert spec["secret"] == {"name": "multihull-llama-8b-modal-main", "keys": ["HF_TOKEN"]}
     assert spec["environment"] == "main" and spec["region"] == "eu"
 
 

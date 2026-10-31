@@ -29,7 +29,7 @@ CALLER = "baseten-fixture-caller"
 TRAFFIC_CALLER = "baseten-fixture-traffic"
 MIRRORED = "mirrored-fixture-value"
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=UTC)
-STORE = store_name("llama-8b", "baseten-us", "hf-token")
+STORE = store_name("llama-8b", "baseten-us", "HF_TOKEN")
 
 
 @pytest.fixture
@@ -97,7 +97,7 @@ def test_secrets_reach_the_server_as_env_read_from_the_mounted_files(target: Tar
     argv = shlex.split(render_truss_config(target)["docker_server"]["start_command"])
     assert argv[:2] == ["sh", "-c"]
     assert argv[3:] == ["sh", "vllm", "serve", "meta-llama/Llama-3.1-8B-Instruct"]
-    assert argv[2] == f'exec env hf-token="$(cat /secrets/{STORE})" "$@"'
+    assert argv[2] == f'HF_TOKEN="$(cat /secrets/{STORE})"; export HF_TOKEN; exec "$@"'
 
 
 def test_identifier_secrets_are_exported_so_values_stay_out_of_argv(
