@@ -452,6 +452,11 @@ def gpu_offers_from_nodes(nodes: list[dict[str, Any]]) -> list[GPUOffer]:
 
 class KubernetesProvider:
     type: ClassVar = "kubernetes"
+    native_credential_env: ClassVar[tuple[str, ...]] = ()
+
+    @staticmethod
+    def native_credential_files() -> list[Path]:
+        return [*kubeconfig_paths(), Path.home() / ".kube" / "config", SERVICE_ACCOUNT_TOKEN]
 
     def __init__(
         self,

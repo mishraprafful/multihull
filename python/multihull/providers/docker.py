@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, ClassVar
 
 import httpx
@@ -39,6 +41,7 @@ NANOSECONDS = 1_000_000_000
 RUNNING_STATES = frozenset({"running"})
 STARTING_STATES = frozenset({"created", "restarting", "paused"})
 DOCKER_HEALTH_STARTING = "starting"
+CONFIG_DIR_ENV = "DOCKER_CONFIG"
 
 
 def docker_block(desired: Target) -> DockerBlock:
@@ -213,6 +216,17 @@ def default_http_client() -> httpx.Client:
 
 class DockerProvider:
     type: ClassVar = "docker"
+    native_credential_env: ClassVar[tuple[str, ...]] = ()
+
+    @staticmethod
+    def native_credential_files() -> list[Path]:
+        configured = os.environ.get(CONFIG_DIR_ENV)
+        home = Path.home()
+        return [
+            *([Path(configured) / "config.json"] if configured else []),
+            home / ".docker" / "config.json",
+            home / ".dockercfg",
+        ]
 
     def __init__(
         self,

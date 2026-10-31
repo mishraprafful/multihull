@@ -409,6 +409,11 @@ class ReplicateApi:
 
 class ReplicateProvider:
     type: ClassVar = "replicate"
+    native_credential_env: ClassVar[tuple[str, ...]] = (API_TOKEN_ENV, CLI_AUTH_TOKEN_ENV)
+
+    @staticmethod
+    def native_credential_files() -> list[Path]:
+        return []
 
     def __init__(
         self,
