@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import shutil
 import subprocess
@@ -18,7 +19,13 @@ from multihull import spec as specmod
 from multihull.build_context import scan_context
 from multihull.providers import kubernetes as kubernetes_provider
 from multihull.providers.base import Ref, ScaleRefused, Target
-from multihull.providers.kubernetes import KUBECONFIG_INLINE_SECRETS, KUBECONFIG_SECRET_FILES
+from multihull.providers.docker import AUTH_FIELD
+from multihull.providers.kubernetes import (
+    KUBECONFIG_KEY_DATA,
+    KUBECONFIG_KEY_FILE,
+    KUBECONFIG_TOKEN,
+    KUBECONFIG_TOKEN_FILE,
+)
 from multihull.providers.modal import PROFILE_TOKEN_FIELDS
 from multihull.providers.replicate import (
     API_TOKEN_ENV,
@@ -915,12 +922,10 @@ def test_apply_refuses_copies_of_native_credential_files_and_their_secret_parts(
     short = uuid.uuid4().hex[:7]
     key_pem = f"PEM {uuid.uuid4().hex}"
     users = [
-        {
-            "name": "inline",
-            "user": dict(zip(KUBECONFIG_INLINE_SECRETS[:2], [bearer_value, short], strict=True)),
-        },
-        {"name": "key-data", "user": {KUBECONFIG_INLINE_SECRETS[2]: encoded(key_pem)}},
-        {"name": "files", "user": {KUBECONFIG_SECRET_FILES[1]: "client.key"}},
+        {"name": "inline", "user": {KUBECONFIG_TOKEN: bearer_value}},
+        {"name": "short", "user": {KUBECONFIG_TOKEN: short}},
+        {"name": "key-data", "user": {KUBECONFIG_KEY_DATA: encoded(key_pem)}},
+        {"name": "files", "user": {KUBECONFIG_KEY_FILE: "client.key"}},
     ]
     kubeconfig.write_text(yaml.safe_dump({"users": users}))
     profile = {field: uuid.uuid4().hex for field in PROFILE_TOKEN_FIELDS}
@@ -970,7 +975,7 @@ def test_apply_refuses_a_secret_part_of_a_kubeconfig_override(
     bearer_value = uuid.uuid4().hex
     override = tmp_path / "keys" / "cluster.yaml"
     override.parent.mkdir()
-    user = {KUBECONFIG_INLINE_SECRETS[0]: bearer_value}
+    user = {KUBECONFIG_TOKEN: bearer_value}
     override.write_text(yaml.safe_dump({"users": [{"name": "ci", "user": user}]}))
     context = tmp_path / "echo"
     shutil.copytree(EXAMPLE, context)
@@ -1008,10 +1013,7 @@ def test_an_unresolvable_kubeconfig_path_never_breaks_plan_or_apply(
 ) -> None:
     home = native_home(tmp_path, monkeypatch)
     bearer_value = uuid.uuid4().hex
-    user = {
-        KUBECONFIG_INLINE_SECRETS[0]: bearer_value,
-        KUBECONFIG_SECRET_FILES[0]: "~nosuchuser-xyz/t",
-    }
+    user = {KUBECONFIG_TOKEN: bearer_value, KUBECONFIG_TOKEN_FILE: "~nosuchuser-xyz/t"}
     (home / ".kube").mkdir()
     (home / ".kube" / "config").write_text(yaml.safe_dump({"users": [{"name": "u", "user": user}]}))
     context = tmp_path / "echo"
@@ -1025,4 +1027,31 @@ def test_an_unresolvable_kubeconfig_path_never_breaks_plan_or_apply(
     assert provider.plan(target, None).notes == [
         f"build.context {context} ships pasted.txt, which holds the value of a credential in "
         f"{home / '.kube' / 'config'}; exclude it in .dockerignore"
+    ]
+
+
+def test_a_short_registry_password_does_not_block_ordinary_code(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = native_home(tmp_path, monkeypatch)
+    word = uuid.uuid4().hex[:15]
+    strong = uuid.uuid4().hex
+    auths = {
+        "weak.example": {AUTH_FIELD: encoded(f"robot:{word}")},
+        "strong.example": {AUTH_FIELD: encoded(f"robot:{strong}")},
+    }
+    (home / ".docker").mkdir()
+    (home / ".docker" / "config.json").write_text(json.dumps({"auths": auths}))
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    predict = context / "predict.py"
+    predict.write_text(predict.read_text() + f"\n# {word}\n")
+    monkeypatch.chdir(context)
+    target = echo_target()
+    provider = ReplicateProvider(dry_run=False, http_client=fake.client(), cog=cog)
+    assert provider.plan(target, None).notes == []
+    (context / "registry.txt").write_text(f"{strong}\n")
+    assert provider.plan(target, None).notes == [
+        f"build.context {context} ships registry.txt, which holds the value of a credential in "
+        f"{home / '.docker' / 'config.json'}; exclude it in .dockerignore"
     ]

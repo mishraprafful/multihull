@@ -13,9 +13,11 @@ from typer.testing import CliRunner
 from multihull import spec as specmod
 from multihull.cli import app
 from multihull.credentials import (
+    MIN_PASSWORD_LENGTH,
     SMALL_FILE_BYTES,
     CredentialError,
     CredentialSource,
+    password_parts,
     read_small_text,
     read_token,
 )
@@ -185,3 +187,10 @@ def test_read_small_text_reads_at_most_the_cap_from_regular_files(tmp_path: Path
     for unreadable in ("binary", "pipe", "missing", "."):
         assert read_small_text(tmp_path / unreadable) is None
     assert read_small_text(tmp_path / "nul\x00byte") is None
+
+
+def test_password_parts_keep_only_long_passwords() -> None:
+    long_enough = secrets.token_hex(MIN_PASSWORD_LENGTH // 2)
+    assert password_parts(long_enough) == [long_enough]
+    assert password_parts(long_enough[:-1]) == []
+    assert password_parts(None) == []

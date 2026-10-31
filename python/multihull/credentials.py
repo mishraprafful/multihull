@@ -11,6 +11,7 @@ from typing import Literal
 CREDENTIALS_PATTERN = r"^(env:[A-Za-z_][A-Za-z0-9_]*|file:\S.*)$"
 CREDENTIALS_FORMAT = "env:NAME (an environment variable name) or file:PATH"
 SMALL_FILE_BYTES = 1 << 20
+MIN_PASSWORD_LENGTH = 16
 
 
 class CredentialError(RuntimeError):
@@ -109,3 +110,8 @@ def base64_text(value: object) -> str | None:
         return base64.b64decode(str(value), validate=True).decode()
     except ValueError:
         return None
+
+
+def password_parts(value: object) -> list[str]:
+    text = str(value) if value else ""
+    return [text] if len(text.strip()) >= MIN_PASSWORD_LENGTH else []

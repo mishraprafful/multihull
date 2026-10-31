@@ -11,7 +11,12 @@ from typing import Any, ClassVar
 import httpx
 from docker.errors import ImageNotFound, NotFound
 
-from multihull.credentials import CredentialError, CredentialSource, base64_text
+from multihull.credentials import (
+    CredentialError,
+    CredentialSource,
+    base64_text,
+    password_parts,
+)
 from multihull.providers.base import (
     PROVIDER_LABEL,
     SERVICE_LABEL,
@@ -42,7 +47,9 @@ RUNNING_STATES = frozenset({"running"})
 STARTING_STATES = frozenset({"created", "restarting", "paused"})
 DOCKER_HEALTH_STARTING = "starting"
 CONFIG_DIR_ENV = "DOCKER_CONFIG"
-AUTH_SECRET_FIELDS = ("auth", "identitytoken", "registrytoken", "password")
+AUTH_FIELD = "auth"
+AUTH_TOKEN_FIELDS = (AUTH_FIELD, "identitytoken", "registrytoken")
+AUTH_PASSWORD_FIELD = "password"
 
 
 def docker_block(desired: Target) -> DockerBlock:
@@ -200,10 +207,11 @@ def docker_config_parts(content: str) -> list[str]:
     entries = [e for e in auths.values() if isinstance(e, dict)] if isinstance(auths, dict) else []
     parts: list[str] = []
     for entry in entries:
-        parts.extend(str(entry[field]) for field in AUTH_SECRET_FIELDS if entry.get(field))
-        decoded = base64_text(entry["auth"]) if entry.get("auth") else None
+        parts.extend(str(entry[field]) for field in AUTH_TOKEN_FIELDS if entry.get(field))
+        parts.extend(password_parts(entry.get(AUTH_PASSWORD_FIELD)))
+        decoded = base64_text(entry[AUTH_FIELD]) if entry.get(AUTH_FIELD) else None
         if decoded:
-            parts.append(decoded.partition(":")[2])
+            parts.extend(password_parts(decoded.partition(":")[2]))
     return parts
 
 

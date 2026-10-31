@@ -9,7 +9,13 @@ from typing import Any, ClassVar, Protocol
 
 import yaml
 
-from multihull.credentials import CredentialError, CredentialSource, base64_text, read_small_text
+from multihull.credentials import (
+    CredentialError,
+    CredentialSource,
+    base64_text,
+    password_parts,
+    read_small_text,
+)
 from multihull.providers.base import (
     GPU_CLASS_LABEL,
     SERVICE_LABEL,
@@ -34,8 +40,11 @@ SCALEDOWN_STABILIZATION_SECONDS = 300
 CPU_TARGET_UTILIZATION = 80
 IN_CLUSTER_HOST_ENV = "KUBERNETES_SERVICE_HOST"
 SERVICE_ACCOUNT_TOKEN = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
-KUBECONFIG_INLINE_SECRETS = ("token", "password", "client-key-data")
-KUBECONFIG_SECRET_FILES = ("tokenFile", "client-key")
+KUBECONFIG_TOKEN = "token"
+KUBECONFIG_TOKEN_FILE = "tokenFile"
+KUBECONFIG_KEY_DATA = "client-key-data"
+KUBECONFIG_KEY_FILE = "client-key"
+KUBECONFIG_PASSWORD = "password"
 
 
 def kubeconfig_paths() -> list[Path]:
@@ -73,14 +82,16 @@ def referenced_text(base: Path, named: object) -> str | None:
 def kubeconfig_parts(content: str, base: Path) -> list[str]:
     parts: list[str] = []
     for user in kubeconfig_users(content):
-        parts.extend(str(user[field]) for field in KUBECONFIG_INLINE_SECRETS if user.get(field))
-        key = base64_text(user["client-key-data"]) if user.get("client-key-data") else None
+        inline = (KUBECONFIG_TOKEN, KUBECONFIG_KEY_DATA)
+        parts.extend(str(user[field]) for field in inline if user.get(field))
+        key = base64_text(user[KUBECONFIG_KEY_DATA]) if user.get(KUBECONFIG_KEY_DATA) else None
         if key:
             parts.append(key)
-        for field in KUBECONFIG_SECRET_FILES:
+        for field in (KUBECONFIG_TOKEN_FILE, KUBECONFIG_KEY_FILE):
             text = referenced_text(base, user.get(field))
             if text:
                 parts.extend([text, base64.b64encode(text.encode()).decode()])
+        parts.extend(password_parts(user.get(KUBECONFIG_PASSWORD)))
     return parts
 
 
