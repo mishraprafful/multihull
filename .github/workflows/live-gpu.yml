@@ -90,6 +90,13 @@ jobs:
           fi
           uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" \
             --env "$MODAL_ENVIRONMENT" | tee "$log"
+      - name: Assert nothing is left on Modal
+        if: always() && steps.sync.outcome == 'success' && steps.preflight.outputs.credentials == 'accepted'
+        timeout-minutes: 5
+        working-directory: testing/live
+        run: >
+          uv run python -m live.sweep --check --prefix "${APP_PREFIX}${GITHUB_RUN_ID}"
+          --env "$MODAL_ENVIRONMENT"
       - name: Job summary
         if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live

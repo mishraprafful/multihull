@@ -11,7 +11,7 @@ gh workflow run live-gpu.yml
 gh workflow run live-gpu.yml -f max_minutes=15
 ```
 
-`max_minutes` (default 20, at most 30) is the harness budget: every wait is bounded by what is left, and once it is exceeded the next test fails so the session teardown runs `hull destroy`. The job itself times out at 40 minutes with the `Destroy` and `Stop Modal apps left by this run` steps in `if: always()`.
+`max_minutes` (default 20, at most 30) is the harness budget: every wait is bounded by what is left, and once it is exceeded the next test fails so the session teardown runs `hull destroy`. The job itself times out at 40 minutes with the `Destroy` and `Stop Modal apps left by this run` steps in `if: always()`; `Assert nothing is left on Modal` then fails the job if an app of the run still runs. Cleanup steps run under `bash -o pipefail`, so a failed command fails its step even when piped to `tee`.
 
 Prerequisites: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` repository secrets (see `live-smoke.md`), L4 capacity in the Modal workspace. The image is public, so no registry secret. Modal pulls `vllm/vllm-openai` from Docker Hub under its own anonymous quota (100 pulls per 6 hours per IPv4 address, shared by every Modal builder behind that address), so an image build can fail with `429 Too Many Requests`; the CI base images moved to mirrors for that reason (issue 139), but `vllm/vllm-openai` is not an official image and has no mirror. Rerun later, or give the spec a `registrySecret` with a Docker Hub token to pull under an account quota.
 
