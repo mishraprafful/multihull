@@ -106,7 +106,7 @@ jobs:
           context=$(KUBECONFIG="$kubeconfig" kubectl config current-context)
           echo "KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
           echo "LIVE_KUBE_CONTEXT=$context" >> "$GITHUB_ENV"
-      - uses: astral-sh/setup-uv@v10.3.2
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: |
