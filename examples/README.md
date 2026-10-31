@@ -16,4 +16,4 @@ hull plan
 hull deploy
 ```
 
-Credentials are never in the spec. Each target reads them from its native location (kubeconfig context, `~/.modal.toml` or `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET`, `RUNPOD_API_KEY`). The `hf-token` secret is referenced by name and mirrored into each provider's secret store. Set `LLAMA_API_KEYS` to comma-separated route keys (`hull_<id>_<secret>`) before `hull deploy`; it refuses a route whose key source yields no keys.
+Credentials are never in the spec. Each target reads them from its native location (kubeconfig context, `~/.modal.toml` or `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET`, `RUNPOD_API_KEY`). The `HF_TOKEN` secret is referenced by name: `hull deploy` reads its value from the `HF_TOKEN` environment variable and mirrors it into each provider's secret store, and the container gets it as `HF_TOKEN`, the variable Hugging Face reads to download the gated model. Set `LLAMA_API_KEYS` to comma-separated route keys (`hull_<id>_<secret>`) before `hull deploy`; it refuses a route whose key source yields no keys.

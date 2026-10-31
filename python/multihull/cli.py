@@ -98,7 +98,7 @@ def load_or_exit(path: Path) -> specmod.ServiceSpec:
 
 def load_and_warn(path: Path) -> specmod.ServiceSpec:
     service = load_or_exit(path)
-    for warning in service.capacity_warnings():
+    for warning in [*service.capacity_warnings(), *service.secret_name_warnings()]:
         errors.print(f"[yellow]warning[/yellow] {warning}")
     return service
 

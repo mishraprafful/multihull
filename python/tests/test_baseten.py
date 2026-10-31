@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import configparser
 import json
 import shlex
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
+from multihull import deploy as deploymod
 from multihull import engine
 from multihull.providers.base import Ref, ScaleRefused, Target, secret_env_name, store_name
 from multihull.providers.baseten import (
@@ -23,14 +27,16 @@ from multihull.providers.baseten import (
     signed_s3_put,
 )
 from multihull.spec import ServiceSpec
+from multihull.state import LocalState
 from tests.conftest import assert_golden
 from tests.fake_baseten import FakeBaseten, error, with_baseten
+from tests.fakes import FakeProvider
 
 CALLER = "baseten-fixture-caller"
 TRAFFIC_CALLER = "baseten-fixture-traffic"
 MIRRORED = "mirrored-fixture-value"
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=UTC)
-STORE = store_name("llama-8b", "baseten-us", "hf-token")
+STORE = store_name("llama-8b", "baseten-us", "HF_TOKEN")
 
 
 @pytest.fixture
@@ -98,7 +104,7 @@ def test_secrets_reach_the_server_as_env_read_from_the_mounted_files(target: Tar
     argv = shlex.split(render_truss_config(target)["docker_server"]["start_command"])
     assert argv[:2] == ["sh", "-c"]
     assert argv[3:] == ["sh", "vllm", "serve", "meta-llama/Llama-3.1-8B-Instruct"]
-    assert argv[2] == f'exec env hf-token="$(cat /secrets/{STORE})" "$@"'
+    assert argv[2] == f'HF_TOKEN="$(cat /secrets/{STORE})"; export HF_TOKEN; exec "$@"'
 
 
 def test_identifier_secrets_are_exported_so_values_stay_out_of_argv(
@@ -174,6 +180,56 @@ def test_start_command_is_refused_exactly_when_it_carries_a_percent(
     candidate = variant(llama_raw, container={"command": command, "secrets": names})
     rendered = render_truss_config(candidate)["docker_server"]["start_command"]
     assert bool(command_problems(candidate)) == ("%" in rendered)
+
+
+def supervisor_reads(command: str, tmp_path: Path) -> list[str] | None:
+    path = tmp_path / "supervisord.conf"
+    written = configparser.ConfigParser()
+    written["program:model-server"] = {"command": command}
+    with path.open("w") as file:
+        written.write(file)
+    read = configparser.RawConfigParser(inline_comment_prefixes=(";", "#"), strict=False)
+    try:
+        read.read(path)
+        return shlex.split(read.get("program:model-server", "command"))
+    except (configparser.Error, ValueError):
+        return None
+
+
+@pytest.mark.parametrize(
+    ("command", "names", "survives", "refused"),
+    [
+        pytest.param(["sh", "-c", "echo hi #x"], [], False, True, id="hash-after-space"),
+        pytest.param(["sh", "-c", "a ; b"], [], False, True, id="semicolon-after-space"),
+        pytest.param(["sh", "-c", "a\t#b"], [], False, True, id="hash-after-tab"),
+        pytest.param(["serve"], ["a #b"], False, True, id="secret-name"),
+        pytest.param(["sh", "-c", "a\n#b"], [], False, True, id="newline-hash"),
+        pytest.param(["sh", "-c", "a\n;b"], [], False, True, id="newline-semicolon"),
+        pytest.param(["sh", "-c", "a\rb"], [], False, True, id="carriage-return"),
+        pytest.param(["sh", "-c", "a\n  b"], [], False, True, id="newline-loses-indent"),
+        pytest.param(["sh", "-c", "a\nb"], [], True, True, id="any-newline"),
+        pytest.param(["sh", "-c", "a;b"], [], True, False, id="semicolon-without-space"),
+        pytest.param(["serve", "#tag"], [], True, False, id="lone-hash-argument"),
+        pytest.param(["serve"], ["HF_TOKEN", "hf-token"], True, False, id="secrets-wrapper"),
+    ],
+)
+def test_commands_supervisord_would_cut_or_change_are_noted_and_refused(
+    llama_raw: dict[str, Any],
+    tmp_path: Path,
+    command: list[str],
+    names: list[str],
+    survives: bool,
+    refused: bool,
+) -> None:
+    candidate = variant(llama_raw, container={"command": command, "secrets": names})
+    rendered = render_truss_config(candidate)["docker_server"]["start_command"]
+    assert (supervisor_reads(rendered, tmp_path) == shlex.split(rendered)) == survives
+    cut = "where ; or # after whitespace starts a comment"
+    notes = BasetenProvider().plan(candidate, None).notes
+    assert any(cut in note for note in notes) == refused
+    if refused:
+        with pytest.raises(ValueError, match=cut):
+            BasetenProvider().apply(candidate, None)
 
 
 def test_reserved_environment_variables_are_noted(llama_raw: dict[str, Any]) -> None:
@@ -350,8 +406,10 @@ def test_status_follows_the_promotion_then_the_health_path(
     assert (observed.phase, observed.ready_replicas) == ("Pending", 0)
     assert observed.message == f"deployment {deployment_id} BUILDING; production serves nothing"
 
+    assert not observed.rollout_failed
     fake.deployments[deployment_id]["status"] = "BUILD_FAILED"
-    assert provider.status(ref).phase == "Failed"
+    observed = provider.status(ref)
+    assert (observed.phase, observed.rollout_failed) == ("Failed", True)
     fake.deployments[deployment_id]["status"] = "DEPLOYING"
 
     fake.finish_promotion(model_id)
@@ -363,6 +421,7 @@ def test_status_follows_the_promotion_then_the_health_path(
     fake.health[model_id] = 200
     observed = provider.status(ref)
     assert (observed.phase, observed.ready_replicas, observed.desired_replicas) == ("Ready", 1, 1)
+    assert not observed.rollout_failed
 
     fake.deployments[deployment_id]["status"] = "SCALED_TO_ZERO"
     assert provider.status(ref).message == f"deployment {deployment_id} SCALED_TO_ZERO"
@@ -389,6 +448,7 @@ def test_a_failed_rollout_keeps_the_previous_deployment_routed(
 
     observed = provider.status(second)
     assert (observed.phase, observed.ready_replicas) == ("Degraded", 1)
+    assert observed.rollout_failed
     assert observed.message == (
         f"rollout failed: deployment {second.ids['deployment']} {outcome}; "
         f"serving the previous config from {first.ids['deployment']}"
@@ -397,10 +457,61 @@ def test_a_failed_rollout_keeps_the_previous_deployment_routed(
     fake.health[second.ids["model"]] = 503
     observed = provider.status(second)
     assert observed.phase == "Pending" and "health returned 503" in observed.message
+    assert observed.rollout_failed
 
     del fake.deployments[second.ids["deployment"]]
     fake.health[second.ids["model"]] = 200
     assert provider.status(second).phase == "Degraded"
+
+
+def test_deploy_wait_returns_at_a_failed_rollout_and_keeps_the_previous_one_routed(
+    provider: BasetenProvider, fake: FakeBaseten, llama_raw: dict[str, Any], tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+
+    def deploy(desired: Target, sleep: Callable[[float], None]) -> deploymod.DeployReport:
+        others = {t.provider: FakeProvider() for t in desired.service.targets}
+        return deploymod.deploy(
+            desired.service,
+            state,
+            {**others, desired.provider: provider},
+            dry_run=False,
+            only={desired.provider},
+            poll_interval=0,
+            snapshot_out=tmp_path / "snapshot.json",
+            sleep=sleep,
+        )
+
+    def never_sleep(seconds: float) -> None:
+        raise AssertionError("waited although the first poll was final")
+
+    first = deploy(variant(llama_raw), never_sleep)
+    [ready] = [o for o in first.outcomes if o.provider == "baseten-us"]
+    assert (ready.ok, ready.phase) == (True, "Ready")
+
+    fake.promote_on_create = False
+    sleeps: list[float] = []
+
+    def fail_the_build(seconds: float) -> None:
+        sleeps.append(seconds)
+        assert len(sleeps) == 1, "kept waiting after the rollout failed"
+        [environment] = fake.environments.values()
+        fake.deployments[environment["candidate"]]["status"] = "BUILD_FAILED"
+        environment["candidate"] = None
+
+    changed = variant(llama_raw, container={"env": {"VLLM_LOGGING_LEVEL": "DEBUG"}})
+    report = deploy(changed, fail_the_build)
+
+    [outcome] = [o for o in report.outcomes if o.provider == "baseten-us"]
+    assert (outcome.ok, outcome.phase, outcome.ready_replicas) == (False, "Degraded", 1)
+    assert outcome.message.startswith("rollout failed: deployment ")
+    assert outcome.url == ready.url
+    assert len(sleeps) == 1
+    assert report.snapshot is not None
+    [endpoint] = report.snapshot["routes"][0]["endpoints"]
+    assert (endpoint["url"], endpoint["health"]) == (ready.url, "degraded")
+    record = state.get(changed.name, changed.provider)
+    assert record is not None and record.last_status == "Degraded"
 
 
 def test_traffic_and_probes_carry_an_api_key_header(

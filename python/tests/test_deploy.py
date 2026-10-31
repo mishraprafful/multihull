@@ -3,19 +3,23 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from multihull import deploy as deploymod
 from multihull import engine
 from multihull.cli import app
 from multihull.controller import Controller
-from multihull.providers.base import Observed, Ref
+from multihull.providers.base import Observed, Ref, Target
+from multihull.providers.kubernetes import KubernetesProvider
 from multihull.spec import ServiceSpec
 from multihull.state import LocalState, StateRecord
 from tests.conftest import FIXTURES
+from tests.fake_kubernetes import FakeKubeClient
 from tests.fakes import FakeProvider
 
 runner = CliRunner()
@@ -322,3 +326,27 @@ def test_deploy_never_overwrites_a_status_changed_while_it_waited(
     assert [o.provider for o in report.outcomes if o.ok and o.phase == "Ready"] == ["modal-main"]
     record = state.get(llama_spec.name, "modal-main")
     assert record is not None and record.last_status == "Failed"
+
+
+def test_wait_keeps_polling_a_kubernetes_rollout_through_degraded(
+    target_for: Callable[[str], Target], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HF_TOKEN", "fixture-value")
+    client = FakeKubeClient()
+    provider = KubernetesProvider(client=client)
+    ref = provider.apply(target_for("gke-prod"), None)
+    deployment = client.objects[("Deployment", "llama-8b", "multihull")]
+    deployment["status"] = {"readyReplicas": 1}
+    observed = provider.status(ref)
+    assert (observed.phase, observed.rollout_failed) == ("Degraded", False)
+    sleeps: list[float] = []
+
+    def finish_rollout(seconds: float) -> None:
+        sleeps.append(seconds)
+        deployment["status"] = {"readyReplicas": 2}
+
+    observed = deploymod.wait_ready(
+        provider, ref, timedelta(minutes=10), poll_interval=0, sleep=finish_rollout
+    )
+    assert (observed.phase, observed.ready_replicas) == ("Ready", 2)
+    assert sleeps == [0]
