@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import shlex
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
+from multihull import deploy as deploymod
 from multihull import engine
 from multihull.providers.base import Ref, ScaleRefused, Target, secret_env_name, store_name
 from multihull.providers.baseten import (
@@ -16,14 +19,17 @@ from multihull.providers.baseten import (
     SECRETS_LABEL,
     BasetenApiError,
     BasetenProvider,
+    command_problems,
     render_payload,
     render_truss_config,
     secret_store_name,
     signed_s3_put,
 )
 from multihull.spec import ServiceSpec
+from multihull.state import LocalState
 from tests.conftest import assert_golden
 from tests.fake_baseten import FakeBaseten, error, with_baseten
+from tests.fakes import FakeProvider
 
 CALLER = "baseten-fixture-caller"
 TRAFFIC_CALLER = "baseten-fixture-traffic"
@@ -146,6 +152,33 @@ def test_a_percent_in_the_command_is_noted_and_refused(llama_raw: dict[str, Any]
     assert note.startswith("Baseten writes docker_server.start_command into supervisord.conf")
     with pytest.raises(ValueError, match="remove % from container.command"):
         BasetenProvider().apply(percent, None)
+
+
+def test_a_percent_in_a_secret_name_is_noted_and_refused(llama_raw: dict[str, Any]) -> None:
+    percent = variant(llama_raw, container={"secrets": ["HF_TOKEN", "hf%token", "a%b"]})
+    [note] = BasetenProvider().plan(percent, None).notes
+    assert note.startswith("Baseten passes secret names that are not shell identifiers")
+    assert note.endswith("remove % from container.secrets: hf%token, a%b")
+    with pytest.raises(ValueError, match="remove % from container.secrets: hf%token, a%b"):
+        BasetenProvider().apply(percent, None)
+
+
+@pytest.mark.parametrize(
+    ("command", "names"),
+    [
+        (["serve", "--name", "a b"], []),
+        (["serve"], ["HF_TOKEN", "hf-token", "x.y/z"]),
+        (["serve", "--fraction", "90%"], []),
+        (["serve"], ["hf%token"]),
+        (["serve"], ["HF_TOKEN", "a%b"]),
+    ],
+)
+def test_start_command_is_refused_exactly_when_it_carries_a_percent(
+    llama_raw: dict[str, Any], command: list[str], names: list[str]
+) -> None:
+    candidate = variant(llama_raw, container={"command": command, "secrets": names})
+    rendered = render_truss_config(candidate)["docker_server"]["start_command"]
+    assert bool(command_problems(candidate)) == ("%" in rendered)
 
 
 def test_reserved_environment_variables_are_noted(llama_raw: dict[str, Any]) -> None:
@@ -322,8 +355,10 @@ def test_status_follows_the_promotion_then_the_health_path(
     assert (observed.phase, observed.ready_replicas) == ("Pending", 0)
     assert observed.message == f"deployment {deployment_id} BUILDING; production serves nothing"
 
+    assert not observed.rollout_failed
     fake.deployments[deployment_id]["status"] = "BUILD_FAILED"
-    assert provider.status(ref).phase == "Failed"
+    observed = provider.status(ref)
+    assert (observed.phase, observed.rollout_failed) == ("Failed", True)
     fake.deployments[deployment_id]["status"] = "DEPLOYING"
 
     fake.finish_promotion(model_id)
@@ -335,6 +370,7 @@ def test_status_follows_the_promotion_then_the_health_path(
     fake.health[model_id] = 200
     observed = provider.status(ref)
     assert (observed.phase, observed.ready_replicas, observed.desired_replicas) == ("Ready", 1, 1)
+    assert not observed.rollout_failed
 
     fake.deployments[deployment_id]["status"] = "SCALED_TO_ZERO"
     assert provider.status(ref).message == f"deployment {deployment_id} SCALED_TO_ZERO"
@@ -361,6 +397,7 @@ def test_a_failed_rollout_keeps_the_previous_deployment_routed(
 
     observed = provider.status(second)
     assert (observed.phase, observed.ready_replicas) == ("Degraded", 1)
+    assert observed.rollout_failed
     assert observed.message == (
         f"rollout failed: deployment {second.ids['deployment']} {outcome}; "
         f"serving the previous config from {first.ids['deployment']}"
@@ -369,10 +406,61 @@ def test_a_failed_rollout_keeps_the_previous_deployment_routed(
     fake.health[second.ids["model"]] = 503
     observed = provider.status(second)
     assert observed.phase == "Pending" and "health returned 503" in observed.message
+    assert observed.rollout_failed
 
     del fake.deployments[second.ids["deployment"]]
     fake.health[second.ids["model"]] = 200
     assert provider.status(second).phase == "Degraded"
+
+
+def test_deploy_wait_returns_at_a_failed_rollout_and_keeps_the_previous_one_routed(
+    provider: BasetenProvider, fake: FakeBaseten, llama_raw: dict[str, Any], tmp_path: Path
+) -> None:
+    state = LocalState(tmp_path / "state.db")
+
+    def deploy(desired: Target, sleep: Callable[[float], None]) -> deploymod.DeployReport:
+        others = {t.provider: FakeProvider() for t in desired.service.targets}
+        return deploymod.deploy(
+            desired.service,
+            state,
+            {**others, desired.provider: provider},
+            dry_run=False,
+            only={desired.provider},
+            poll_interval=0,
+            snapshot_out=tmp_path / "snapshot.json",
+            sleep=sleep,
+        )
+
+    def never_sleep(seconds: float) -> None:
+        raise AssertionError("waited although the first poll was final")
+
+    first = deploy(variant(llama_raw), never_sleep)
+    [ready] = [o for o in first.outcomes if o.provider == "baseten-us"]
+    assert (ready.ok, ready.phase) == (True, "Ready")
+
+    fake.promote_on_create = False
+    sleeps: list[float] = []
+
+    def fail_the_build(seconds: float) -> None:
+        sleeps.append(seconds)
+        assert len(sleeps) == 1, "kept waiting after the rollout failed"
+        [environment] = fake.environments.values()
+        fake.deployments[environment["candidate"]]["status"] = "BUILD_FAILED"
+        environment["candidate"] = None
+
+    changed = variant(llama_raw, container={"env": {"VLLM_LOGGING_LEVEL": "DEBUG"}})
+    report = deploy(changed, fail_the_build)
+
+    [outcome] = [o for o in report.outcomes if o.provider == "baseten-us"]
+    assert (outcome.ok, outcome.phase, outcome.ready_replicas) == (False, "Degraded", 1)
+    assert outcome.message.startswith("rollout failed: deployment ")
+    assert outcome.url == ready.url
+    assert len(sleeps) == 1
+    assert report.snapshot is not None
+    [endpoint] = report.snapshot["routes"][0]["endpoints"]
+    assert (endpoint["url"], endpoint["health"]) == (ready.url, "degraded")
+    record = state.get(changed.name, changed.provider)
+    assert record is not None and record.last_status == "Degraded"
 
 
 def test_traffic_and_probes_carry_an_api_key_header(
