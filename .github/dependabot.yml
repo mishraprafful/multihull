@@ -24,3 +24,19 @@ updates:
       interval: weekly
     commit-message:
       prefix: "ci(deps)"
+  - package-ecosystem: docker
+    directories:
+      - /python
+      - /router
+      - /testing/mock-server
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      base-images:
+        patterns: ["*"]
+        group-by: dependency-name
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
