@@ -157,7 +157,7 @@ jobs:
       - name: Skip the Artifact Hub metadata until the repository is registered
         if: vars.ARTIFACTHUB_REPOSITORY_ID == ''
         run: echo "::notice::ARTIFACTHUB_REPOSITORY_ID is unset, not pushing charts/artifacthub-repo.yml"
-      - uses: oras-project/setup-oras@v2.0.2
+      - uses: oras-project/setup-oras@v2.0.3
         if: vars.ARTIFACTHUB_REPOSITORY_ID != ''
         with:
           version: 1.3.4
