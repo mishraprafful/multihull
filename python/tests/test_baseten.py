@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 import json
 import shlex
 from collections.abc import Callable
@@ -179,6 +180,56 @@ def test_start_command_is_refused_exactly_when_it_carries_a_percent(
     candidate = variant(llama_raw, container={"command": command, "secrets": names})
     rendered = render_truss_config(candidate)["docker_server"]["start_command"]
     assert bool(command_problems(candidate)) == ("%" in rendered)
+
+
+def supervisor_reads(command: str, tmp_path: Path) -> list[str] | None:
+    path = tmp_path / "supervisord.conf"
+    written = configparser.ConfigParser()
+    written["program:model-server"] = {"command": command}
+    with path.open("w") as file:
+        written.write(file)
+    read = configparser.RawConfigParser(inline_comment_prefixes=(";", "#"), strict=False)
+    try:
+        read.read(path)
+        return shlex.split(read.get("program:model-server", "command"))
+    except (configparser.Error, ValueError):
+        return None
+
+
+@pytest.mark.parametrize(
+    ("command", "names", "survives", "refused"),
+    [
+        pytest.param(["sh", "-c", "echo hi #x"], [], False, True, id="hash-after-space"),
+        pytest.param(["sh", "-c", "a ; b"], [], False, True, id="semicolon-after-space"),
+        pytest.param(["sh", "-c", "a\t#b"], [], False, True, id="hash-after-tab"),
+        pytest.param(["serve"], ["a #b"], False, True, id="secret-name"),
+        pytest.param(["sh", "-c", "a\n#b"], [], False, True, id="newline-hash"),
+        pytest.param(["sh", "-c", "a\n;b"], [], False, True, id="newline-semicolon"),
+        pytest.param(["sh", "-c", "a\rb"], [], False, True, id="carriage-return"),
+        pytest.param(["sh", "-c", "a\n  b"], [], False, True, id="newline-loses-indent"),
+        pytest.param(["sh", "-c", "a\nb"], [], True, True, id="any-newline"),
+        pytest.param(["sh", "-c", "a;b"], [], True, False, id="semicolon-without-space"),
+        pytest.param(["serve", "#tag"], [], True, False, id="lone-hash-argument"),
+        pytest.param(["serve"], ["HF_TOKEN", "hf-token"], True, False, id="secrets-wrapper"),
+    ],
+)
+def test_commands_supervisord_would_cut_or_change_are_noted_and_refused(
+    llama_raw: dict[str, Any],
+    tmp_path: Path,
+    command: list[str],
+    names: list[str],
+    survives: bool,
+    refused: bool,
+) -> None:
+    candidate = variant(llama_raw, container={"command": command, "secrets": names})
+    rendered = render_truss_config(candidate)["docker_server"]["start_command"]
+    assert (supervisor_reads(rendered, tmp_path) == shlex.split(rendered)) == survives
+    cut = "where ; or # after whitespace starts a comment"
+    notes = BasetenProvider().plan(candidate, None).notes
+    assert any(cut in note for note in notes) == refused
+    if refused:
+        with pytest.raises(ValueError, match=cut):
+            BasetenProvider().apply(candidate, None)
 
 
 def test_reserved_environment_variables_are_noted(llama_raw: dict[str, Any]) -> None:

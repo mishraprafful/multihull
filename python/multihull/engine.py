@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -30,8 +30,18 @@ DEFAULT_PLAN_DIR = Path(".multihull/plan")
 APPLIED_CHANGES = {"new", "changed", "unchanged"}
 CREDENTIALS_KEY = "credentials"
 STORED_CREDENTIALS_NOT_REFRESHED = (
-    "not in the spec; its stored credentials reference is used only by hull destroy"
+    "not in the spec; its stored credentials reference is used only by hull destroy --target"
 )
+
+
+class UnnamedStoredCredentials(ValueError):
+    def __init__(self, records: Mapping[str, str]) -> None:
+        self.records = dict(records)
+        listed = ", ".join(f"{name} ({reference})" for name, reference in self.records.items())
+        super().__init__(
+            f"not in the spec, with a stored credentials reference: {listed}; "
+            "a stored reference is used only for a target destroyed by name"
+        )
 
 
 @dataclass
@@ -111,6 +121,37 @@ def with_credentials(ref: Ref, target: TargetSpec) -> Ref:
     if target.credentials is None:
         return ref
     return replace(ref, ids={**ref.ids, CREDENTIALS_KEY: target.credentials})
+
+
+def stored_credentials(ref: Ref) -> str | None:
+    reference = ref.ids.get(CREDENTIALS_KEY)
+    return None if reference is None else str(reference)
+
+
+def unnamed_stored_credentials(
+    records: Iterable[StateRecord], known: Collection[str]
+) -> dict[str, str]:
+    unnamed: dict[str, str] = {}
+    for record in records:
+        reference = stored_credentials(Ref.from_json(record.ref))
+        if record.provider not in known and reference is not None:
+            unnamed[record.provider] = reference
+    return unnamed
+
+
+def destroy_records(
+    service: str,
+    state: StateBackend,
+    known: Collection[str],
+    only: Collection[str] | None = None,
+) -> list[StateRecord]:
+    records = state.list(service)
+    if only is not None:
+        return [record for record in records if record.provider in only]
+    unnamed = unnamed_stored_credentials(records, known)
+    if unnamed:
+        raise UnnamedStoredCredentials(unnamed)
+    return records
 
 
 def ref_credential_kwargs(ref: Ref) -> dict[str, str]:
@@ -292,7 +333,7 @@ def destroy(
     only: Collection[str] | None = None,
     max_workers: int = 8,
 ) -> list[DestroyResult]:
-    records = [r for r in state.list(service) if only is None or r.provider in only]
+    records = destroy_records(service, state, providers or {}, only)
 
     def run(record: StateRecord) -> DestroyResult:
         ref = Ref.from_json(record.ref)
@@ -379,7 +420,7 @@ def refresh(
     def run(record: StateRecord) -> RefreshResult:
         ref = Ref.from_json(record.ref)
         provider = providers.get(record.provider) if providers is not None else None
-        if provider is None and CREDENTIALS_KEY in ref.ids:
+        if provider is None and stored_credentials(ref) is not None:
             skipped = Observed(phase="Unknown", message=STORED_CREDENTIALS_NOT_REFRESHED)
             return RefreshResult(record.provider, ref.type, ref, settled(record, skipped), False)
         try:
