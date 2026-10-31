@@ -147,11 +147,11 @@ def test_a_shipped_file_holding_a_credential_value_is_named_without_the_value(
     (context / "weights.bin").write_bytes(padding + value.encode() + b"tail")
     (context / "notes.txt").write_text("short abc")
     secrets = {"REPLICATE_API_TOKEN": value, "env:SHORT": "abc"}
-    problems = scan_context(context, secrets=secrets).problems
+    problems = scan_context(context, secrets=secrets.items()).problems
     assert problems == [
         "ships .env, which holds the value of REPLICATE_API_TOKEN",
         "ships weights.bin, which holds the value of REPLICATE_API_TOKEN",
     ]
     assert all(value not in problem for problem in problems)
     (context / ".dockerignore").write_text(".env*\nweights.bin\n")
-    assert scan_context(context, secrets=secrets).problems == []
+    assert scan_context(context, secrets=secrets.items()).problems == []

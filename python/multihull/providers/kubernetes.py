@@ -8,7 +8,14 @@ from typing import Any, ClassVar, Protocol
 
 import yaml
 
-from multihull.credentials import CredentialError, CredentialSource
+from multihull.credentials import (
+    CredentialError,
+    CredentialSource,
+    decoded_base64,
+    encoded_base64,
+    password_parts,
+    read_small_text,
+)
 from multihull.providers.base import (
     GPU_CLASS_LABEL,
     SERVICE_LABEL,
@@ -33,6 +40,11 @@ SCALEDOWN_STABILIZATION_SECONDS = 300
 CPU_TARGET_UTILIZATION = 80
 IN_CLUSTER_HOST_ENV = "KUBERNETES_SERVICE_HOST"
 SERVICE_ACCOUNT_TOKEN = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+KUBECONFIG_TOKEN = "token"
+KUBECONFIG_TOKEN_FILE = "tokenFile"
+KUBECONFIG_KEY_DATA = "client-key-data"
+KUBECONFIG_KEY_FILE = "client-key"
+KUBECONFIG_PASSWORD = "password"
 
 
 def kubeconfig_paths() -> list[Path]:
@@ -40,6 +52,49 @@ def kubeconfig_paths() -> list[Path]:
     if configured:
         return [Path(entry) for entry in configured.split(os.pathsep) if entry]
     return [Path.home() / ".kube" / "config"]
+
+
+def kubeconfig_users(content: str) -> list[dict[str, Any]]:
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return []
+    entries = document.get("users") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [
+        entry["user"]
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("user"), dict)
+    ]
+
+
+def referenced_text(base: Path, named: object) -> str | None:
+    if not named:
+        return None
+    try:
+        path = base / Path(str(named)).expanduser()
+    except (RuntimeError, ValueError):
+        return None
+    return read_small_text(path)
+
+
+def kubeconfig_parts(content: str, base: Path) -> list[str]:
+    parts: list[str] = []
+    for user in kubeconfig_users(content):
+        token = user.get(KUBECONFIG_TOKEN)
+        token_file = referenced_text(base, user.get(KUBECONFIG_TOKEN_FILE))
+        for value in (str(token) if token else None, token_file):
+            if value:
+                parts.extend([value, encoded_base64(value.strip())])
+        key_data = user.get(KUBECONFIG_KEY_DATA)
+        if key_data:
+            parts.extend(filter(None, [str(key_data), decoded_base64(key_data)]))
+        key_file = referenced_text(base, user.get(KUBECONFIG_KEY_FILE))
+        if key_file:
+            parts.extend([key_file, encoded_base64(key_file), encoded_base64(key_file.strip())])
+        parts.extend(password_parts(user.get(KUBECONFIG_PASSWORD)))
+    return parts
 
 
 def uses_in_cluster_config(context: str | None) -> bool:
@@ -457,6 +512,10 @@ class KubernetesProvider:
     @staticmethod
     def native_credential_files() -> list[Path]:
         return [*kubeconfig_paths(), Path.home() / ".kube" / "config", SERVICE_ACCOUNT_TOKEN]
+
+    @staticmethod
+    def credential_parts(content: str, base: Path) -> list[str]:
+        return kubeconfig_parts(content, base)
 
     def __init__(
         self,

@@ -411,6 +411,10 @@ class RunpodProvider:
     def native_credential_files() -> list[Path]:
         return []
 
+    @staticmethod
+    def credential_parts(content: str, base: Path) -> list[str]:
+        return []
+
     def __init__(
         self,
         dry_run: bool = True,

@@ -70,6 +70,7 @@ DEFAULT_PROFILE = "default"
 PROFILE_ENV = "MODAL_PROFILE"
 CONFIG_PATH_ENV = "MODAL_CONFIG_PATH"
 NATIVE_CREDENTIAL_PREFIXES = ("MODAL_TOKEN_", "MODAL_OAUTH_")
+PROFILE_TOKEN_FIELDS = ("token_id", "token_secret")
 
 
 class CredentialStatus(StrEnum):
@@ -140,6 +141,20 @@ def profile_tokens(credentials: str) -> tuple[str, str, str]:
 def modal_tokens(credentials: str) -> tuple[str, str]:
     _, token_id, token_secret = profile_tokens(credentials)
     return token_id, token_secret
+
+
+def modal_config_parts(content: str) -> list[str]:
+    try:
+        document = tomllib.loads(content)
+    except tomllib.TOMLDecodeError:
+        return []
+    return [
+        str(profile[field])
+        for profile in document.values()
+        if isinstance(profile, dict)
+        for field in PROFILE_TOKEN_FIELDS
+        if profile.get(field)
+    ]
 
 
 def credential_tokens(credentials: str | None) -> list[str]:
@@ -421,6 +436,10 @@ class ModalProvider:
     def native_credential_files() -> list[Path]:
         configured = os.environ.get(CONFIG_PATH_ENV)
         return [*([Path(configured)] if configured else []), Path.home() / ".modal.toml"]
+
+    @staticmethod
+    def credential_parts(content: str, base: Path) -> list[str]:
+        return modal_config_parts(content)
 
     def __init__(
         self,
