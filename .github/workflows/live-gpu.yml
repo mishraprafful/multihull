@@ -68,17 +68,9 @@ jobs:
           LIVE_WORKDIR: ${{ runner.temp }}/live
       - name: Destroy
         if: always()
-        run: |
-          workdir="$RUNNER_TEMP/live"
-          mkdir -p "$workdir/logs"
-          if [ -f "$workdir/multihull.yaml" ]; then
-            cd "$workdir"
-            uv run --project "$GITHUB_WORKSPACE/testing/live" hull destroy multihull.yaml --yes \
-              --state .multihull/state.db --snapshot-out .multihull/snapshot.json 2>&1 \
-              | tee logs/workflow-destroy.log
-          else
-            echo "no rendered spec; nothing to destroy" | tee "$workdir/logs/workflow-destroy.log"
-          fi
+        timeout-minutes: 10
+        working-directory: testing/live
+        run: uv run python -m live.kubernetes_gpu destroy --workdir "$RUNNER_TEMP/live"
       - name: Stop Modal apps left by this run
         if: always()
         working-directory: testing/live
