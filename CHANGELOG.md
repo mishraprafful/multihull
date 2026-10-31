@@ -30,6 +30,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - `Endpoint` leaves `inject_headers` out of its repr, so a logged or asserted endpoint never shows the provider credentials the router injects (#66).
 - The Replicate build-context scan matches a `credentials: file:` by file identity, so hard links and other spellings are caught, and refuses any shipped file holding a target's credential value or `REPLICATE_API_TOKEN` or `REPLICATE_CLI_AUTH_TOKEN`, naming the file, never the value. Refresh and `hull deploy --wait` no longer overwrite a record another apply or destroy changed meanwhile (#65).
 - The Baseten endpoint no longer ends in `/production/predict`, which sent probes and routed paths to the predict route; the Truss config no longer carries the unsupported `runtime.health_checks.initial_delay_seconds` (#64).
+- Baseten `hull plan` notes and `apply` refuses a `container.secrets` name containing `%`: a name that is not a shell identifier reaches `docker_server.start_command` through `exec env`, where `%` fails the `supervisord.conf` build as it does in `container.command` (#185).
 - Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile (#67).
 
 ## [0.2.0] - 2026-10-12
