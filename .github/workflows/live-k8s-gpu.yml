@@ -24,6 +24,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   MODAL_ENVIRONMENT: main
   APP_PREFIX: multihull-live-
