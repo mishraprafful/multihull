@@ -19,6 +19,7 @@ from multihull.providers.replicate import (
     CLI_AUTH_TOKEN_ENV,
     CogCli,
     DeletionDeferred,
+    ReplicateApi,
     ReplicateApiError,
     ReplicateProvider,
     context_scan,
@@ -755,3 +756,62 @@ def test_apply_refuses_a_context_file_holding_a_token_value(
     (context / ".env.local").write_text(f"REPLICATE_API_TOKEN={CALLER}\n")
     (context / "settings.py").unlink()
     assert provider.plan(target, None).notes == []
+
+
+@pytest.mark.parametrize("ids", [{"owner": ".."}, {"deployment": ".."}, {"deployment": "."}])
+def test_a_traversal_shaped_owner_or_deployment_in_state_is_refused(
+    provider: ReplicateProvider, fake: FakeReplicate, ids: dict[str, str]
+) -> None:
+    ref = Ref(
+        "replicate",
+        "replicate",
+        "replicate-echo",
+        {"owner": "acme", "deployment": DEPLOYMENT, **ids},
+    )
+    with pytest.raises(ValueError, match="dot segment"):
+        provider.status(ref)
+    with pytest.raises(ValueError, match="dot segment"):
+        provider.destroy(ref)
+    with pytest.raises(ValueError, match="dot segment"):
+        provider.scale(ref, 1, 2)
+    with pytest.raises(ValueError, match="dot segment"):
+        provider.endpoint(ref)
+    assert fake.calls == []
+
+
+def test_a_traversal_shaped_model_or_owner_is_refused(
+    provider: ReplicateProvider, fake: FakeReplicate, target: Target
+) -> None:
+    api = ReplicateApi(fake.client())
+    for owner, name in (("acme", ".."), ("..", "multihull-replicate-echo"), ("acme", "")):
+        with pytest.raises(ValueError, match="dot segment"):
+            api.model(owner, name)
+        with pytest.raises(ValueError, match="dot segment"):
+            api.deployment(owner, name)
+    assert fake.calls == []
+    fake.owner = ".."
+    with pytest.raises(ValueError, match="dot segment"):
+        provider.apply(target, None)
+    assert fake.calls == [("GET", "/v1/account"), ("GET", "/v1/hardware")]
+
+
+def test_names_reach_the_api_as_single_quoted_segments(fake: FakeReplicate) -> None:
+    seen: list[bytes] = []
+
+    def recording(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.raw_path)
+        return fake(request)
+
+    provider = ReplicateProvider(
+        dry_run=False, http_client=httpx.Client(transport=httpx.MockTransport(recording))
+    )
+    ref = Ref(
+        "replicate",
+        "replicate",
+        "replicate-echo",
+        {"owner": "acme/../account", "deployment": DEPLOYMENT},
+    )
+    quoted = f"/v1/deployments/acme%2F..%2Faccount/{DEPLOYMENT}"
+    assert provider.status(ref).phase == "Failed"
+    assert seen == [quoted.encode()]
+    assert provider.endpoint(ref).url == f"https://api.replicate.com{quoted}"
