@@ -631,7 +631,8 @@ def test_modal_check_logs_in_with_the_override_profile(
 ) -> None:
     reference, first, second = modal_override
     check = check_credentials(credentials=reference)
-    assert check.ok and check.message == f"Modal accepted {CredentialSource.parse(reference)}"
+    accepted = f"Modal accepted profile prod of {CredentialSource.parse(reference)}"
+    assert check.ok and check.message == accepted
     assert fake_modal.logins == [(first, second)] and fake_modal.client.hellos == 1
 
 
@@ -698,6 +699,33 @@ def test_modal_profile_selection_follows_the_modal_config_rules(
     assert modal_profile_message(lone_default, monkeypatch) == "tokens " + ",".join(good)
     active = modal_toml(("default", *other, False), ("prod", *good, True))
     assert modal_profile_message(active, monkeypatch) == "tokens " + ",".join(good)
+
+
+def test_modal_override_ignores_modal_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    good, other = (sentinel(), sentinel()), (sentinel(), sentinel())
+    tokens = "tokens " + ",".join(good)
+    active = modal_toml(("native", *other, False), ("prod", *good, True))
+    lone_default = modal_toml(("default", *good, False))
+    for profile in ("native", "absent"):
+        monkeypatch.setenv("MODAL_PROFILE", profile)
+        assert modal_profile_message(active, monkeypatch) == tokens
+        assert modal_profile_message(lone_default, monkeypatch) == tokens
+    no_active = modal_toml(("native", *other, False), ("prod", *good, False))
+    assert modal_profile_message(no_active, monkeypatch) == (
+        f"credentials env:{OVERRIDE_ENV} has no active profile; mark one with active = true "
+        "or keep a single profile named default; MODAL_PROFILE does not pick an override's profile"
+    )
+
+
+def test_modal_check_names_the_override_profile_whatever_modal_profile_says(
+    monkeypatch: pytest.MonkeyPatch, fake_modal: FakeModal, modal_override: tuple[str, str, str]
+) -> None:
+    reference, first, second = modal_override
+    monkeypatch.setenv("MODAL_PROFILE", "other")
+    check = check_credentials(credentials=reference)
+    assert check.message == f"Modal accepted profile prod of {CredentialSource.parse(reference)}"
+    assert ModalProvider(dry_run=False, credentials=reference).client is fake_modal.client
+    assert fake_modal.logins == [(first, second), (first, second)]
 
 
 def test_modal_sdk_calls_use_the_override_client(

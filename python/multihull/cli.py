@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shlex
 import signal
 from datetime import timedelta
@@ -405,14 +406,28 @@ def colour_result(ok: bool, phase: str) -> str:
     return f"[{colour}]{phase}[/{colour}]"
 
 
+def options_to_repeat(state_url: str, snapshot_out: Path) -> list[str]:
+    options: list[str] = []
+    if state_url != (os.environ.get(STATE_ENV) or DEFAULT_STATE):
+        options.append("--state")
+    if snapshot_out != deploymod.DEFAULT_SNAPSHOT_PATH:
+        options.append("--snapshot-out")
+    return options
+
+
 def refuse_unnamed_stored_credentials(
-    path: Path, refused: engine.UnnamedStoredCredentials
+    path: Path, refused: engine.UnnamedStoredCredentials, repeat: list[str]
 ) -> NoReturn:
     spec_arg = [] if path == DEFAULT_SPEC else [str(path)]
     named = [arg for name in refused.records for arg in ("--target", name)]
     command = shlex.join(["hull", "destroy", *spec_arg, *named])
     errors.print(f"[red]{escape(str(refused))}[/red]")
     errors.print(f"nothing was destroyed; destroy them by name first: {escape(command)}")
+    if repeat:
+        errors.print(
+            f"also pass the same {' and '.join(repeat)}; "
+            "they are left out above so a state URL is never printed"
+        )
     raise typer.Exit(1)
 
 
@@ -439,7 +454,7 @@ def destroy(
     try:
         records = engine.destroy_records(service.name, state, known, only)
     except engine.UnnamedStoredCredentials as exc:
-        refuse_unnamed_stored_credentials(path, exc)
+        refuse_unnamed_stored_credentials(path, exc, options_to_repeat(state_url, snapshot_out))
     if not records:
         console.print(f"nothing to destroy for {service.name}")
         return
