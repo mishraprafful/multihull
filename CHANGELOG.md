@@ -24,7 +24,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - A provider key or token that is only whitespace (`RUNPOD_API_KEY`, `BASETEN_API_KEY`, `REPLICATE_API_TOKEN`) now counts as missing, so `hull doctor` fails on it (#67).
 - The Replicate client builds every API path and the deployment endpoint URL with `api_path`, as the Baseten and RunPod clients do: each owner, model and deployment name is one quoted segment, and an empty, `.` or `..` name is refused before any request (#189).
 - `hull destroy` uses a stored `credentials` reference only for a target named with `--target`, and its confirmation shows the reference. A plain `hull destroy` (and SDK `Service.destroy()` without `target`) that covers a target outside the spec with a stored reference stops before destroying anything, names it and prints the `--target` command, so a crafted state record cannot make a routine teardown load a planted kubeconfig (#187).
-- The `llama-8b` example's secret is renamed from `hf-token` to `HF_TOKEN`. If you deployed the example, run `hull destroy` before redeploying it: `hull deploy` mirrors the new name only, so the RunPod and Baseten secrets mirrored under the old name would stay behind (#190).
+- The `llama-8b` example's secret is renamed from `hf-token` to `HF_TOKEN`. If you deployed the example, run `hull destroy` before redeploying it: `hull deploy` mirrors the new name only, so the RunPod secret mirrored under the old name would stay behind, and the Baseten one too if you added a Baseten target (#190).
 
 ### Fixed
 
