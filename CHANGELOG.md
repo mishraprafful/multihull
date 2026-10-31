@@ -30,6 +30,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - The Replicate build-context scan matches a `credentials: file:` by file identity, so hard links and other spellings are caught, and refuses any shipped file holding a target's credential value or `REPLICATE_API_TOKEN` or `REPLICATE_CLI_AUTH_TOKEN`, naming the file, never the value. Refresh and `hull deploy --wait` no longer overwrite a record another apply or destroy changed meanwhile (#65).
 - The Baseten endpoint no longer ends in `/production/predict`, which sent probes and routed paths to the predict route; the Truss config no longer carries the unsupported `runtime.health_checks.initial_delay_seconds` (#64).
 - Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile, as Modal does (#67).
+- The Replicate build-context scan also refuses a shipped file holding the value of any provider's native credential variable (`RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_API_KEY`, `BASETEN_API_KEY`, `BASETEN_INFERENCE_API_KEY`, `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, the Modal proxy tokens), and any native credentials file by identity (kubeconfig, the in-cluster service account token, `.modal.toml`, Docker `config.json`). Each provider declares its variables and files; the message names the shipped file and the source path or variable, never the value (#188).
 
 ## [0.2.0] - 2026-10-12
 
