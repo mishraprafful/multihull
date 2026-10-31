@@ -94,6 +94,10 @@ PERCENT_IN_COMMAND = (
     "Baseten writes docker_server.start_command into supervisord.conf, where % starts an "
     "interpolation and fails the build; remove % from container.command"
 )
+PERCENT_IN_SECRET_NAMES = (
+    "Baseten passes secret names that are not shell identifiers to docker_server.start_command "
+    "through exec env, where % fails the supervisord.conf build; remove % from container.secrets"
+)
 
 
 class BasetenApiError(RuntimeError):
@@ -258,10 +262,14 @@ def render_payload(desired: Target) -> dict[str, Any]:
 
 
 def command_problems(desired: Target) -> list[str]:
-    command = desired.service.container.command
-    if not command:
+    container = desired.service.container
+    if not container.command:
         return [NO_COMMAND]
-    return [PERCENT_IN_COMMAND] if any("%" in part for part in command) else []
+    problems = [PERCENT_IN_COMMAND] if any("%" in part for part in container.command) else []
+    named = [name for name in container.secrets if "%" in name]
+    if named:
+        problems.append(f"{PERCENT_IN_SECRET_NAMES}: {', '.join(named)}")
+    return problems
 
 
 def plan_notes(desired: Target) -> list[str]:
