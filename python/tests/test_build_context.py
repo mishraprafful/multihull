@@ -108,7 +108,7 @@ def test_a_credentials_file_inside_the_context_is_a_problem_unless_ignored(
     outside = tmp_path / "elsewhere.token"
     outside.write_text("fixture value")
     assert scan_context(context, [named, outside]).problems == [
-        "ships keys/replicate.token, a credentials file a target names"
+        f"ships keys/replicate.token, the credentials file {named}"
     ]
     (context / ".dockerignore").write_text(".multihull\nkeys\n")
     assert scan_context(context, [named, outside]).problems == []
@@ -122,18 +122,18 @@ def test_a_credentials_file_is_found_by_identity_not_by_spelling(
     outside.write_text("fixture value")
     os.link(outside, context / "linked.token")
     assert scan_context(context, [outside]).problems == [
-        "ships linked.token, a credentials file a target names"
+        f"ships linked.token, the credentials file {outside}"
     ]
     (context / "linked.token").unlink()
     (context / "tok").write_text("fixture value")
     (context / "sub").mkdir()
     respelled = context / "sub" / ".." / "tok"
     assert scan_context(context, [respelled]).problems == [
-        "ships tok, a credentials file a target names"
+        f"ships tok, the credentials file {respelled}"
     ]
     if (context / "TOK").exists():
         assert scan_context(context, [context / "TOK"]).problems == [
-            "ships tok, a credentials file a target names"
+            f"ships tok, the credentials file {context / 'TOK'}"
         ]
 
 

@@ -154,14 +154,14 @@ def hash_file(path: Path, digest: hashlib._Hash, needles: Mapping[str, bytes]) -
     return found
 
 
-def identities(paths: Sequence[Path]) -> set[tuple[int, int]]:
-    found: set[tuple[int, int]] = set()
+def identities(paths: Sequence[Path]) -> dict[tuple[int, int], set[str]]:
+    found: dict[tuple[int, int], set[str]] = {}
     for path in paths:
         try:
             status = path.stat()
         except OSError:
             continue
-        found.add((status.st_dev, status.st_ino))
+        found.setdefault((status.st_dev, status.st_ino), set()).add(str(path))
     return found
 
 
@@ -178,8 +178,9 @@ def scan_context(
     guarded = identities(protected)
     for relative in shipped_files(root, rules, UNHASHED_DIRS):
         status = (root / relative).lstat()
-        if (status.st_dev, status.st_ino) in guarded:
-            problems.append(f"ships {relative}, a credentials file a target names")
+        sources = guarded.get((status.st_dev, status.st_ino))
+        if sources:
+            problems.append(f"ships {relative}, the credentials file {', '.join(sorted(sources))}")
             continue
         pieces = relative.split("/")
         if LOCAL_STATE_DIR in pieces[:-1]:

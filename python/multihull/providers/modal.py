@@ -113,13 +113,15 @@ def profile_name(document: dict[str, Any], source: CredentialSource) -> str:
         return active[0]
     if list(document) == [DEFAULT_PROFILE]:
         return DEFAULT_PROFILE
+    ignored = bool(os.environ.get(PROFILE_ENV))
     raise CredentialError(
         f"credentials {source} has no active profile; mark one with active = true "
         f"or keep a single profile named {DEFAULT_PROFILE}"
+        + (f"; {PROFILE_ENV} does not pick an override's profile" if ignored else "")
     )
 
 
-def modal_tokens(credentials: str) -> tuple[str, str]:
+def profile_tokens(credentials: str) -> tuple[str, str, str]:
     source = CredentialSource.parse(credentials)
     try:
         document = tomllib.loads(source.read())
@@ -132,7 +134,12 @@ def modal_tokens(credentials: str) -> tuple[str, str]:
             f"profile {name} of credentials {source} has no token_id and token_secret; "
             "only token profiles are supported, not OAuth"
         )
-    return str(profile["token_id"]), str(profile["token_secret"])
+    return name, str(profile["token_id"]), str(profile["token_secret"])
+
+
+def modal_tokens(credentials: str) -> tuple[str, str]:
+    _, token_id, token_secret = profile_tokens(credentials)
+    return token_id, token_secret
 
 
 def credential_tokens(credentials: str | None) -> list[str]:
@@ -194,11 +201,12 @@ def check_credentials(
             )
         return verify_credentials(source, hello_from_env, [], timeout)
     try:
-        tokens = modal_tokens(credentials)
+        name, token_id, token_secret = profile_tokens(credentials)
     except CredentialError as exc:
         return CredentialCheck(CredentialStatus.MISSING, str(exc))
-    source = str(CredentialSource.parse(credentials))
-    return verify_credentials(source, hello_with_tokens(*tokens), list(tokens), timeout)
+    source = f"profile {name} of {CredentialSource.parse(credentials)}"
+    tokens = [token_id, token_secret]
+    return verify_credentials(source, hello_with_tokens(*tokens), tokens, timeout)
 
 
 def verify_credentials(
@@ -402,6 +410,17 @@ def stop_app(app_name: str, environment: str, credentials: str | None = None) ->
 
 class ModalProvider:
     type: ClassVar = "modal"
+    native_credential_env: ClassVar[tuple[str, ...]] = (
+        TOKEN_ID_ENV,
+        TOKEN_SECRET_ENV,
+        PROXY_TOKEN_ID_ENV,
+        PROXY_TOKEN_SECRET_ENV,
+    )
+
+    @staticmethod
+    def native_credential_files() -> list[Path]:
+        configured = os.environ.get(CONFIG_PATH_ENV)
+        return [*([Path(configured)] if configured else []), Path.home() / ".modal.toml"]
 
     def __init__(
         self,

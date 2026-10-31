@@ -116,13 +116,18 @@ def context_path(desired: Target) -> Path:
 
 
 def credential_files(desired: Target) -> list[Path]:
+    from multihull.providers.registry import native_credential_files
+
     sources = (
         CredentialSource.parse(t.credentials) for t in desired.service.targets if t.credentials
     )
-    return [source.path for source in sources if source.kind == "file"]
+    named = [source.path for source in sources if source.kind == "file"]
+    return [*named, *native_credential_files()]
 
 
 def credential_values(desired: Target) -> dict[str, str]:
+    from multihull.providers.registry import native_credential_env
+
     values: dict[str, str] = {}
     for target in desired.service.targets:
         if not target.credentials:
@@ -132,7 +137,7 @@ def credential_values(desired: Target) -> dict[str, str]:
         except CredentialError:
             continue
         values[str(CredentialSource.parse(target.credentials))] = value
-    for name in (API_TOKEN_ENV, CLI_AUTH_TOKEN_ENV):
+    for name in native_credential_env():
         if os.environ.get(name, "").strip():
             values[name] = os.environ[name]
     return values
@@ -409,6 +414,11 @@ class ReplicateApi:
 
 class ReplicateProvider:
     type: ClassVar = "replicate"
+    native_credential_env: ClassVar[tuple[str, ...]] = (API_TOKEN_ENV, CLI_AUTH_TOKEN_ENV)
+
+    @staticmethod
+    def native_credential_files() -> list[Path]:
+        return []
 
     def __init__(
         self,
