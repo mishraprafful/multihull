@@ -13,7 +13,7 @@ from multihull.cli import app
 from multihull.providers.base import Ref
 from multihull.providers.kubernetes import DynamicKubeClient
 from multihull.spec import ServiceSpec
-from multihull.state import Floor, LocalState, StateRecord
+from multihull.state import STATE_ENV, Floor, LocalState, StateRecord
 from tests.conftest import FIXTURES
 from tests.fake_kubernetes import FakeKubeClient
 from tests.fakes import FakeProvider
@@ -22,6 +22,7 @@ from tests.test_credentials import single_target_spec, write_spec
 runner = CliRunner()
 WIDE = {"COLUMNS": "1000"}
 PLANTED = "file:/planted/kubeconfig"
+REPEAT_HINT = "also pass the same"
 
 
 def outside_record(state: LocalState, service: str, provider: str, reference: str | None) -> Ref:
@@ -140,8 +141,37 @@ def test_plain_destroy_never_loads_a_kubeconfig_named_only_by_state(
     assert f"gone ({planted.reference})" in result.output
     rerun = shlex.join(["hull", "destroy", str(planted.spec), "--target", "gone"])
     assert f"nothing was destroyed; destroy them by name first: {rerun}" in result.output
+    assert f"{REPEAT_HINT} --state and --snapshot-out;" in result.output
+    assert planted.args[1] not in result.output
     record = planted.store.get("llama-8b", "gone")
     assert record is not None and record.last_status == "Ready"
+
+
+@pytest.mark.parametrize(
+    ("passed", "state_from_env", "repeat"),
+    [
+        (("--state", "--snapshot-out"), False, "--state and --snapshot-out"),
+        (("--snapshot-out",), True, "--snapshot-out"),
+        ((), True, None),
+    ],
+)
+def test_the_refusal_asks_to_repeat_only_the_options_a_rerun_would_lose(
+    planted: Planted,
+    monkeypatch: pytest.MonkeyPatch,
+    passed: tuple[str, ...],
+    state_from_env: bool,
+    repeat: str | None,
+) -> None:
+    values = dict(zip(planted.args[::2], planted.args[1::2], strict=True))
+    if state_from_env:
+        monkeypatch.setenv(STATE_ENV, values["--state"])
+    args = [arg for name in passed for arg in (name, values[name])]
+    result = runner.invoke(app, ["destroy", str(planted.spec), *args], env=WIDE)
+    assert result.exit_code == 1 and planted.loaded == []
+    assert values["--state"] not in result.output
+    hints = [line for line in result.output.splitlines() if line.startswith(REPEAT_HINT)]
+    expected = f"{REPEAT_HINT} {repeat}; they are left out above so a state URL is never printed"
+    assert hints == ([expected] if repeat else [])
 
 
 def test_destroy_by_name_shows_the_stored_reference_before_loading_it(planted: Planted) -> None:
