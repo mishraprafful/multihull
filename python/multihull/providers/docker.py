@@ -14,7 +14,7 @@ from docker.errors import ImageNotFound, NotFound
 from multihull.credentials import (
     CredentialError,
     CredentialSource,
-    base64_text,
+    decoded_base64,
     password_parts,
 )
 from multihull.providers.base import (
@@ -209,7 +209,7 @@ def docker_config_parts(content: str) -> list[str]:
     for entry in entries:
         parts.extend(str(entry[field]) for field in AUTH_TOKEN_FIELDS if entry.get(field))
         parts.extend(password_parts(entry.get(AUTH_PASSWORD_FIELD)))
-        decoded = base64_text(entry[AUTH_FIELD]) if entry.get(AUTH_FIELD) else None
+        decoded = decoded_base64(entry[AUTH_FIELD]) if entry.get(AUTH_FIELD) else None
         if decoded:
             parts.extend(password_parts(decoded.partition(":")[2]))
     return parts

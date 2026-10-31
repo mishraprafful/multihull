@@ -105,11 +105,15 @@ def read_small_text(path: Path) -> str | None:
         return None
 
 
-def base64_text(value: object) -> str | None:
+def decoded_base64(value: object) -> str | None:
     try:
         return base64.b64decode(str(value), validate=True).decode()
     except ValueError:
         return None
+
+
+def encoded_base64(text: str) -> str:
+    return base64.b64encode(text.encode()).decode()
 
 
 def password_parts(value: object) -> list[str]:

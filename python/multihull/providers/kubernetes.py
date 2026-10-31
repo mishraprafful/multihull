@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import os
 from collections.abc import Callable, Iterator
 from datetime import timedelta
@@ -12,7 +11,8 @@ import yaml
 from multihull.credentials import (
     CredentialError,
     CredentialSource,
-    base64_text,
+    decoded_base64,
+    encoded_base64,
     password_parts,
     read_small_text,
 )
@@ -82,15 +82,17 @@ def referenced_text(base: Path, named: object) -> str | None:
 def kubeconfig_parts(content: str, base: Path) -> list[str]:
     parts: list[str] = []
     for user in kubeconfig_users(content):
-        inline = (KUBECONFIG_TOKEN, KUBECONFIG_KEY_DATA)
-        parts.extend(str(user[field]) for field in inline if user.get(field))
-        key = base64_text(user[KUBECONFIG_KEY_DATA]) if user.get(KUBECONFIG_KEY_DATA) else None
-        if key:
-            parts.append(key)
-        for field in (KUBECONFIG_TOKEN_FILE, KUBECONFIG_KEY_FILE):
-            text = referenced_text(base, user.get(field))
-            if text:
-                parts.extend([text, base64.b64encode(text.encode()).decode()])
+        token = user.get(KUBECONFIG_TOKEN)
+        token_file = referenced_text(base, user.get(KUBECONFIG_TOKEN_FILE))
+        for value in (str(token) if token else None, token_file):
+            if value:
+                parts.extend([value, encoded_base64(value.strip())])
+        key_data = user.get(KUBECONFIG_KEY_DATA)
+        if key_data:
+            parts.extend(filter(None, [str(key_data), decoded_base64(key_data)]))
+        key_file = referenced_text(base, user.get(KUBECONFIG_KEY_FILE))
+        if key_file:
+            parts.extend([key_file, encoded_base64(key_file), encoded_base64(key_file.strip())])
         parts.extend(password_parts(user.get(KUBECONFIG_PASSWORD)))
     return parts
 

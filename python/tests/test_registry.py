@@ -140,13 +140,15 @@ def test_native_credential_values_hold_each_file_and_its_secret_parts(
         kubeconfig: {
             kubeconfig.read_text(),
             bearer,
+            encoded(bearer),
             strong,
             encoded(key_pem),
             key_pem,
             token_text,
-            encoded(token_text),
+            encoded(token_text.strip()),
             key_text,
             encoded(key_text),
+            encoded(key_text.strip()),
         },
         service_account: {service_account.read_text()},
         home / ".modal.toml": {(home / ".modal.toml").read_text(), *profile.values()},
@@ -165,7 +167,7 @@ def test_unresolvable_or_failing_sources_are_skipped(
     bearer = sentinel()
     user = {KUBECONFIG_TOKEN: bearer, KUBECONFIG_TOKEN_FILE: "~nosuchuser-xyz/t"}
     kubeconfig = yaml.safe_dump({"users": [{"name": "u", "user": user}]})
-    assert credential_parts("kubernetes", kubeconfig, tmp_path) == [bearer]
+    assert credential_parts("kubernetes", kubeconfig, tmp_path) == [bearer, encoded(bearer)]
 
     def broken(*_: object) -> list[Path]:
         raise RuntimeError("Could not determine home directory.")
