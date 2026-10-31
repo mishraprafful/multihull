@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import uuid
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -698,10 +699,10 @@ def test_apply_refuses_to_push_a_credentials_file_from_the_context(
         dry_run=False, http_client=fake.client(), cog=cog, credentials="file:replicate.token"
     )
     assert provider.plan(target, None).notes == [
-        f"build.context {context} ships replicate.token, a credentials file a target names; "
-        "exclude it in .dockerignore"
+        f"build.context {context} ships replicate.token, the credentials file "
+        f"{context / 'replicate.token'}; exclude it in .dockerignore"
     ]
-    with pytest.raises(ValueError, match="ships replicate.token, a credentials file"):
+    with pytest.raises(ValueError, match="ships replicate.token, the credentials file"):
         provider.apply(target, None)
     assert fake.calls == [] and cog.pushes == []
     with (context / ".dockerignore").open("a") as ignore:
@@ -729,7 +730,7 @@ def test_apply_refuses_a_hard_link_to_a_credentials_file_outside_the_context(
     provider = ReplicateProvider(
         dry_run=False, http_client=fake.client(), cog=cog, credentials=reference
     )
-    with pytest.raises(ValueError, match="ships bundled.bin, a credentials file"):
+    with pytest.raises(ValueError, match="ships bundled.bin, the credentials file"):
         provider.apply(Target(spec, spec.target("replicate")), None)
     assert fake.calls == [] and cog.pushes == []
 
@@ -815,3 +816,79 @@ def test_names_reach_the_api_as_single_quoted_segments(fake: FakeReplicate) -> N
     assert provider.status(ref).phase == "Failed"
     assert seen == [quoted.encode()]
     assert provider.endpoint(ref).url == f"https://api.replicate.com{quoted}"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "RUNPOD_API_KEY",
+        "RUNPOD_ENDPOINT_API_KEY",
+        "BASETEN_API_KEY",
+        "BASETEN_INFERENCE_API_KEY",
+        "MODAL_TOKEN_ID",
+        "MODAL_TOKEN_SECRET",
+    ],
+)
+def test_apply_refuses_a_context_file_holding_another_providers_native_key(
+    fake: FakeReplicate,
+    cog: FakeCog,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    value = uuid.uuid4().hex
+    (context / "deploy.cfg").write_text(f"{value}\n")
+    monkeypatch.setenv(name, value)
+    monkeypatch.chdir(context)
+    target = echo_target()
+    provider = ReplicateProvider(dry_run=False, http_client=fake.client(), cog=cog)
+    [note] = provider.plan(target, None).notes
+    assert note == (
+        f"build.context {context} ships deploy.cfg, which holds the value of {name}; "
+        "exclude it in .dockerignore"
+    )
+    with pytest.raises(ValueError) as raised:
+        provider.apply(target, None)
+    assert f"ships deploy.cfg, which holds the value of {name}" in str(raised.value)
+    assert value not in str(raised.value) and value not in note
+    assert fake.calls == [] and cog.pushes == []
+    monkeypatch.setenv(name, value[:7])
+    assert provider.plan(target, None).notes == []
+
+
+def test_apply_refuses_native_credential_files_by_identity(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    natives = {
+        "cluster.yaml": tmp_path / "clusters" / "gpu.yaml",
+        "kube-default": home / ".kube" / "config",
+        "modal.cfg": home / ".modal.toml",
+        "registry.json": home / ".docker" / "config.json",
+    }
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    for shipped, native in natives.items():
+        native.parent.mkdir(parents=True, exist_ok=True)
+        native.write_text(f"fixture for {shipped}\n")
+        os.link(native, context / shipped)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("KUBECONFIG", str(natives["cluster.yaml"]))
+    monkeypatch.delenv("DOCKER_CONFIG", raising=False)
+    monkeypatch.delenv("MODAL_CONFIG_PATH", raising=False)
+    monkeypatch.chdir(context)
+    target = echo_target()
+    provider = ReplicateProvider(dry_run=False, http_client=fake.client(), cog=cog)
+    assert provider.plan(target, None).notes == [
+        f"build.context {context} ships {shipped}, the credentials file {native}; "
+        "exclude it in .dockerignore"
+        for shipped, native in natives.items()
+    ]
+    with pytest.raises(ValueError, match="ships cluster.yaml, the credentials file"):
+        provider.apply(target, None)
+    assert fake.calls == [] and cog.pushes == []
+    with (context / ".dockerignore").open("a") as ignore:
+        ignore.write("".join(f"{shipped}\n" for shipped in natives))
+    assert provider.plan(target, None).notes == []
