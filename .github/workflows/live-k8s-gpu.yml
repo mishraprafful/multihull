@@ -112,7 +112,8 @@ jobs:
           cache-dependency-glob: |
             testing/live/uv.lock
             python/uv.lock
-      - run: uv sync --locked --project testing/live
+      - id: sync
+        run: uv sync --locked --project testing/live
       - name: Cluster preflight (API, namespace, RBAC, GPU nodes, model access)
         working-directory: testing/live
         timeout-minutes: 5
@@ -142,12 +143,12 @@ jobs:
           LIVE_WORKDIR: ${{ runner.temp }}/live
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
       - name: Destroy
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         timeout-minutes: 10
         working-directory: testing/live
         run: uv run python -m live.kubernetes_gpu destroy --workdir "$RUNNER_TEMP/live"
       - name: Force-delete Kubernetes objects left by this run
-        if: always() && steps.kubeconfig.outcome == 'success'
+        if: always() && steps.kubeconfig.outcome == 'success' && steps.sync.outcome == 'success'
         timeout-minutes: 8
         working-directory: testing/live
         run: |
@@ -156,7 +157,7 @@ jobs:
           uv run python -m live.kubernetes_gpu sweep --namespace "$LIVE_KUBE_NAMESPACE" \
             --service "$LIVE_SERVICE" | tee "$log"
       - name: Stop Modal apps left by this run
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         timeout-minutes: 5
         working-directory: testing/live
         env:
@@ -171,7 +172,7 @@ jobs:
           uv run python -m live.sweep --prefix "${APP_PREFIX}${GITHUB_RUN_ID}" \
             --env "$MODAL_ENVIRONMENT" | tee "$log"
       - name: Assert nothing is left on Kubernetes or Modal
-        if: always() && steps.kubeconfig.outcome == 'success'
+        if: always() && steps.kubeconfig.outcome == 'success' && steps.sync.outcome == 'success'
         timeout-minutes: 5
         working-directory: testing/live
         env:
@@ -187,7 +188,7 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/kubeconfig"
       - name: Job summary
-        if: always()
+        if: always() && steps.sync.outcome == 'success'
         working-directory: testing/live
         run: >
           uv run python -m live.summary publish --workdir "$RUNNER_TEMP/live"
