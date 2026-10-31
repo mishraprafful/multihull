@@ -5,7 +5,7 @@ import os
 import posixpath
 import re
 import sqlite3
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -141,15 +141,15 @@ def multihull_state(path: Path) -> bool:
     return found is not None
 
 
-def hash_file(path: Path, digest: hashlib._Hash, needles: Mapping[str, bytes]) -> set[str]:
-    keep = max(len(needle) for needle in needles.values()) - 1
+def hash_file(path: Path, digest: hashlib._Hash, needles: Sequence[tuple[str, bytes]]) -> set[str]:
+    keep = max(len(needle) for _, needle in needles) - 1
     tail = b""
     found: set[str] = set()
     with path.open("rb") as handle:
         while chunk := handle.read(READ_CHUNK):
             digest.update(chunk)
             window = tail + chunk
-            found.update(label for label, needle in needles.items() if needle in window)
+            found.update(label for label, needle in needles if needle in window)
             tail = window[-keep:] if keep else b""
     return found
 
@@ -166,15 +166,15 @@ def identities(paths: Sequence[Path]) -> dict[tuple[int, int], set[str]]:
 
 
 def scan_context(
-    root: Path, protected: Sequence[Path] = (), secrets: Mapping[str, str] | None = None
+    root: Path, protected: Sequence[Path] = (), secrets: Iterable[tuple[str, str]] = ()
 ) -> ContextScan:
     digest = hashlib.sha256()
     problems: list[str] = []
     rules = read_rules(root)
-    needles = {SNAPSHOT: SNAPSHOT_MARKER}
-    for origin, value in (secrets or {}).items():
+    needles = [(SNAPSHOT, SNAPSHOT_MARKER)]
+    for origin, value in dict.fromkeys(secrets):
         if len(value.strip()) >= MIN_SECRET_LENGTH:
-            needles[origin] = value.strip().encode()
+            needles.append((origin, value.strip().encode()))
     guarded = identities(protected)
     for relative in shipped_files(root, rules, UNHASHED_DIRS):
         status = (root / relative).lstat()

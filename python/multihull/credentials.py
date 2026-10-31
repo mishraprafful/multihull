@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import base64
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 CREDENTIALS_PATTERN = r"^(env:[A-Za-z_][A-Za-z0-9_]*|file:\S.*)$"
 CREDENTIALS_FORMAT = "env:NAME (an environment variable name) or file:PATH"
+SMALL_FILE_BYTES = 1 << 20
+MIN_PASSWORD_LENGTH = 16
 
 
 class CredentialError(RuntimeError):
@@ -77,3 +81,41 @@ def credential_problem(reference: str) -> str | None:
     except CredentialError as exc:
         return str(exc)
     return None
+
+
+def read_small_text(path: Path) -> str | None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except (OSError, ValueError):
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        with open(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(SMALL_FILE_BYTES + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    if len(data) > SMALL_FILE_BYTES:
+        return None
+    try:
+        return data.decode()
+    except UnicodeDecodeError:
+        return None
+
+
+def decoded_base64(value: object) -> str | None:
+    try:
+        return base64.b64decode(str(value), validate=True).decode()
+    except ValueError:
+        return None
+
+
+def encoded_base64(text: str) -> str:
+    return base64.b64encode(text.encode()).decode()
+
+
+def password_parts(value: object) -> list[str]:
+    text = str(value) if value else ""
+    return [text] if len(text.strip()) >= MIN_PASSWORD_LENGTH else []

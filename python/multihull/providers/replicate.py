@@ -15,7 +15,6 @@ from multihull.build_context import ContextScan, scan_context
 from multihull.credentials import (
     CredentialError,
     CredentialSource,
-    read_credential,
     read_token,
     token_origin,
 )
@@ -125,21 +124,31 @@ def credential_files(desired: Target) -> list[Path]:
     return [*named, *native_credential_files()]
 
 
-def credential_values(desired: Target) -> dict[str, str]:
-    from multihull.providers.registry import native_credential_env
+def credential_values(desired: Target) -> list[tuple[str, str]]:
+    from multihull.providers.registry import (
+        credential_parts,
+        native_credential_env,
+        native_credential_values,
+    )
 
-    values: dict[str, str] = {}
+    values: list[tuple[str, str]] = []
     for target in desired.service.targets:
         if not target.credentials:
             continue
+        source = CredentialSource.parse(target.credentials)
         try:
-            value = read_credential(target.credentials)
+            value = source.read()
         except CredentialError:
             continue
-        values[str(CredentialSource.parse(target.credentials))] = value
-    for name in native_credential_env():
-        if os.environ.get(name, "").strip():
-            values[name] = os.environ[name]
+        base = source.path.parent if source.kind == "file" else Path.cwd()
+        parts = credential_parts(target.type, value, base)
+        values.extend((str(source), part) for part in [value, *parts])
+    values.extend(
+        (name, os.environ[name])
+        for name in native_credential_env()
+        if os.environ.get(name, "").strip()
+    )
+    values.extend((f"a credential in {path}", value) for path, value in native_credential_values())
     return values
 
 
@@ -160,7 +169,9 @@ def context_notes(desired: Target, scan: ContextScan | None) -> list[str]:
     ]
 
 
-def checked_scan(context: Path, protected: list[Path], secrets: dict[str, str]) -> ContextScan:
+def checked_scan(
+    context: Path, protected: list[Path], secrets: list[tuple[str, str]]
+) -> ContextScan:
     if not context.is_dir():
         raise ValueError(f"build.context {context} is not a directory")
     scan = scan_context(context, protected, secrets)
@@ -418,6 +429,10 @@ class ReplicateProvider:
 
     @staticmethod
     def native_credential_files() -> list[Path]:
+        return []
+
+    @staticmethod
+    def credential_parts(content: str, base: Path) -> list[str]:
         return []
 
     def __init__(
