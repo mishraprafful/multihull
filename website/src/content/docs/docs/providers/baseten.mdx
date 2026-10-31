@@ -3,7 +3,7 @@ title: Baseten
 description: Baseten custom-server deployments through the management API.
 ---
 
-Calls Baseten's management API (`https://api.baseten.co/v1`) directly. `apply` renders a Truss `config.yaml` for a custom server (`base_image`, `docker_server`), uploads it as a config-only Truss archive and creates the model `multihull-<svc>-<provider>`, or a new deployment of it, pushed to the `production` environment. On `main`, unreleased: tested against a mocked API, not yet run against Baseten.
+Calls Baseten's management API (`https://api.baseten.co/v1`) directly. `apply` renders a Truss `config.yaml` for a custom server (`base_image`, `docker_server`), uploads it as a config-only Truss archive and creates the model `multihull-<svc>-<provider>`, or a new deployment of it, pushed to the `production` environment. Since 0.3.0: tested against a mocked API, not yet run against Baseten.
 
 ```yaml
 - provider: baseten-us

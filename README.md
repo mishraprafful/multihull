@@ -13,18 +13,18 @@ A Python control plane translates the spec into each provider's native resources
 
 *`make demo` in five beats: one spec and `hull deploy`; streaming completions through one URL; `hull top` live; the primary stopped, traffic moves, errors stay at 0; the primary restored, traffic returns. Free, local, no GPUs: [examples/demo](examples/demo/README.md).*
 
-**Status (0.2.0):** Kubernetes and Modal deploy from one spec and fail over per request, proven with the mock model server on CPU and with a real model (Qwen2.5-1.5B-Instruct on vLLM) on two Modal L4 targets. RunPod, Baseten and Replicate deploy on `main` (unreleased, tested against mocked APIs, not yet run live). No Kubernetes GPU run yet. See [what is proven](docs/releases/0.2.0.md#what-is-proven).
+**Status (0.3.0):** Kubernetes and Modal deploy from one spec and fail over per request, proven with the mock model server on CPU and with a real model (Qwen2.5-1.5B-Instruct on vLLM) on two Modal L4 targets. RunPod, Baseten and Replicate deploy too, tested against mocked APIs, not yet run live. No Kubernetes GPU run yet. See [what is proven](docs/releases/0.3.0.md#what-is-proven).
 
 ## Providers
 
-| Provider | 0.2.0 |
+| Provider | 0.3.0 |
 |---|---|
 | Kubernetes | Working: deploy, status, scale, logs, destroy |
 | Modal | Working: deploy, status, scale, logs, destroy |
 | Docker | Working, for laptops and CI |
-| RunPod | On `main`, unreleased: deploy, status, scale, logs, destroy; not yet run live |
-| Baseten | On `main`, unreleased: deploy, status, scale, logs, destroy; not yet run live |
-| Replicate | On `main`, unreleased: deploy, status, scale, destroy for Cog models; not yet run live |
+| RunPod | Deploy, status, scale, logs, destroy; tested against a mocked API, not yet run live |
+| Baseten | Deploy, status, scale, logs, destroy; tested against a mocked API, not yet run live |
+| Replicate | Deploy, status, scale, destroy for Cog models; tested against a mocked API, not yet run live |
 
 ## Principles
 
@@ -35,7 +35,7 @@ A Python control plane translates the spec into each provider's native resources
 ## Quickstart
 
 ```sh
-uv tool install 'multihull[modal]==0.2.0'
+uv tool install 'multihull[modal]==0.3.0'
 hull init                       # writes multihull.yaml; edit the image, contexts and GPU request
 hull doctor                     # checks credentials per target
 hull plan                       # renders native payloads to .multihull/plan/, shows diff
@@ -48,7 +48,7 @@ hull status
 
 The full walkthrough, router and first request included, is the [quickstart](https://multihull.pages.dev/docs/quickstart/).
 
-Then run the router against the snapshot `hull deploy` wrote, or `hull controller` and the Helm chart: see the [router overview](https://multihull.pages.dev/docs/router/overview/). Releases: [CHANGELOG.md](CHANGELOG.md), [release notes](docs/releases/0.2.0.md), [release runbook](docs/runbooks/release.md).
+Then run the router against the snapshot `hull deploy` wrote, or `hull controller` and the Helm chart: see the [router overview](https://multihull.pages.dev/docs/router/overview/). Releases: [CHANGELOG.md](CHANGELOG.md), [release notes](docs/releases/0.3.0.md), [release runbook](docs/runbooks/release.md).
 
 ## Repository
 

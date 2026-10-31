@@ -3,7 +3,7 @@ title: Replicate
 description: Cog models on Replicate deployments, routed as Cog predictions.
 ---
 
-Replicate runs Cog models only, so a service with a Replicate target sets `build.target: cog` and every target runs the same Cog image. `apply` calls Replicate's HTTP API (`https://api.replicate.com/v1`) and the Cog CLI: it creates the private model `<account>/multihull-<svc>` if missing, runs `cog push r8.im/<account>/multihull-<svc>` in `build.context`, then creates or updates the deployment `multihull-<svc>-<provider>` with the pushed version. On `main`, unreleased: tested against a mocked API, not yet run against Replicate.
+Replicate runs Cog models only, so a service with a Replicate target sets `build.target: cog` and every target runs the same Cog image. `apply` calls Replicate's HTTP API (`https://api.replicate.com/v1`) and the Cog CLI: it creates the private model `<account>/multihull-<svc>` if missing, runs `cog push r8.im/<account>/multihull-<svc>` in `build.context`, then creates or updates the deployment `multihull-<svc>-<provider>` with the pushed version. Since 0.3.0: tested against a mocked API, not yet run against Replicate.
 
 ```yaml
 container:
