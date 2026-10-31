@@ -891,7 +891,7 @@ def test_docker_library_errors_become_credential_errors_naming_the_source(
         assert marker not in message and encoded not in message
 
 
-def test_a_removed_target_is_destroyed_with_its_override_but_never_refreshed_with_it(
+def test_a_removed_target_uses_its_override_only_when_destroyed_by_name(
     monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], tmp_path: Path, fake_registry
 ) -> None:
     value = sentinel()
@@ -929,7 +929,11 @@ def test_a_removed_target_is_destroyed_with_its_override_but_never_refreshed_wit
     after = store.get("llama-8b", "modal-main")
     assert before is not None and after is not None
     assert after.last_status == before.last_status
-    destroyed = runner.invoke(app, ["destroy", str(path), "--yes", *state])
+    refused = runner.invoke(app, ["destroy", str(path), "--yes", *state])
+    assert refused.exit_code == 1
+    assert fake_registry["modal"].kwargs == {} and fake_registry["modal"].destroyed == []
+    named = ["destroy", str(path), "--yes", "--target", "modal-main", *state]
+    destroyed = runner.invoke(app, named)
     assert destroyed.exit_code == 0, destroyed.output
     assert fake_registry["modal"].kwargs == {"dry_run": False, "credentials": reference}
     assert [ref.ids["credentials"] for ref in fake_registry["modal"].destroyed] == [reference]
