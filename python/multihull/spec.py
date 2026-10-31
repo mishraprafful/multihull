@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
@@ -20,6 +21,9 @@ PROVIDER_TYPES: tuple[ProviderType, ...] = (
     "docker",
 )
 ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
+VERBATIM_SECRET_PROVIDERS: frozenset[ProviderType] = frozenset(
+    {"kubernetes", "modal", "runpod", "baseten"}
+)
 
 
 class GPU(StrEnum):
@@ -280,6 +284,19 @@ class ServiceSpec(SpecModel):
             f"fallback targets ({names}) can run {available} replicas in total, fewer than "
             f"{needed} ({factor:g} x the {primary_max} of primary {primary.provider}); "
             "a primary outage would leave them no headroom, so raise replicas.max on a fallback"
+        ]
+
+    def secret_name_warnings(self) -> list[str]:
+        verbatim = [t.provider for t in self.targets if t.type in VERBATIM_SECRET_PROVIDERS]
+        if not verbatim:
+            return []
+        providers = ", ".join(verbatim)
+        return [
+            f"container.secrets name {name!r} is not an environment variable name, yet "
+            f"targets ({providers}) expose it to the container under exactly that name; "
+            "name it after the variable the program reads, such as HF_TOKEN"
+            for name in self.container.secrets
+            if not re.fullmatch(ENV_NAME_PATTERN, name)
         ]
 
     def target(self, provider: str) -> TargetSpec:

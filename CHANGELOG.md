@@ -15,6 +15,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Replicate in the translator conformance suite, and `examples/replicate-echo`, a Cog echo model on Docker and Replicate (#65).
 - `live-smoke.yml` job `replicate-smoke` (suite `testing/live/replicate`) and a daily Replicate deployment sweep, both skipped without the `REPLICATE_API_TOKEN` and `REPLICATE_CLI_AUTH_TOKEN` secrets (#65).
 - `live-k8s-gpu.yml`: a manual run of Llama 3.1 8B on a real GPU Kubernetes cluster (priority 1) with Modal (priority 2): cluster preflight, failover to Modal and back with zero client errors, forced cleanup of both providers and a final check that nothing is left. A least-privilege `rbac.yaml`, a kubeconfig script and the runbook at `docs/testing/kubernetes-gpu`. Skipped without `GPU_KUBECONFIG`; not yet run (#68).
+- `hull validate`, `plan` and `deploy` warn when a `container.secrets` name is not a valid environment variable name and a Kubernetes, Modal, RunPod or Baseten target passes it to the container under exactly that name (#190).
 
 ### Changed
 
