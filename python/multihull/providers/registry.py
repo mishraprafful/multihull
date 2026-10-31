@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from multihull.providers.base import Provider
@@ -10,14 +11,27 @@ from multihull.providers.modal import ModalProvider
 from multihull.providers.replicate import ReplicateProvider
 from multihull.providers.runpod import RunpodProvider
 
-PROVIDERS: dict[str, type] = {
-    KubernetesProvider.type: KubernetesProvider,
-    ModalProvider.type: ModalProvider,
-    RunpodProvider.type: RunpodProvider,
-    BasetenProvider.type: BasetenProvider,
-    ReplicateProvider.type: ReplicateProvider,
-    DockerProvider.type: DockerProvider,
-}
+PROVIDER_CLASSES = (
+    KubernetesProvider,
+    ModalProvider,
+    RunpodProvider,
+    BasetenProvider,
+    ReplicateProvider,
+    DockerProvider,
+)
+PROVIDERS: dict[str, type] = {cls.type: cls for cls in PROVIDER_CLASSES}
+
+
+def native_credential_env() -> list[str]:
+    return list(
+        dict.fromkeys(name for cls in PROVIDER_CLASSES for name in cls.native_credential_env)
+    )
+
+
+def native_credential_files() -> list[Path]:
+    return list(
+        dict.fromkeys(path for cls in PROVIDER_CLASSES for path in cls.native_credential_files())
+    )
 
 
 def create(provider_type: str, **kwargs: Any) -> Provider:
