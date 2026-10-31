@@ -81,7 +81,7 @@ def test_apply_with_injected_client(target_for, monkeypatch: pytest.MonkeyPatch)
     }
     secret = client.applied[0]
     assert secret["kind"] == "Secret"
-    assert list(secret["stringData"]) == ["hf-token"]
+    assert list(secret["stringData"]) == ["HF_TOKEN"]
     assert FIELD_MANAGER == "multihull"
 
 

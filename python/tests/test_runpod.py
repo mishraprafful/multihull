@@ -290,7 +290,7 @@ def test_rediscover_pages_through_endpoints_by_name(
         "name": "multihull-llama-8b-runpod-eu",
         "url": created.ids["url"],
         "health_path": "/health",
-        "secrets": secret_store_name(target, "hf-token"),
+        "secrets": secret_store_name(target, "HF_TOKEN"),
     }
     assert RunpodProvider(False, "runpod-us", fake.client()).rediscover("llama-8b") is None
 

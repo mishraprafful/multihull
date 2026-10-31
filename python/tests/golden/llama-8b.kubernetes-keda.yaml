@@ -7,7 +7,7 @@ metadata:
     multihull.dev/service: llama-8b
     multihull.dev/provider: gke-prod
   annotations:
-    multihull.dev/secret-keys: hf-token
+    multihull.dev/secret-keys: HF_TOKEN
 type: Opaque
 ---
 apiVersion: apps/v1

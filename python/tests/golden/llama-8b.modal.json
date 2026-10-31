@@ -36,7 +36,7 @@
   "secret": {
     "name": "multihull-llama-8b-modal-main",
     "keys": [
-      "hf-token"
+      "HF_TOKEN"
     ]
   }
 }
