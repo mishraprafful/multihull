@@ -13,7 +13,7 @@ from multihull.cli import app
 from multihull.providers.base import Ref
 from multihull.providers.kubernetes import DynamicKubeClient
 from multihull.spec import ServiceSpec
-from multihull.state import STATE_ENV, Floor, LocalState, StateRecord
+from multihull.state import DEFAULT_STATE, STATE_ENV, Floor, LocalState, StateRecord
 from tests.conftest import FIXTURES
 from tests.fake_kubernetes import FakeKubeClient
 from tests.fakes import FakeProvider
@@ -148,27 +148,36 @@ def test_plain_destroy_never_loads_a_kubeconfig_named_only_by_state(
 
 
 @pytest.mark.parametrize(
-    ("passed", "state_from_env", "repeat"),
+    ("args", "env_state", "repeat"),
     [
-        (("--state", "--snapshot-out"), False, "--state and --snapshot-out"),
-        (("--snapshot-out",), True, "--snapshot-out"),
-        ((), True, None),
+        (["--state", "planted", "--snapshot-out", "snapshot"], None, "--state and --snapshot-out"),
+        (["--snapshot-out", "snapshot"], "planted", "--snapshot-out"),
+        ([], "planted", None),
+        (["--state", "default"], "other", "--state"),
     ],
 )
 def test_the_refusal_asks_to_repeat_only_the_options_a_rerun_would_lose(
     planted: Planted,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    passed: tuple[str, ...],
-    state_from_env: bool,
+    args: list[str],
+    env_state: str | None,
     repeat: str | None,
 ) -> None:
-    values = dict(zip(planted.args[::2], planted.args[1::2], strict=True))
-    if state_from_env:
-        monkeypatch.setenv(STATE_ENV, values["--state"])
-    args = [arg for name in passed for arg in (name, values[name])]
-    result = runner.invoke(app, ["destroy", str(planted.spec), *args], env=WIDE)
+    monkeypatch.chdir(tmp_path)
+    outside_record(LocalState(DEFAULT_STATE), "llama-8b", "gone", planted.reference)
+    values = {
+        "planted": planted.args[1],
+        "snapshot": planted.args[3],
+        "default": DEFAULT_STATE,
+        "other": str(tmp_path / "other.db"),
+    }
+    if env_state is not None:
+        monkeypatch.setenv(STATE_ENV, values[env_state])
+    passed = [values.get(arg, arg) for arg in args]
+    result = runner.invoke(app, ["destroy", str(planted.spec), *passed], env=WIDE)
     assert result.exit_code == 1 and planted.loaded == []
-    assert values["--state"] not in result.output
+    assert values["planted"] not in result.output
     hints = [line for line in result.output.splitlines() if line.startswith(REPEAT_HINT)]
     expected = f"{REPEAT_HINT} {repeat}; they are left out above so a state URL is never printed"
     assert hints == ([expected] if repeat else [])

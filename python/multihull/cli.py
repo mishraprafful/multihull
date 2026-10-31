@@ -408,7 +408,7 @@ def colour_result(ok: bool, phase: str) -> str:
 
 def options_to_repeat(state_url: str, snapshot_out: Path) -> list[str]:
     options: list[str] = []
-    if state_url not in (DEFAULT_STATE, os.environ.get(STATE_ENV)):
+    if state_url != (os.environ.get(STATE_ENV) or DEFAULT_STATE):
         options.append("--state")
     if snapshot_out != deploymod.DEFAULT_SNAPSHOT_PATH:
         options.append("--snapshot-out")
