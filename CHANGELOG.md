@@ -23,6 +23,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
 - A provider key or token that is only whitespace (`RUNPOD_API_KEY`, `BASETEN_API_KEY`, `REPLICATE_API_TOKEN`) now counts as missing, so `hull doctor` fails on it (#67).
 - The Replicate client builds every API path and the deployment endpoint URL with `api_path`, as the Baseten and RunPod clients do: each owner, model and deployment name is one quoted segment, and an empty, `.` or `..` name is refused before any request (#189).
+- `hull destroy` uses a stored `credentials` reference only for a target named with `--target`, and its confirmation shows the reference. A plain `hull destroy` (and SDK `Service.destroy()` without `target`) that covers a target outside the spec with a stored reference stops before destroying anything, names it and prints the `--target` command, so a crafted state record cannot make a routine teardown load a planted kubeconfig (#187).
 - The `llama-8b` example's secret is renamed from `hf-token` to `HF_TOKEN`. If you deployed the example, run `hull destroy` before redeploying it: `hull deploy` mirrors the new name only, so the RunPod and Baseten secrets mirrored under the old name would stay behind (#190).
 
 ### Fixed
@@ -33,6 +34,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - The Baseten endpoint no longer ends in `/production/predict`, which sent probes and routed paths to the predict route; the Truss config no longer carries the unsupported `runtime.health_checks.initial_delay_seconds` (#64).
 - Baseten `hull plan` notes and `apply` refuses a `container.secrets` name containing `%`: a name that is not a shell identifier reaches `docker_server.start_command` through `exec env`, where `%` fails the `supervisord.conf` build as it does in `container.command` (#185).
 - `hull deploy --wait` returns as soon as a Baseten rollout has failed (new deployment `BUILD_FAILED`, `DEPLOY_FAILED` or `INACTIVE`) instead of waiting out the 20 minute timeout; the target stays Degraded and not ok while the router keeps routing to the previous deployment. Kubernetes Degraded still waits for Ready (#184).
+- Baseten `hull plan` notes and `apply` refuses a `docker_server.start_command` that supervisord would cut or change: `;` or `#` after whitespace, which supervisor 4.2.5 (pinned by truss) reads as an inline comment, or any line break, which loses indentation or splits the line. One check on the rendered command covers `container.command` and secret names; the secrets wrapper still passes (#207).
 - Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile, as Modal does (#67).
 - The `llama-8b` example names its Hugging Face secret `HF_TOKEN`; `hf-token` reached containers as env `hf-token`, which Hugging Face ignores, so the gated model failed to download (#190).
 

@@ -3,15 +3,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shlex
 import signal
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 import yaml
 from pydantic import ValidationError
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from multihull import __version__, discovery, engine
@@ -34,6 +36,7 @@ from multihull.state import (
     STATE_ENV,
     StateBackend,
     StateBackendError,
+    StateRecord,
     open_state,
 )
 from multihull.stream_security import DEFAULT_TOKEN_ENV, StreamSecurity, StreamSecurityError
@@ -402,6 +405,24 @@ def colour_result(ok: bool, phase: str) -> str:
     return f"[{colour}]{phase}[/{colour}]"
 
 
+def refuse_unnamed_stored_credentials(
+    path: Path, refused: engine.UnnamedStoredCredentials
+) -> NoReturn:
+    spec_arg = [] if path == DEFAULT_SPEC else [str(path)]
+    named = [arg for name in refused.records for arg in ("--target", name)]
+    command = shlex.join(["hull", "destroy", *spec_arg, *named])
+    errors.print(f"[red]{escape(str(refused))}[/red]")
+    errors.print(f"nothing was destroyed; destroy them by name first: {escape(command)}")
+    raise typer.Exit(1)
+
+
+def destroy_label(record: StateRecord, known: set[str]) -> str:
+    reference = engine.stored_credentials(Ref.from_json(record.ref))
+    if record.provider in known or reference is None:
+        return record.provider
+    return f"{record.provider} (stored credentials {reference})"
+
+
 @app.command()
 def destroy(
     path: SpecArg = DEFAULT_SPEC,
@@ -413,15 +434,20 @@ def destroy(
     service = load_or_exit(path)
     route_keys_or_exit(service)
     state = state_or_exit(state_url)
-    records = [r for r in state.list(service.name) if not target or r.provider in target]
+    known = {t.provider for t in service.targets}
+    only = set(target) if target else None
+    try:
+        records = engine.destroy_records(service.name, state, known, only)
+    except engine.UnnamedStoredCredentials as exc:
+        refuse_unnamed_stored_credentials(path, exc)
     if not records:
         console.print(f"nothing to destroy for {service.name}")
         return
-    names = ", ".join(r.provider for r in records)
+    names = ", ".join(destroy_label(record, known) for record in records)
     if not yes and not typer.confirm(f"destroy {service.name} on {names}?"):
         raise typer.Exit(1)
     providers = providers_for(service, live=True)
-    results = engine.destroy(service.name, state, providers, only=set(target) if target else None)
+    results = engine.destroy(service.name, state, providers, only=only)
     table = Table(title=f"destroy {service.name}")
     table.add_column("provider")
     table.add_column("type")
