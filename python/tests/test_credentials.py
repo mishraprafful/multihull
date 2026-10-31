@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import secrets
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,13 @@ from typer.testing import CliRunner
 
 from multihull import spec as specmod
 from multihull.cli import app
-from multihull.credentials import CredentialError, CredentialSource, read_token
+from multihull.credentials import (
+    SMALL_FILE_BYTES,
+    CredentialError,
+    CredentialSource,
+    read_small_text,
+    read_token,
+)
 from multihull.providers.runpod import API_KEY_ENV
 from multihull.sdk import target as sdk_target
 from multihull.spec import ServiceSpec
@@ -164,3 +171,17 @@ def test_native_location_applies_without_an_override(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv(API_KEY_ENV)
     with pytest.raises(CredentialError, match=f"^{API_KEY_ENV} is not set$"):
         read_token(None, API_KEY_ENV)
+
+
+def test_read_small_text_reads_at_most_the_cap_from_regular_files(tmp_path: Path) -> None:
+    exact = tmp_path / "exact"
+    exact.write_bytes(b"x" * SMALL_FILE_BYTES)
+    assert read_small_text(exact) == "x" * SMALL_FILE_BYTES
+    with exact.open("ab") as grown:
+        grown.write(b"x")
+    assert read_small_text(exact) is None
+    (tmp_path / "binary").write_bytes(b"\xff\xfe")
+    os.mkfifo(tmp_path / "pipe")
+    for unreadable in ("binary", "pipe", "missing", "."):
+        assert read_small_text(tmp_path / unreadable) is None
+    assert read_small_text(tmp_path / "nul\x00byte") is None

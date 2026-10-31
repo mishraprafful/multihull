@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -83,10 +84,23 @@ def credential_problem(reference: str) -> str | None:
 
 def read_small_text(path: Path) -> str | None:
     try:
-        if not path.is_file() or path.stat().st_size > SMALL_FILE_BYTES:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except (OSError, ValueError):
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             return None
-        return path.read_text()
-    except (OSError, UnicodeDecodeError):
+        with open(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(SMALL_FILE_BYTES + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    if len(data) > SMALL_FILE_BYTES:
+        return None
+    try:
+        return data.decode()
+    except UnicodeDecodeError:
         return None
 
 
