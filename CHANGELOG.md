@@ -21,6 +21,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - The router answers `400` `bad_request_target` to a request target without a leading `/` or with a `.` or `..` segment (also `..;`), raw or percent-encoded, instead of appending it to the endpoint URL (#65).
 - Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
 - A provider key or token that is only whitespace (`RUNPOD_API_KEY`, `BASETEN_API_KEY`, `REPLICATE_API_TOKEN`) now counts as missing, so `hull doctor` fails on it (#67).
+- The Replicate client builds every API path and the deployment endpoint URL with `api_path`, as the Baseten and RunPod clients do: each owner, model and deployment name is one quoted segment, and an empty, `.` or `..` name is refused before any request (#189).
 
 ### Fixed
 
