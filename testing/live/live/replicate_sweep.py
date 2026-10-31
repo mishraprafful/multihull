@@ -13,6 +13,7 @@ from multihull.providers.replicate import (
     HTTP_TIMEOUT_SECONDS,
     ReplicateApi,
     ReplicateApiError,
+    deployment_path,
     live_settings,
     release_of,
 )
@@ -50,7 +51,7 @@ def offline(deployment: Mapping[str, Any]) -> bool:
 
 
 def sweep(api: ReplicateApi, deployment: Mapping[str, Any]) -> str:
-    path = f"/deployments/{deployment['owner']}/{deployment['name']}"
+    path = deployment_path(str(deployment["owner"]), str(deployment["name"]))
     if not offline(deployment):
         api.call("PATCH", path, OFFLINE)
         return "scaled to zero; a later sweep deletes it"
@@ -83,7 +84,7 @@ def main(argv: Sequence[str] | None = None, api: ReplicateApi | None = None) -> 
     for deployment in targets:
         try:
             outcome = sweep(client, deployment)
-        except (RuntimeError, httpx.HTTPError) as exc:
+        except (RuntimeError, ValueError, httpx.HTTPError) as exc:
             outcome = f"failed: {exc}"
             failed += 1
         print(f"{deployment['owner']}/{deployment['name']} {outcome}")

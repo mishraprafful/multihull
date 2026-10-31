@@ -102,3 +102,26 @@ def test_sweeper_without_a_token_skips(
     unused = httpx.MockTransport(lambda request: httpx.Response(500))
     assert main(["--prefix", "multihull-live-"], api_answering(unused)) == 1
     assert capsys.readouterr().out.startswith(f"skipped, {API_TOKEN_ENV} is not set")
+
+
+def test_sweeper_quotes_names_and_skips_a_dot_segment_owner(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv(API_TOKEN_ENV, CALLER)
+    tampered = {**deployment("multihull-live-x-replicate", "2026-10-26T09:00:00Z"), "owner": ".."}
+    listed = [tampered, deployment("multihull-live-y-replicate", "2026-10-26T09:00:00Z")]
+    writes: list[tuple[str, bytes]] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"next": None, "previous": None, "results": listed})
+        writes.append((request.method, request.url.raw_path))
+        return httpx.Response(204)
+
+    assert main(["--prefix", "multihull-live-"], api_answering(httpx.MockTransport(answer))) == 1
+    assert writes == [("DELETE", b"/v1/deployments/acme/multihull-live-y-replicate")]
+    assert capsys.readouterr().out.splitlines() == [
+        "../multihull-live-x-replicate failed: refusing an API path with an empty or dot segment",
+        "acme/multihull-live-y-replicate deleted",
+        "2 deployment(s) matched multihull-live-, 1 failed",
+    ]
