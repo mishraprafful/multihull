@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import subprocess
@@ -10,11 +11,15 @@ from typing import Any
 
 import httpx
 import pytest
+import yaml
 
 from multihull import discovery, engine
 from multihull import spec as specmod
 from multihull.build_context import scan_context
+from multihull.providers import kubernetes as kubernetes_provider
 from multihull.providers.base import Ref, ScaleRefused, Target
+from multihull.providers.kubernetes import KUBECONFIG_INLINE_SECRETS, KUBECONFIG_SECRET_FILES
+from multihull.providers.modal import PROFILE_TOKEN_FIELDS
 from multihull.providers.replicate import (
     API_TOKEN_ENV,
     CLI_AUTH_TOKEN_ENV,
@@ -892,3 +897,97 @@ def test_apply_refuses_native_credential_files_by_identity(
     with (context / ".dockerignore").open("a") as ignore:
         ignore.write("".join(f"{shipped}\n" for shipped in natives))
     assert provider.plan(target, None).notes == []
+
+
+def encoded(text: str) -> str:
+    return base64.b64encode(text.encode()).decode()
+
+
+def test_apply_refuses_copies_of_native_credential_files_and_their_secret_parts(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    kubeconfig = home / ".kube" / "config"
+    kubeconfig.parent.mkdir(parents=True)
+    client_key = kubeconfig.parent / "client.key"
+    client_key.write_text(f"PEM {uuid.uuid4().hex}")
+    bearer_value = uuid.uuid4().hex
+    short = uuid.uuid4().hex[:7]
+    key_pem = f"PEM {uuid.uuid4().hex}"
+    users = [
+        {
+            "name": "inline",
+            "user": dict(zip(KUBECONFIG_INLINE_SECRETS[:2], [bearer_value, short], strict=True)),
+        },
+        {"name": "key-data", "user": {KUBECONFIG_INLINE_SECRETS[2]: encoded(key_pem)}},
+        {"name": "files", "user": {KUBECONFIG_SECRET_FILES[1]: "client.key"}},
+    ]
+    kubeconfig.write_text(yaml.safe_dump({"users": users}))
+    profile = {field: uuid.uuid4().hex for field in PROFILE_TOKEN_FIELDS}
+    modal_config = home / ".modal.toml"
+    modal_config.write_text(
+        "[default]\n" + "".join(f'{field} = "{value}"\n' for field, value in profile.items())
+    )
+    service_account = tmp_path / "serviceaccount-token"
+    service_account.write_text(uuid.uuid4().hex)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(kubernetes_provider, "SERVICE_ACCOUNT_TOKEN", service_account)
+    for name in ("KUBECONFIG", "DOCKER_CONFIG", "MODAL_CONFIG_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    copies = {
+        "bearer.txt": (f"pasted {bearer_value} here\n", kubeconfig),
+        "client.key": (client_key.read_text(), kubeconfig),
+        "client.pem": (key_pem, kubeconfig),
+        "flat.yaml": (f"users: [{encoded(client_key.read_text())}]\n", kubeconfig),
+        "kubeconfig": (kubeconfig.read_text(), kubeconfig),
+        "modal.env": (f"pasted {profile[PROFILE_TOKEN_FIELDS[1]]}\n", modal_config),
+        "sa.jwt": (service_account.read_text(), service_account),
+    }
+    for shipped, (content, _) in copies.items():
+        (context / shipped).write_text(content)
+    (context / "short.txt").write_text(short)
+    monkeypatch.chdir(context)
+    target = echo_target()
+    provider = ReplicateProvider(dry_run=False, http_client=fake.client(), cog=cog)
+    notes = provider.plan(target, None).notes
+    assert notes == [
+        f"build.context {context} ships {shipped}, which holds the value of a credential in "
+        f"{source}; exclude it in .dockerignore"
+        for shipped, (_, source) in copies.items()
+    ]
+    with pytest.raises(ValueError, match="ships bearer.txt, which holds the value of a credential"):
+        provider.apply(target, None)
+    assert fake.calls == [] and cog.pushes == []
+    secrets = [bearer_value, key_pem, client_key.read_text(), *profile.values()]
+    assert not any(value in note for value in secrets for note in notes)
+
+
+def test_apply_refuses_a_secret_part_of_a_kubeconfig_override(
+    fake: FakeReplicate, cog: FakeCog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bearer_value = uuid.uuid4().hex
+    override = tmp_path / "keys" / "cluster.yaml"
+    override.parent.mkdir()
+    user = {KUBECONFIG_INLINE_SECRETS[0]: bearer_value}
+    override.write_text(yaml.safe_dump({"users": [{"name": "ci", "user": user}]}))
+    context = tmp_path / "echo"
+    shutil.copytree(EXAMPLE, context)
+    (context / "notes.txt").write_text(f"pasted {bearer_value}\n")
+    monkeypatch.chdir(context)
+    raw = echo_raw()
+    raw["targets"].append(
+        {
+            "provider": "cluster",
+            "type": "kubernetes",
+            "priority": 3,
+            "credentials": f"file:{override}",
+        }
+    )
+    spec = ServiceSpec.model_validate(raw)
+    provider = ReplicateProvider(dry_run=False, http_client=fake.client(), cog=cog)
+    assert provider.plan(Target(spec, spec.target("replicate")), None).notes == [
+        f"build.context {context} ships notes.txt, which holds the value of file:{override}; "
+        "exclude it in .dockerignore"
+    ]
