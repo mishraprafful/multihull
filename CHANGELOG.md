@@ -22,6 +22,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - Images build from `mirror.gcr.io/library` base images, same digests, because `public.ecr.aws` refused anonymous pulls with `429 Data limit exceeded` (#139).
 - A provider key or token that is only whitespace (`RUNPOD_API_KEY`, `BASETEN_API_KEY`, `REPLICATE_API_TOKEN`) now counts as missing, so `hull doctor` fails on it (#67).
 - `hull destroy` uses a stored `credentials` reference only for a target named with `--target`, and its confirmation shows the reference. A plain `hull destroy` (and SDK `Service.destroy()` without `target`) that covers a target outside the spec with a stored reference stops before destroying anything, names it and prints the `--target` command, so a crafted state record cannot make a routine teardown load a planted kubeconfig (#187).
+- A Modal `credentials` override picks its profile from its own file only (`active = true`, else a lone `default`) and ignores `MODAL_PROFILE`, which is process-wide while overrides are per target; the docs no longer claim Modal's own order. `hull doctor` names the profile it checked, and the no-active-profile error says when `MODAL_PROFILE` was set but not used (#186).
 
 ### Fixed
 
@@ -29,7 +30,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 - `Endpoint` leaves `inject_headers` out of its repr, so a logged or asserted endpoint never shows the provider credentials the router injects (#66).
 - The Replicate build-context scan matches a `credentials: file:` by file identity, so hard links and other spellings are caught, and refuses any shipped file holding a target's credential value or `REPLICATE_API_TOKEN` or `REPLICATE_CLI_AUTH_TOKEN`, naming the file, never the value. Refresh and `hull deploy --wait` no longer overwrite a record another apply or destroy changed meanwhile (#65).
 - The Baseten endpoint no longer ends in `/production/predict`, which sent probes and routed paths to the predict route; the Truss config no longer carries the unsupported `runtime.health_checks.initial_delay_seconds` (#64).
-- Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile, as Modal does (#67).
+- Refresh (`hull status`, the controller) never builds a provider from a credentials reference read from the state database; only `hull destroy` uses one. A Modal override now needs an active profile or a lone `default` profile (#67).
 
 ## [0.2.0] - 2026-10-12
 
