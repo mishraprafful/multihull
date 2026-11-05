@@ -273,6 +273,38 @@ def test_missing_command_is_a_plan_note_and_apply_error(
         ModalProvider().apply(target, None)
 
 
+def test_plan_notes_and_apply_refuse_a_secret_name_modal_rejects_before_any_call(
+    mock_kind_modal_spec: ServiceSpec,
+    fake_modal: FakeModal,
+    registry_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = with_secret_named(mock_kind_modal_spec, "conformance-secret", monkeypatch)
+    [note] = ModalProvider().plan(target, None).notes
+    assert note == (
+        "Modal refuses container.secrets name 'conformance-secret': a Modal secret key must be "
+        "an environment variable name of letters, digits and underscores that does not start "
+        "with a digit; rename it, for example to CONFORMANCE_SECRET"
+    )
+    for dry_run in (True, False):
+        with pytest.raises(ValueError) as raised:
+            ModalProvider(dry_run=dry_run).apply(target, None)
+        assert str(raised.value) == note
+    assert (fake_modal.images, fake_modal.deployed) == ([], [])
+
+
+def test_secret_name_refusals_name_each_bad_secret_and_hint_only_valid_renames(
+    mock_kind_modal_spec: ServiceSpec,
+) -> None:
+    raw = mock_kind_modal_spec.model_dump(by_alias=True, exclude_none=True)
+    raw["container"]["secrets"] = ["HF_TOKEN", "hf.home", "1TOKEN", "TOKEN\n"]
+    notes = ModalProvider().plan(mock_modal_target(ServiceSpec.model_validate(raw)), None).notes
+    assert len(notes) == 3
+    assert "'hf.home'" in notes[0] and notes[0].endswith("rename it, for example to HF_HOME")
+    assert "'1TOKEN'" in notes[1] and notes[1].endswith("rename it")
+    assert "'TOKEN\\n'" in notes[2]
+
+
 def test_deploy_pulls_private_image_with_serialized_server(
     mock_kind_modal_spec: ServiceSpec, fake_modal: FakeModal, registry_env: dict[str, str]
 ) -> None:
