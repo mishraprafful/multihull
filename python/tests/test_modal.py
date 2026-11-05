@@ -28,6 +28,7 @@ from multihull.providers.modal import (
     render_app_spec,
 )
 from multihull.spec import GPU, ServiceSpec
+from tests.conformance_live import live_spec
 from tests.conftest import assert_golden
 from tests.fake_modal import (
     FakeAuthError,
@@ -303,6 +304,11 @@ def test_secret_name_refusals_name_each_bad_secret_and_hint_only_valid_renames(
     assert "'hf.home'" in notes[0] and notes[0].endswith("rename it, for example to HF_HOME")
     assert "'1TOKEN'" in notes[1] and notes[1].endswith("rename it")
     assert "'TOKEN\\n'" in notes[2]
+
+
+def test_the_live_conformance_secret_is_one_modal_accepts() -> None:
+    spec = live_spec({"provider": "modal", "type": "modal"})
+    assert ModalProvider().plan(Target(spec, spec.targets[0]), None).notes == []
 
 
 def test_deploy_pulls_private_image_with_serialized_server(
