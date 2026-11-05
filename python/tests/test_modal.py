@@ -5,13 +5,14 @@ import os
 import subprocess
 import sys
 from datetime import timedelta
+from secrets import token_hex
 from typing import Any
 
 import httpx
 import pytest
 
 from multihull.providers import modal as modal_provider
-from multihull.providers.base import EdgeError, Ref, Target
+from multihull.providers.base import EdgeError, Ref, Target, secret_env_name
 from multihull.providers.modal import (
     IMAGE_BUILDER_VERSION,
     IMAGE_BUILDER_VERSION_ENV,
@@ -28,7 +29,13 @@ from multihull.providers.modal import (
 )
 from multihull.spec import GPU, ServiceSpec
 from tests.conftest import assert_golden
-from tests.fake_modal import FakeAuthError, FakeLogEntry, FakeModal, FakeNotFoundError
+from tests.fake_modal import (
+    FakeAuthError,
+    FakeInvalidError,
+    FakeLogEntry,
+    FakeModal,
+    FakeNotFoundError,
+)
 
 REGISTRY_ENV = {"GHCR_USERNAME": "fixture-user", "GHCR_TOKEN": "fixture-registry-value"}
 FAKE_TOKEN_ID = "ak-fixture-token-id"
@@ -207,6 +214,43 @@ def test_golden_cpu_app_spec_names_registry_env_only(
     plan = ModalProvider().plan(target, None)
     rendered = json.dumps(plan.payload) + json.dumps(ref_for(target).ids) + " ".join(plan.notes)
     assert all(value not in rendered for value in registry_env.values())
+
+
+def with_secret_named(spec: ServiceSpec, name: str, monkeypatch: pytest.MonkeyPatch) -> Target:
+    raw = spec.model_dump(by_alias=True, exclude_none=True)
+    raw["container"]["secrets"] = [name]
+    monkeypatch.setenv(secret_env_name(name), token_hex(8))
+    return mock_modal_target(ServiceSpec.model_validate(raw))
+
+
+@pytest.mark.parametrize("name", ["conformance-secret", "hf.home", "1TOKEN"])
+def test_fake_deploy_rejects_secret_keys_with_the_modal_message(
+    name: str,
+    mock_kind_modal_spec: ServiceSpec,
+    fake_modal: FakeModal,
+    registry_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered = render_app_spec(with_secret_named(mock_kind_modal_spec, name, monkeypatch))
+    with pytest.raises(FakeInvalidError) as raised:
+        deploy_with_sdk(rendered)
+    assert str(raised.value) == (
+        f"Secret key name {name!r} is invalid for environment variables. "
+        "Only letters, numbers, and underscores are allowed."
+    )
+    assert fake_modal.deployed == []
+
+
+@pytest.mark.parametrize("name", ["HF_TOKEN", "_hidden", "token2"])
+def test_fake_deploy_accepts_env_name_secret_keys(
+    name: str,
+    mock_kind_modal_spec: ServiceSpec,
+    fake_modal: FakeModal,
+    registry_env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deploy_with_sdk(render_app_spec(with_secret_named(mock_kind_modal_spec, name, monkeypatch)))
+    assert fake_modal.deployed == [("multihull-live-mock-modal", "main")]
 
 
 def test_registry_credentials_name_missing_env_only(monkeypatch: pytest.MonkeyPatch) -> None:
