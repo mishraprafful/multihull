@@ -21,9 +21,7 @@ PROVIDER_TYPES: tuple[ProviderType, ...] = (
     "docker",
 )
 ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
-VERBATIM_SECRET_PROVIDERS: frozenset[ProviderType] = frozenset(
-    {"kubernetes", "modal", "runpod", "baseten"}
-)
+VERBATIM_SECRET_PROVIDERS: frozenset[ProviderType] = frozenset({"kubernetes", "runpod", "baseten"})
 
 
 class GPU(StrEnum):
