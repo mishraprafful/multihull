@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
+
+SECRET_KEY_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 @dataclass
@@ -44,6 +47,17 @@ class FakeInvalidError(Exception):
 
 class FakeNotFoundError(Exception):
     pass
+
+
+def check_secret_keys(secrets: list[FakeSecret]) -> None:
+    for key in (key for held in secrets for key in held.values):
+        if not key:
+            raise FakeInvalidError("Secret key name cannot be empty")
+        if not SECRET_KEY_NAME.match(key):
+            raise FakeInvalidError(
+                f"Secret key name {key!r} is invalid for environment variables. "
+                "Only letters, numbers, and underscores are allowed."
+            )
 
 
 class FakeModalClient:
@@ -143,6 +157,8 @@ class FakeModal:
                 fake.clients_used.append(("deploy", client))
                 if fake.deploy_error is not None:
                     raise fake.deploy_error
+                registry = [self.image.secret] if self.image.secret else []
+                check_secret_keys([*registry, *fake.cls_kwargs.get("secrets", [])])
                 fake.deployed.append((name, environment_name))
                 fake.stopped.discard(name)
                 fake.builder_versions.append(os.environ.get("MODAL_IMAGE_BUILDER_VERSION"))

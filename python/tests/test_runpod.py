@@ -417,3 +417,28 @@ def test_destroy_refuses_a_state_name_outside_the_store_charset(
     with pytest.raises(ValueError, match="refusing"):
         provider.destroy(tampered)
     assert {victim, ours.ids["endpoint"]} <= set(fake.endpoints)
+
+
+@pytest.mark.parametrize("name", ["", "1abc", "has space", "runpod_x", "RUNPOD_X", "a" * 192])
+def test_fake_refuses_secret_names_runpod_refuses(runpod_env: None, name: str) -> None:
+    fake = FakeRunpod(CALLER)
+    with fake.client() as client:
+        response = client.post(
+            "https://api.runpod.io/v2/account/secrets",
+            json={"name": name, "value": "x"},
+            headers={"authorization": f"Bearer {CALLER}"},
+        )
+    assert response.status_code == 400
+    assert fake.secrets == {}
+
+
+@pytest.mark.parametrize("secret", ["HF_TOKEN", "hf-token", "hf token", "1X", "runpod", "a" * 300])
+def test_mirrored_store_names_are_names_runpod_accepts(
+    runpod_env: None, monkeypatch: pytest.MonkeyPatch, llama_raw: dict[str, Any], secret: str
+) -> None:
+    llama_raw["container"]["secrets"] = [secret]
+    monkeypatch.setenv(secret_env_name(secret), MIRRORED)
+    fake = FakeRunpod(CALLER)
+    provider = RunpodProvider(dry_run=False, provider_name="runpod-eu", http_client=fake.client())
+    provider.apply(variant(llama_raw), None)
+    assert len(fake.secrets) == 1

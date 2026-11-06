@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -37,6 +38,9 @@ ENDPOINT_DEFAULTS: dict[str, Any] = {
     "createdAt": CREATED_AT,
 }
 GPU_DEFAULTS: dict[str, Any] = {"allowedCudaVersions": [], "minCudaVersion": None}
+STORE_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_.\-/]*")
+STORE_NAME_MAX_LENGTH = 191
+RESERVED_STORE_PREFIX = "runpod"
 
 
 def problem(status: int, title: str, detail: str) -> httpx.Response:
@@ -61,6 +65,14 @@ def endpoint_view(endpoint: Mapping[str, Any]) -> dict[str, Any]:
 
 def secret_view(stored: Mapping[str, Any]) -> dict[str, Any]:
     return {"id": stored["id"], "name": stored["name"], "createdAt": CREATED_AT}
+
+
+def store_name_accepted(name: str) -> bool:
+    return (
+        len(name) <= STORE_NAME_MAX_LENGTH
+        and STORE_NAME.fullmatch(name) is not None
+        and not name.casefold().startswith(RESERVED_STORE_PREFIX)
+    )
 
 
 class FakeRunpod:
@@ -223,6 +235,8 @@ class FakeRunpod:
             return httpx.Response(200, json={"secrets": found})
         if not parts and method == "POST":
             assert body is not None
+            if not store_name_accepted(str(body["name"])):
+                return problem(400, "Bad Request", "invalid secret name")
             if any(s["name"].casefold() == body["name"].casefold() for s in self.secrets.values()):
                 return problem(409, "Conflict", "secret name exists")
             secret_id = self.next_id("sec")
