@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -25,6 +26,9 @@ UPDATE_FIELDS = CONTAINER_FIELDS | {
 CREATE_FIELDS = UPDATE_FIELDS | {"type"}
 MERGED_FIELDS = {"workers", "gpu"}
 WORKER_STATES = ("running", "idle", "initializing", "throttled", "unhealthy")
+STORE_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_.\-/]*")
+STORE_NAME_MAX_LENGTH = 191
+RESERVED_STORE_PREFIX = "runpod"
 
 
 def problem(status: int, title: str, detail: str) -> httpx.Response:
@@ -32,6 +36,14 @@ def problem(status: int, title: str, detail: str) -> httpx.Response:
         status,
         json={"title": title, "status": status, "detail": detail},
         headers={"content-type": "application/problem+json"},
+    )
+
+
+def store_name_accepted(name: str) -> bool:
+    return (
+        len(name) <= STORE_NAME_MAX_LENGTH
+        and STORE_NAME.fullmatch(name) is not None
+        and not name.casefold().startswith(RESERVED_STORE_PREFIX)
     )
 
 
@@ -186,6 +198,8 @@ class FakeRunpod:
             return httpx.Response(200, json={"secrets": found})
         if not parts and method == "POST":
             assert body is not None
+            if not store_name_accepted(str(body["name"])):
+                return problem(400, "Bad Request", "invalid secret name")
             if any(s["name"].casefold() == body["name"].casefold() for s in self.secrets.values()):
                 return problem(409, "Conflict", "secret name exists")
             secret_id = self.next_id("sec")
