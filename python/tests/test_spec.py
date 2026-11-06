@@ -268,7 +268,7 @@ def test_secret_names_that_are_not_env_names_warn_for_targets_that_pass_them_ver
     warnings = ServiceSpec.model_validate(raw).secret_name_warnings()
     assert len(warnings) == 2
     assert "'hf-token' is not an environment variable name" in warnings[0]
-    assert "targets (gke-prod, modal-main, runpod-eu)" in warnings[0]
+    assert "targets (gke-prod, runpod-eu)" in warnings[0]
     assert "'hf.home'" in warnings[1]
 
 
@@ -277,5 +277,15 @@ def test_env_name_secrets_and_docker_only_specs_do_not_warn(
 ) -> None:
     assert llama_spec.secret_name_warnings() == []
     raw = mock_docker_spec.model_dump(mode="json", exclude_none=True)
+    raw["container"]["secrets"] = ["hf-token"]
+    assert ServiceSpec.model_validate(raw).secret_name_warnings() == []
+
+
+def test_modal_targets_refuse_bad_secret_names_at_plan_instead_of_warning(
+    mock_kind_modal_spec: ServiceSpec,
+) -> None:
+    raw = mock_kind_modal_spec.model_dump(mode="json", exclude_none=True)
+    raw["targets"] = [target for target in raw["targets"] if target["type"] == "modal"]
+    raw["reliability"]["minWarmProviders"] = 1
     raw["container"]["secrets"] = ["hf-token"]
     assert ServiceSpec.model_validate(raw).secret_name_warnings() == []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -45,6 +46,13 @@ KUBECONFIG_TOKEN_FILE = "tokenFile"
 KUBECONFIG_KEY_DATA = "client-key-data"
 KUBECONFIG_KEY_FILE = "client-key"
 KUBECONFIG_PASSWORD = "password"
+SECRET_KEY = re.compile(r"[-._a-zA-Z0-9]+")
+SECRET_KEY_MAX_LENGTH = 253
+SECRET_KEY_RULE = (
+    "a Secret key is at most 253 letters, digits, '-', '_' or '.', and is not '.' "
+    "and does not start with '..'"
+)
+ENV_NAME_RULE = "an environment variable name is printable ASCII other than '='"
 
 
 def kubeconfig_paths() -> list[Path]:
@@ -123,6 +131,34 @@ def context_health(
     if chosen is None or chosen not in names:
         return CredHealth(ok=False, message=f"context {chosen!r} not found in {origin}")
     return CredHealth(ok=True, message=f"{origin} context {chosen}", identity=chosen)
+
+
+def is_secret_key(name: str) -> bool:
+    return (
+        len(name) <= SECRET_KEY_MAX_LENGTH
+        and SECRET_KEY.fullmatch(name) is not None
+        and name != "."
+        and not name.startswith("..")
+    )
+
+
+def is_env_name(name: str) -> bool:
+    return bool(name) and all(" " <= char <= "~" and char != "=" for char in name)
+
+
+def refusals(desired: Target) -> list[str]:
+    container = desired.service.container
+    secrets = [
+        f"Kubernetes refuses container.secrets name {name!r}: {SECRET_KEY_RULE}; rename it"
+        for name in container.secrets
+        if not is_secret_key(name)
+    ]
+    env = [
+        f"Kubernetes refuses container.env name {name!r}: {ENV_NAME_RULE}; rename it"
+        for name in container.env
+        if not is_env_name(name)
+    ]
+    return [*secrets, *env]
 
 
 class KubeClient(Protocol):
@@ -549,6 +585,7 @@ class KubernetesProvider:
             type=self.type,
             payload=render_manifests(desired),
             format="yaml",
+            notes=refusals(desired),
         )
 
     def require_namespace(self, desired: Target) -> None:
@@ -562,6 +599,8 @@ class KubernetesProvider:
         )
 
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
+        for problem in refusals(desired):
+            raise ValueError(problem)
         client = self._require_client()
         self.require_namespace(desired)
         secret_values = (
