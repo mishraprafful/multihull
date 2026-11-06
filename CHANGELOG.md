@@ -4,7 +4,7 @@ Notable changes to Multihull. Format: [Keep a Changelog](https://keepachangelog.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-10-31
+## [0.3.0] - 2026-11-06
 
 More providers. RunPod, Baseten and Replicate ship as preview: verified against fakes and the provider API specs, never run live. Human-facing notes: [docs/releases/0.3.0.md](docs/releases/0.3.0.md).
 
