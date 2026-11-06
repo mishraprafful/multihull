@@ -459,8 +459,15 @@ class FakeBaseten:
         if not parts and method == "POST":
             assert body is not None
             self.secrets[body["name"]] = body["value"]
-            stored = {"id": body["name"], "name": body["name"], "team_name": "default"}
-            return httpx.Response(200, json={**stored, "created_at": CREATED_AT})
+            return httpx.Response(
+                200,
+                json={
+                    "id": body["name"],
+                    "name": body["name"],
+                    "team_name": "default",
+                    "created_at": CREATED_AT,
+                },
+            )
         if len(parts) == 1 and method == "DELETE":
             if parts[0] not in self.secrets:
                 return error(404, "secret not found")
