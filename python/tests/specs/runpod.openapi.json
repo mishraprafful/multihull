@@ -1,0 +1,4713 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Runpod REST API",
+    "version": "2.0.0",
+    "description": "Runpod public REST API — v2"
+  },
+  "servers": [
+    {
+      "url": "https://api.runpod.io",
+      "description": "Runpod API v2 production server"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/v2/account/secrets": {
+      "get": {
+        "operationId": "listSecrets",
+        "x-runpod-scope": "secrets:read",
+        "summary": "List secrets",
+        "x-mint": {
+          "metadata": {
+            "description": "List encrypted secrets referenced by Runpod Pods, Serverless endpoints, and templates through environment variables. Secret values are never returned."
+          }
+        },
+        "description": "Returns the account's secrets — encrypted strings referenced from pod, serverless, and template environment variables with the `{{ RUNPOD_SECRET_<name> }}` placeholder syntax, substituted with the secret's value when the pod or worker boots. Secret values are write-only and are never returned.",
+        "tags": [
+          "Account"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "When provided, returns only the secret with this name (case-insensitive)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSecretsResponse"
+                },
+                "examples": {
+                  "secrets": {
+                    "summary": "Successful response",
+                    "value": {
+                      "secrets": [
+                        {
+                          "id": "2q9m7x4cavgd",
+                          "name": "hf-token",
+                          "description": "Hugging Face read token",
+                          "createdAt": "2026-08-01T12:00:00Z",
+                          "valueLastUpdatedAt": "2026-09-01T08:30:00Z"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createSecret",
+        "x-runpod-scope": "secrets:write",
+        "summary": "Create a secret",
+        "x-mint": {
+          "metadata": {
+            "description": "Create an encrypted Runpod account secret that Pods, Serverless endpoints, and templates can reference from environment variables at boot."
+          }
+        },
+        "description": "Stores a new account-scoped encrypted string. `name` must be unique\nacross the account's secrets and is immutable; `value` is write-only\nand can never be read back through the API.\n\nUse the secret from pods, serverless endpoints, and templates by\nsetting an environment variable's value to\n`{{ RUNPOD_SECRET_<name> }}` — Runpod substitutes the stored value\nwhen the pod or worker boots.\n\nReturns `201` with the created secret's metadata, or `409` when the\nname is already taken.\n",
+        "tags": [
+          "Account"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSecretRequest"
+              },
+              "examples": {
+                "secret": {
+                  "summary": "Secret with a description",
+                  "value": {
+                    "name": "hf-token",
+                    "value": "hf_********************************",
+                    "description": "Hugging Face read token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Secret"
+                },
+                "examples": {
+                  "secret": {
+                    "summary": "Successful response",
+                    "value": {
+                      "id": "2q9m7x4cavgd",
+                      "name": "hf-token",
+                      "description": "Hugging Face read token",
+                      "createdAt": "2026-09-10T17:23:45Z",
+                      "valueLastUpdatedAt": "2026-09-10T17:23:45Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "409": {
+            "description": "A secret with this name already exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntityError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/account/secrets/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Secret identifier",
+          "example": "2q9m7x4cavgd"
+        }
+      ],
+      "get": {
+        "operationId": "getSecret",
+        "x-runpod-scope": "secrets:read",
+        "summary": "Get a secret",
+        "x-mint": {
+          "metadata": {
+            "description": "Retrieve a Runpod account secret's metadata by ID. The secret value is write-only and is never returned."
+          }
+        },
+        "description": "Returns a single secret's metadata by ID. The value is write-only and never returned.",
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Secret"
+                },
+                "examples": {
+                  "secret": {
+                    "summary": "Successful response",
+                    "value": {
+                      "id": "2q9m7x4cavgd",
+                      "name": "hf-token",
+                      "description": "Hugging Face read token",
+                      "createdAt": "2026-08-01T12:00:00Z",
+                      "valueLastUpdatedAt": "2026-09-01T08:30:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateSecret",
+        "x-runpod-scope": "secrets:write",
+        "summary": "Update a secret",
+        "x-mint": {
+          "metadata": {
+            "description": "Update a Runpod account secret's description or rotate its value. The new value takes effect the next time a referencing Pod or worker boots."
+          }
+        },
+        "description": "Rotates a secret's value and/or updates its description. Only the\nprovided fields are changed and at least one field is required; the\n`name` is immutable.\n\nPods and workers receive the new value at their next boot — running\ninstances keep the value they were started with.\n\nWhen both fields are sent, the value is applied first, then the\ndescription. The two updates are not atomic: if the description\nupdate fails after the value was rotated, the response is an error\nbut the new value has already taken effect. Send the fields in\nseparate requests when that partial outcome matters.\n",
+        "tags": [
+          "Account"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSecretRequest"
+              },
+              "examples": {
+                "rotateSecret": {
+                  "summary": "Rotate the value",
+                  "value": {
+                    "value": "hf_********************************"
+                  }
+                },
+                "updateDescription": {
+                  "summary": "Update the description",
+                  "value": {
+                    "description": "Rotated HF token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Secret"
+                },
+                "examples": {
+                  "secret": {
+                    "summary": "Successful response after rotation",
+                    "value": {
+                      "id": "2q9m7x4cavgd",
+                      "name": "hf-token",
+                      "description": "Rotated HF token",
+                      "createdAt": "2026-08-01T12:00:00Z",
+                      "valueLastUpdatedAt": "2026-09-10T17:40:12Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntityError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteSecret",
+        "x-runpod-scope": "secrets:write",
+        "summary": "Delete a secret",
+        "x-mint": {
+          "metadata": {
+            "description": "Delete a Runpod account secret so Pods, Serverless endpoints, and templates can no longer resolve it from environment variables."
+          }
+        },
+        "description": "Permanently deletes a secret. Environment variables referencing the\ndeleted secret's name will no longer resolve to a value.\n",
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "204": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Deleted. Response has no body."
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless": {
+      "get": {
+        "operationId": "listEndpoints",
+        "x-runpod-scope": "serverless:read",
+        "summary": "List serverless endpoints",
+        "x-mint": {
+          "metadata": {
+            "description": "List all Runpod Serverless endpoints owned by the authenticated user, including compute, worker, scaling, and deployment settings."
+          }
+        },
+        "description": "Returns serverless endpoints owned by the authenticated user,\ncursor-paginated newest-first; an omitted `limit` defaults to 1000.\nFollow `pagination.nextCursor` until `hasNextPage` is false.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResourceFilters"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationCursor"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationLimit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEndpointsResponse"
+                },
+                "examples": {
+                  "endpoints": {
+                    "summary": "Successful response",
+                    "value": {
+                      "endpoints": [
+                        {
+                          "id": "4m7x2k9q",
+                          "name": "image-generator",
+                          "type": "QUEUE",
+                          "requestUrls": {
+                            "run": "https://api.runpod.ai/v2/4m7x2k9q/run",
+                            "runSync": "https://api.runpod.ai/v2/4m7x2k9q/runsync",
+                            "status": "https://api.runpod.ai/v2/4m7x2k9q/status/{job_id}",
+                            "stream": "https://api.runpod.ai/v2/4m7x2k9q/stream/{job_id}",
+                            "cancel": "https://api.runpod.ai/v2/4m7x2k9q/cancel/{job_id}",
+                            "retry": "https://api.runpod.ai/v2/4m7x2k9q/retry/{job_id}",
+                            "purgeQueue": "https://api.runpod.ai/v2/4m7x2k9q/purge-queue",
+                            "health": "https://api.runpod.ai/v2/4m7x2k9q/health"
+                          },
+                          "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+                          "args": "",
+                          "disk": 20,
+                          "ports": [
+                            "8000/http"
+                          ],
+                          "env": {
+                            "MODEL_NAME": "sdxl"
+                          },
+                          "registry": null,
+                          "gpu": {
+                            "pools": [
+                              "ADA_24"
+                            ],
+                            "count": 1,
+                            "allowedCudaVersions": [],
+                            "minCudaVersion": null
+                          },
+                          "workers": {
+                            "min": 0,
+                            "max": 5,
+                            "idleTimeout": 5
+                          },
+                          "scaling": {
+                            "type": "QUEUE_DELAY",
+                            "queueDelay": 4
+                          },
+                          "dataCenterIds": [
+                            "US-KS-2"
+                          ],
+                          "networkVolumes": [
+                            "2q9m7x4c"
+                          ],
+                          "mounts": {
+                            "network": [
+                              {
+                                "volumeId": "2q9m7x4c"
+                              }
+                            ],
+                            "global": []
+                          },
+                          "timeout": 300000,
+                          "flashboot": "OFF",
+                          "createdAt": "2026-06-01T12:00:00Z"
+                        }
+                      ],
+                      "pagination": {
+                        "nextCursor": null,
+                        "hasNextPage": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "413": {
+            "$ref": "#/components/responses/ResponseTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntityError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createEndpoint",
+        "x-runpod-scope": "serverless:write",
+        "summary": "Create a serverless endpoint",
+        "x-mint": {
+          "metadata": {
+            "description": "Create a Runpod Serverless endpoint with GPU or CPU compute, container or template settings, worker limits, and scaling policies."
+          }
+        },
+        "description": "Creates a serverless endpoint. Callers specify exactly one of `gpu` or\n`cpu`; neither or both returns 400. Container settings come from the\nbody, from a serverless template referenced by `templateId` (body\nfields override the template's), or both; `image` is required unless\n`templateId` is set. See `CreateEndpointRequest` for the full body.\n\nThe CUDA constraints live on `gpu` — `gpu.allowedCudaVersions` and\n`gpu.minCudaVersion` — so a CPU create cannot express them and the\nschema rejects the attempt with a 422. A non-empty set and a floor are\nmutually exclusive (400 if both are sent); an explicit empty set states\nno constraint and may accompany a floor.\n\nReturns `201` with the created endpoint. The endpoint can accept jobs\nimmediately, but starts with no active workers unless `workers.min`\nis greater than 0. Workers are provisioned on demand and autoscaled\nbetween `workers.min` and `workers.max` according to the `scaling`\npolicy, so the first request to an idle endpoint may incur cold-start\nlatency while a worker pulls its image and boots.\n\n## Checking what you can deploy\n\n`gpu.pools` takes serverless GPU **pool** IDs, not the GPU type IDs\nused for pods. `gpu.excludedTypes` takes the type IDs — it subtracts\nspecific cards from the pools you picked. Read both from the catalog\nbefore you create:\n\n- [List GPU types](https://docs.runpod.io/api-reference-v2/catalog/list-gpu-types)\n  — the `pool` field carries the pool ID for each GPU type (`null`\n  means that type is not in a serverless pool). Add\n  `include=AVAILABILITY&product=SERVERLESS` for current serverless\n  stock.\n- [List data centers](https://docs.runpod.io/api-reference-v2/catalog/list-data-centers)\n  — locations to constrain with `dataCenterIds`, with\n  `include=GPU_AVAILABILITY` for stock per data center.\n\nUnlike pod creation, you do not need to retry across GPUs yourself:\nlist every pool you are willing to run on and workers are placed on\nwhichever one has capacity. Listing more pools — and leaving\n`dataCenterIds` unset — gives the scheduler more room and reduces the\nchance of workers failing to start when a single pool is exhausted.\n\nIf your workload needs a specific card, pick the pool that holds it and\nexclude the rest of that pool with `gpu.excludedTypes`. Keep at least\none type in the selection — a selection that leaves none is\nrejected.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEndpointRequest"
+              },
+              "examples": {
+                "serverlessEndpoint": {
+                  "summary": "Serverless GPU endpoint",
+                  "value": {
+                    "name": "image-generator",
+                    "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+                    "type": "QUEUE",
+                    "gpu": {
+                      "pools": [
+                        "ADA_24"
+                      ],
+                      "count": 1
+                    },
+                    "workers": {
+                      "min": 0,
+                      "max": 5,
+                      "idleTimeout": 5
+                    },
+                    "scaling": {
+                      "type": "QUEUE_DELAY",
+                      "queueDelay": 4
+                    },
+                    "dataCenterIds": [
+                      "US-KS-2"
+                    ],
+                    "timeout": 300000
+                  }
+                },
+                "cpuServerlessEndpoint": {
+                  "summary": "Serverless CPU endpoint with multiple configurations",
+                  "value": {
+                    "name": "cpu-inference",
+                    "image": "python:3.11-slim",
+                    "type": "QUEUE",
+                    "cpu": [
+                      {
+                        "id": "cpu5c",
+                        "vcpuCount": 4
+                      },
+                      {
+                        "id": "cpu5g",
+                        "vcpuCount": 8
+                      }
+                    ],
+                    "workers": {
+                      "min": 0,
+                      "max": 3,
+                      "idleTimeout": 10
+                    },
+                    "scaling": {
+                      "type": "QUEUE_DELAY",
+                      "queueDelay": 4
+                    },
+                    "timeout": 300000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Endpoint"
+                },
+                "examples": {
+                  "endpoint": {
+                    "summary": "Successful response",
+                    "value": {
+                      "id": "4m7x2k9q",
+                      "name": "image-generator",
+                      "type": "QUEUE",
+                      "requestUrls": {
+                        "run": "https://api.runpod.ai/v2/4m7x2k9q/run",
+                        "runSync": "https://api.runpod.ai/v2/4m7x2k9q/runsync",
+                        "status": "https://api.runpod.ai/v2/4m7x2k9q/status/{job_id}",
+                        "stream": "https://api.runpod.ai/v2/4m7x2k9q/stream/{job_id}",
+                        "cancel": "https://api.runpod.ai/v2/4m7x2k9q/cancel/{job_id}",
+                        "retry": "https://api.runpod.ai/v2/4m7x2k9q/retry/{job_id}",
+                        "purgeQueue": "https://api.runpod.ai/v2/4m7x2k9q/purge-queue",
+                        "health": "https://api.runpod.ai/v2/4m7x2k9q/health"
+                      },
+                      "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+                      "args": "",
+                      "disk": 20,
+                      "ports": [
+                        "8000/http"
+                      ],
+                      "env": {
+                        "MODEL_NAME": "sdxl"
+                      },
+                      "registry": null,
+                      "gpu": {
+                        "pools": [
+                          "ADA_24"
+                        ],
+                        "count": 1,
+                        "allowedCudaVersions": [],
+                        "minCudaVersion": null
+                      },
+                      "workers": {
+                        "min": 0,
+                        "max": 5,
+                        "idleTimeout": 5
+                      },
+                      "scaling": {
+                        "type": "QUEUE_DELAY",
+                        "queueDelay": 4
+                      },
+                      "dataCenterIds": [
+                        "US-KS-2"
+                      ],
+                      "networkVolumes": [
+                        "2q9m7x4c"
+                      ],
+                      "mounts": {
+                        "network": [
+                          {
+                            "volumeId": "2q9m7x4c"
+                          }
+                        ],
+                        "global": []
+                      },
+                      "timeout": 300000,
+                      "flashboot": "OFF",
+                      "createdAt": "2026-06-01T12:00:00Z"
+                    }
+                  },
+                  "cpuEndpoint": {
+                    "summary": "Successful response for a CPU endpoint",
+                    "value": {
+                      "id": "7c3v1n8p",
+                      "name": "cpu-inference",
+                      "type": "QUEUE",
+                      "requestUrls": {
+                        "run": "https://api.runpod.ai/v2/7c3v1n8p/run",
+                        "runSync": "https://api.runpod.ai/v2/7c3v1n8p/runsync",
+                        "status": "https://api.runpod.ai/v2/7c3v1n8p/status/{job_id}",
+                        "stream": "https://api.runpod.ai/v2/7c3v1n8p/stream/{job_id}",
+                        "cancel": "https://api.runpod.ai/v2/7c3v1n8p/cancel/{job_id}",
+                        "retry": "https://api.runpod.ai/v2/7c3v1n8p/retry/{job_id}",
+                        "purgeQueue": "https://api.runpod.ai/v2/7c3v1n8p/purge-queue",
+                        "health": "https://api.runpod.ai/v2/7c3v1n8p/health"
+                      },
+                      "image": "python:3.11-slim",
+                      "args": "",
+                      "disk": 20,
+                      "ports": [],
+                      "env": {},
+                      "registry": null,
+                      "cpu": [
+                        {
+                          "id": "cpu5c",
+                          "vcpuCount": 4,
+                          "memory": 16
+                        },
+                        {
+                          "id": "cpu5g",
+                          "vcpuCount": 8,
+                          "memory": 16
+                        }
+                      ],
+                      "workers": {
+                        "min": 0,
+                        "max": 3,
+                        "idleTimeout": 10
+                      },
+                      "scaling": {
+                        "type": "QUEUE_DELAY",
+                        "queueDelay": 4
+                      },
+                      "dataCenterIds": [],
+                      "networkVolumes": [],
+                      "mounts": {
+                        "network": [],
+                        "global": []
+                      },
+                      "timeout": 300000,
+                      "flashboot": "OFF",
+                      "createdAt": "2026-06-01T12:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntityError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        }
+      ],
+      "get": {
+        "operationId": "getEndpoint",
+        "x-runpod-scope": "serverless:read",
+        "summary": "Get a serverless endpoint",
+        "x-mint": {
+          "metadata": {
+            "description": "Retrieve a Runpod Serverless endpoint by ID with its compute, worker, scaling, container, storage, and current status settings."
+          }
+        },
+        "description": "Returns a single serverless endpoint by ID.",
+        "tags": [
+          "Serverless"
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Endpoint"
+                },
+                "examples": {
+                  "endpoint": {
+                    "summary": "Successful response",
+                    "value": {
+                      "id": "4m7x2k9q",
+                      "name": "image-generator",
+                      "type": "LOAD_BALANCER",
+                      "requestUrls": {
+                        "base": "https://4m7x2k9q.api.runpod.ai",
+                        "health": "https://4m7x2k9q.api.runpod.ai/ping"
+                      },
+                      "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+                      "args": "",
+                      "disk": 20,
+                      "ports": [
+                        "8000/http"
+                      ],
+                      "env": {
+                        "MODEL_NAME": "sdxl"
+                      },
+                      "registry": null,
+                      "gpu": {
+                        "pools": [
+                          "ADA_24"
+                        ],
+                        "count": 1,
+                        "allowedCudaVersions": [],
+                        "minCudaVersion": null
+                      },
+                      "workers": {
+                        "min": 0,
+                        "max": 5,
+                        "idleTimeout": 5
+                      },
+                      "scaling": {
+                        "type": "REQUEST_COUNT",
+                        "requestCount": 4
+                      },
+                      "dataCenterIds": [
+                        "US-KS-2"
+                      ],
+                      "networkVolumes": [
+                        "2q9m7x4c"
+                      ],
+                      "mounts": {
+                        "network": [
+                          {
+                            "volumeId": "2q9m7x4c"
+                          }
+                        ],
+                        "global": []
+                      },
+                      "timeout": 300000,
+                      "flashboot": "OFF",
+                      "createdAt": "2026-06-01T12:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateEndpoint",
+        "x-runpod-scope": "serverless:write",
+        "summary": "Update a serverless endpoint",
+        "x-mint": {
+          "metadata": {
+            "description": "Update selected settings on a Runpod Serverless endpoint, including compute, workers, scaling, storage, and container configuration."
+          }
+        },
+        "description": "Partially updates a serverless endpoint. This is a PATCH: only the\nfields present in the body are changed; omitted fields are left\nuntouched. See `UpdateEndpointRequest` for the full body.\n\nMutable fields: `name`, `gpu`, `cpu`, `workers` (`min`/`max`),\n`scaling` (`type`/`value`/`idleTimeout`), `dataCenterIds`,\n`networkVolumes`, `timeout`, `flashboot`, and the\ncontainer settings (`image`, `args`, `disk`, `ports`, `env`,\n`registry`).\n\nOmitted compute preserves the current selection. `cpu` completely\nreplaces a CPU endpoint's selection; compute family is immutable.\n`gpu` on CPU, `cpu` on GPU, or both fields returns 400.\n\nReturns `200` with the full updated endpoint. Effect timing differs\nby field: scaling and worker-bound settings (`workers`, `scaling`,\n`timeout`) are applied to the autoscaler promptly, while\ncontainer-affecting changes (e.g. `image`, `env`) create a new\nendpoint release that rolls out as workers cycle — in-flight workers\nkeep the previous version until they are replaced. Track rollout via\n`listEndpointReleases`.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateEndpointRequest"
+              },
+              "examples": {
+                "scaleEndpoint": {
+                  "summary": "Scale endpoint",
+                  "value": {
+                    "workers": {
+                      "min": 1,
+                      "max": 10,
+                      "idleTimeout": 10
+                    },
+                    "scaling": {
+                      "type": "QUEUE_DELAY",
+                      "queueDelay": 8
+                    }
+                  }
+                },
+                "changeGpuPoolsKeepingExclusions": {
+                  "summary": "Change GPU pools and keep the existing exclusions",
+                  "description": "`pools` and `excludedTypes` are replaced together, so both\nare sent. Omitting `excludedTypes` here would clear it.\nRead the current value with `GET /v2/serverless/{id}` first\nand resend the entries that still apply to the new pools —\nan exclusion naming a type that is not in `pools` is\nrejected with 400.\n",
+                  "value": {
+                    "gpu": {
+                      "pools": [
+                        "ADA_24",
+                        "AMPERE_80"
+                      ],
+                      "excludedTypes": [
+                        "NVIDIA L40"
+                      ]
+                    }
+                  }
+                },
+                "changeCudaOnly": {
+                  "summary": "Change a CUDA constraint without touching the GPU selection",
+                  "description": "No `pools`, so the pool list and any `excludedTypes` are\nboth left exactly as they are. Same shape for a `count`-only\nchange.\n",
+                  "value": {
+                    "gpu": {
+                      "minCudaVersion": "12.4"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Endpoint"
+                },
+                "examples": {
+                  "endpoint": {
+                    "summary": "Successful response",
+                    "value": {
+                      "id": "4m7x2k9q",
+                      "name": "image-generator",
+                      "type": "QUEUE",
+                      "requestUrls": {
+                        "run": "https://api.runpod.ai/v2/4m7x2k9q/run",
+                        "runSync": "https://api.runpod.ai/v2/4m7x2k9q/runsync",
+                        "status": "https://api.runpod.ai/v2/4m7x2k9q/status/{job_id}",
+                        "stream": "https://api.runpod.ai/v2/4m7x2k9q/stream/{job_id}",
+                        "cancel": "https://api.runpod.ai/v2/4m7x2k9q/cancel/{job_id}",
+                        "retry": "https://api.runpod.ai/v2/4m7x2k9q/retry/{job_id}",
+                        "purgeQueue": "https://api.runpod.ai/v2/4m7x2k9q/purge-queue",
+                        "health": "https://api.runpod.ai/v2/4m7x2k9q/health"
+                      },
+                      "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+                      "args": "",
+                      "disk": 20,
+                      "ports": [
+                        "8000/http"
+                      ],
+                      "env": {
+                        "MODEL_NAME": "sdxl"
+                      },
+                      "registry": null,
+                      "gpu": {
+                        "pools": [
+                          "ADA_24"
+                        ],
+                        "count": 1,
+                        "allowedCudaVersions": [],
+                        "minCudaVersion": null
+                      },
+                      "workers": {
+                        "min": 1,
+                        "max": 10,
+                        "idleTimeout": 10
+                      },
+                      "scaling": {
+                        "type": "QUEUE_DELAY",
+                        "queueDelay": 8
+                      },
+                      "dataCenterIds": [
+                        "US-KS-2"
+                      ],
+                      "networkVolumes": [
+                        "2q9m7x4c"
+                      ],
+                      "mounts": {
+                        "network": [
+                          {
+                            "volumeId": "2q9m7x4c"
+                          }
+                        ],
+                        "global": []
+                      },
+                      "timeout": 300000,
+                      "flashboot": "OFF",
+                      "createdAt": "2026-06-01T12:00:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntityError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteEndpoint",
+        "x-runpod-scope": "serverless:write",
+        "summary": "Delete a serverless endpoint",
+        "x-mint": {
+          "metadata": {
+            "description": "Permanently delete a Runpod Serverless endpoint, terminate its workers, cancel queued and active jobs, and remove its bound template."
+          }
+        },
+        "description": "Permanently deletes a serverless endpoint and its bound template.\nThis is irreversible: all workers are terminated and any queued or\nin-progress jobs are cancelled.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "responses": {
+          "204": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Deleted. Response has no body."
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}/builds": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        }
+      ],
+      "get": {
+        "operationId": "listEndpointBuilds",
+        "x-runpod-scope": "serverless:read",
+        "summary": "List serverless endpoint builds",
+        "x-mint": {
+          "metadata": {
+            "description": "List a Runpod Serverless endpoint's GitHub build history, newest first, capped to the 100 most recent builds, with older builds fetchable by ID."
+          }
+        },
+        "description": "Returns the endpoint's GitHub build history, newest first (Runpod\nGitHub-build integration), cursor-paginated; an omitted `limit`\ndefaults to 100, so a bare request returns at most the 100 most\nrecent builds. Any build can also be fetched by id via\n`GET /v2/serverless/{id}/builds/{buildId}`. Stream a build's logs via\n`/v2/serverless/{id}/builds/{buildId}/logs`.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PaginationCursor"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationLimitBuilds"
+          }
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEndpointBuildsResponse"
+                },
+                "examples": {
+                  "builds": {
+                    "summary": "Successful response",
+                    "value": {
+                      "builds": [
+                        {
+                          "id": "build_abc123",
+                          "status": "COMPLETED",
+                          "commitHash": "abc1234",
+                          "commitMessage": "bump model",
+                          "branch": "main",
+                          "commitDate": "2026-06-01T12:00:00Z",
+                          "imageName": "registry.runpod.net/repo:abc1234",
+                          "startedAt": "2026-06-01T12:00:05Z",
+                          "completedAt": "2026-06-01T12:04:31Z",
+                          "error": null
+                        }
+                      ],
+                      "pagination": {
+                        "nextCursor": null,
+                        "hasNextPage": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "413": {
+            "$ref": "#/components/responses/ResponseTooLargeError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}/builds/{buildId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        },
+        {
+          "name": "buildId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "GitHub build identifier (from GET /v2/serverless/{id}/builds or a release's `buildId`)",
+          "example": "build_abc123"
+        }
+      ],
+      "get": {
+        "operationId": "getEndpointBuild",
+        "x-runpod-scope": "serverless:read",
+        "summary": "Get a serverless endpoint build",
+        "x-mint": {
+          "metadata": {
+            "description": "Retrieve a single GitHub build for a Runpod Serverless endpoint by its build ID, returning that build regardless of how old it is."
+          }
+        },
+        "description": "Returns one of the endpoint's GitHub builds by id, regardless of age —\nno need to page through `GET /v2/serverless/{id}/builds` to reach it.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Build"
+                },
+                "examples": {
+                  "build": {
+                    "summary": "Successful response",
+                    "value": {
+                      "id": "build_abc123",
+                      "status": "COMPLETED",
+                      "commitHash": "abc1234",
+                      "commitMessage": "bump model",
+                      "branch": "main",
+                      "commitDate": "2026-06-01T12:00:00Z",
+                      "imageName": "registry.runpod.net/repo:abc1234",
+                      "startedAt": "2026-06-01T12:00:05Z",
+                      "completedAt": "2026-06-01T12:04:31Z",
+                      "error": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}/metrics/cold-starts": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        }
+      ],
+      "get": {
+        "operationId": "getEndpointColdStartMetrics",
+        "x-runpod-scope": "serverless:read",
+        "summary": "Get serverless endpoint cold start metrics",
+        "x-mint": {
+          "metadata": {
+            "description": "Get cold start counts and durations for a Runpod Serverless endpoint as a time series."
+          }
+        },
+        "description": "Returns the cold start series shown on the endpoint's Metrics tab in the console.\n\n**Window.** `startTime` is inclusive and `endTime` is exclusive. Both are\noptional: `endTime` defaults to now and `startTime` to 24 hours before\n`endTime`, rounded down to the start of an `interval` bucket. An\n`endTime` in the future is treated as now. Metrics are kept for 90 days,\nso `startTime` must be within the last 90 days.\n\n**Interval.** Each record covers one `interval`-sized bucket, aligned to\nUTC.\n\n**Paging.** Records are oldest first, at most `limit` (default 1000) per\npage. Follow `pagination.nextCursor` while `pagination.hasNextPage` is\ntrue. The cursor keeps the first page's window, so `startTime`,\n`endTime`, and `interval` can be left out on later pages; if sent, they\nmust match the first page or the cursor is rejected with 422.\n\n**Sparse series.** Buckets with no activity are omitted, not zero-filled,\nso `records` can be shorter than the number of buckets in the window, or\nempty.\n\n**Units.** `durationMs` is how long each cold start took, in milliseconds.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MetricsStartTime"
+          },
+          {
+            "$ref": "#/components/parameters/MetricsEndTime"
+          },
+          {
+            "$ref": "#/components/parameters/MetricsInterval"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationCursor"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationLimit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndpointColdStartMetricsResponse"
+                },
+                "examples": {
+                  "metrics": {
+                    "summary": "Successful response",
+                    "value": {
+                      "startTime": "2026-10-11T00:00:00Z",
+                      "endTime": "2026-10-12T00:00:00Z",
+                      "interval": "1h",
+                      "records": [
+                        {
+                          "time": "2026-10-11T13:00:00Z",
+                          "count": 2,
+                          "durationMs": {
+                            "min": 8200,
+                            "max": 11900,
+                            "total": 20100,
+                            "p70": 11900,
+                            "p90": 11900,
+                            "p95": 11900,
+                            "p98": 11900
+                          }
+                        }
+                      ],
+                      "pagination": {
+                        "nextCursor": null,
+                        "hasNextPage": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "413": {
+            "$ref": "#/components/responses/ResponseTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntityError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}/metrics/requests": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        }
+      ],
+      "get": {
+        "operationId": "getEndpointRequestMetrics",
+        "x-runpod-scope": "serverless:read",
+        "summary": "Get serverless endpoint request metrics",
+        "x-mint": {
+          "metadata": {
+            "description": "Get request counts, execution time, and queue delay for a Runpod Serverless endpoint as a time series."
+          }
+        },
+        "description": "Returns the request series shown on the endpoint's Metrics tab in the console.\n\n**Window.** `startTime` is inclusive and `endTime` is exclusive. Both are\noptional: `endTime` defaults to now and `startTime` to 24 hours before\n`endTime`, rounded down to the start of an `interval` bucket. An\n`endTime` in the future is treated as now. Metrics are kept for 90 days,\nso `startTime` must be within the last 90 days.\n\n**Interval.** Each record covers one `interval`-sized bucket, aligned to\nUTC.\n\n**Paging.** Records are oldest first, at most `limit` (default 1000) per\npage. Follow `pagination.nextCursor` while `pagination.hasNextPage` is\ntrue. The cursor keeps the first page's window, so `startTime`,\n`endTime`, and `interval` can be left out on later pages; if sent, they\nmust match the first page or the cursor is rejected with 422.\n\n**Sparse series.** Buckets with no activity are omitted, not zero-filled,\nso `records` can be shorter than the number of buckets in the window, or\nempty.\n\n**Units.** Durations are milliseconds. `executionTimeMs` is the time a\nworker spent running a request; `delayTimeMs` is the time a request\nwaited in the queue before a worker picked it up.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MetricsStartTime"
+          },
+          {
+            "$ref": "#/components/parameters/MetricsEndTime"
+          },
+          {
+            "$ref": "#/components/parameters/MetricsInterval"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationCursor"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationLimit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndpointRequestMetricsResponse"
+                },
+                "examples": {
+                  "metrics": {
+                    "summary": "Successful response",
+                    "value": {
+                      "startTime": "2026-10-11T00:00:00Z",
+                      "endTime": "2026-10-12T00:00:00Z",
+                      "interval": "1h",
+                      "records": [
+                        {
+                          "time": "2026-10-11T13:00:00Z",
+                          "requests": 120,
+                          "completed": 117,
+                          "failed": 3,
+                          "retries": 2,
+                          "executionTimeMs": {
+                            "min": 210,
+                            "max": 9400,
+                            "total": 182400,
+                            "p70": 1500,
+                            "p90": 3100,
+                            "p95": 4800,
+                            "p98": 7700
+                          },
+                          "delayTimeMs": {
+                            "min": 4,
+                            "max": 2100,
+                            "total": 15600,
+                            "p70": 90,
+                            "p90": 310,
+                            "p95": 820,
+                            "p98": 1500
+                          }
+                        }
+                      ],
+                      "pagination": {
+                        "nextCursor": null,
+                        "hasNextPage": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "413": {
+            "$ref": "#/components/responses/ResponseTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntityError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}/metrics/workers": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        }
+      ],
+      "get": {
+        "operationId": "getEndpointWorkerMetrics",
+        "x-runpod-scope": "serverless:read",
+        "summary": "Get serverless endpoint worker metrics",
+        "x-mint": {
+          "metadata": {
+            "description": "Get worker counts by state for a Runpod Serverless endpoint as a time series."
+          }
+        },
+        "description": "Returns the worker state series shown on the endpoint's Metrics tab in the console.\nFor the current worker list, use `GET /v2/serverless/{id}/workers`.\n\n**Window.** `startTime` is inclusive and `endTime` is exclusive. Both are\noptional: `endTime` defaults to now and `startTime` to 24 hours before\n`endTime`, rounded down to the start of an `interval` bucket. An\n`endTime` in the future is treated as now. Metrics are kept for 90 days,\nso `startTime` must be within the last 90 days.\n\n**Interval.** Each record covers one `interval`-sized bucket, aligned to\nUTC.\n\n**Paging.** Records are oldest first, at most `limit` (default 1000) per\npage. Follow `pagination.nextCursor` while `pagination.hasNextPage` is\ntrue. The cursor keeps the first page's window, so `startTime`,\n`endTime`, and `interval` can be left out on later pages; if sent, they\nmust match the first page or the cursor is rejected with 422.\n\n**Sparse series.** Buckets with no activity are omitted, not zero-filled,\nso `records` can be shorter than the number of buckets in the window, or\nempty.\n\n**Snapshots.** Each record holds the last worker-count snapshot in its\nbucket, as point-in-time counts.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MetricsStartTime"
+          },
+          {
+            "$ref": "#/components/parameters/MetricsEndTime"
+          },
+          {
+            "$ref": "#/components/parameters/MetricsInterval"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationCursor"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationLimit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndpointWorkerMetricsResponse"
+                },
+                "examples": {
+                  "metrics": {
+                    "summary": "Successful response",
+                    "value": {
+                      "startTime": "2026-10-11T00:00:00Z",
+                      "endTime": "2026-10-12T00:00:00Z",
+                      "interval": "1h",
+                      "records": [
+                        {
+                          "time": "2026-10-11T13:00:00Z",
+                          "running": 3,
+                          "idle": 1,
+                          "initializing": 0,
+                          "throttled": 0,
+                          "unhealthy": 0
+                        }
+                      ],
+                      "pagination": {
+                        "nextCursor": null,
+                        "hasNextPage": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequestError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "413": {
+            "$ref": "#/components/responses/ResponseTooLargeError"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntityError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}/releases": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        }
+      ],
+      "get": {
+        "operationId": "listEndpointReleases",
+        "x-runpod-scope": "serverless:read",
+        "summary": "List serverless endpoint releases",
+        "x-mint": {
+          "metadata": {
+            "description": "List a Serverless endpoint's release history, configuration changes, build IDs, and current worker rollout status, newest release first."
+          }
+        },
+        "description": "Returns the endpoint's release history (newest first) plus a rollout\nsummary of how many workers are running the current version. Each\nrelease is a versioned configuration snapshot with a `diff` of what\nchanged; build-driven releases carry a `buildId` (fetch build detail via\nthe builds sub-routes).\n\nReleases are cursor-paginated newest-first; an omitted `limit`\ndefaults to 1000. The rollout summary always describes the endpoint's\ncurrent state, independent of the page requested.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PaginationCursor"
+          },
+          {
+            "$ref": "#/components/parameters/PaginationLimit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEndpointReleasesResponse"
+                },
+                "examples": {
+                  "releases": {
+                    "summary": "Successful response",
+                    "value": {
+                      "endpointVersion": 4,
+                      "rollout": {
+                        "inProgress": true,
+                        "workersOnLatest": 1,
+                        "workersTotal": 2,
+                        "percentOnLatest": 50
+                      },
+                      "releases": [
+                        {
+                          "id": "5r9x2m7q",
+                          "version": 4,
+                          "source": "MANUAL",
+                          "buildId": null,
+                          "createdByUserId": null,
+                          "workerCount": 2,
+                          "createdAt": "2026-06-01T12:10:00Z",
+                          "diff": [
+                            {
+                              "field": "workers.max",
+                              "old": 5,
+                              "new": 10
+                            }
+                          ]
+                        }
+                      ],
+                      "pagination": {
+                        "nextCursor": null,
+                        "hasNextPage": false
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "413": {
+            "$ref": "#/components/responses/ResponseTooLargeError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}/workers": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        }
+      ],
+      "get": {
+        "operationId": "listEndpointWorkers",
+        "x-runpod-scope": "serverless:read",
+        "summary": "List serverless endpoint workers",
+        "x-mint": {
+          "metadata": {
+            "description": "List active workers for a Runpod Serverless endpoint with worker status, runtime details, and summary counts grouped by status."
+          }
+        },
+        "description": "Lists the active workers for a serverless endpoint.\n\n**Returns.** A `200` with a `ListEndpointWorkersResponse`: a\n`workers` array (one entry per active worker, each carrying its `id`,\n`status`, and runtime details) plus a `summary` of worker counts\ngrouped by status. Only currently active workers are included;\nscaled-down workers are not returned.\n\n**How `status` is determined.** Each worker's `status` is derived by\nreconciling the worker pod's lifecycle status with the endpoint's\nlive job-queue view (which workers are actively serving requests).\nWhen the job-queue view is unavailable, the response degrades\ngracefully: the shape is unchanged, but each `status` and the summary\ncounts fall back to pod lifecycle alone.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEndpointWorkersResponse"
+                },
+                "examples": {
+                  "workers": {
+                    "summary": "Successful response",
+                    "value": {
+                      "endpointVersion": 4,
+                      "summary": {
+                        "running": 1,
+                        "idle": 1,
+                        "initializing": 0,
+                        "throttled": 0,
+                        "unhealthy": 0,
+                        "total": 2
+                      },
+                      "workers": [
+                        {
+                          "id": "8g3n5t6r",
+                          "status": "RUNNING",
+                          "isStale": false,
+                          "version": 4,
+                          "gpuCount": 1,
+                          "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+                          "uptimeSeconds": 3600,
+                          "gpuTypeId": "NVIDIA GeForce RTX 4090",
+                          "dataCenterId": "US-KS-2",
+                          "startedAt": "2026-06-01T12:05:00Z"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/serverless/{id}/workers/{workerId}/logs": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Serverless endpoint identifier",
+          "example": "ep_abc123"
+        },
+        {
+          "name": "workerId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Worker identifier (from GET /v2/serverless/{id}/workers)",
+          "example": "worker_abc"
+        }
+      ],
+      "get": {
+        "operationId": "getWorkerLogs",
+        "x-runpod-scope": "serverless:read",
+        "summary": "Stream serverless worker logs",
+        "x-mint": {
+          "metadata": {
+            "description": "Stream a Runpod Serverless worker's logs in real time as Server-Sent Events, with resumable reconnects via Last-Event-ID."
+          }
+        },
+        "description": "Streams a serverless worker's logs as Server-Sent Events. The `source`\nquery parameter selects which log source to include.\n\nThe SSE `data` payload shape is:\n`{ \"source\": \"container\", \"line\": \"...\", \"ts\": \"...\" }`.\nLog-event `id` values are the event `ts` timestamp so browser/EventSource\nreconnects can resume with `Last-Event-ID`.\n",
+        "tags": [
+          "Serverless"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LogSourceParam"
+          },
+          {
+            "$ref": "#/components/parameters/LogTail"
+          },
+          {
+            "$ref": "#/components/parameters/LogSince"
+          },
+          {
+            "$ref": "#/components/parameters/LogLastEventID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Worker log event stream",
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Always `no-cache` for SSE responses."
+              },
+              "Connection": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Always `keep-alive` to hold the SSE stream open."
+              },
+              "X-Accel-Buffering": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Always `no` to disable proxy buffering of the SSE stream."
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-Sent Events stream. Each event includes an `id:` line and a JSON `data:` payload with `source`, `line`, and `ts` fields."
+                },
+                "examples": {
+                  "logLine": {
+                    "summary": "Successful response",
+                    "value": "id: 2026-06-01T12:05:04Z/000000000042\ndata: {\"ts\":\"2026-06-01T12:05:04Z\",\"source\":\"container\",\"line\":\"Worker ready.\"}\n"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequestsError"
+          },
+          "default": {
+            "headers": {
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimit-Policy"
+              }
+            },
+            "description": "Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "headers": {
+      "RateLimit": {
+        "description": "Live quota state for the caller, per the IETF ratelimit-headers draft.",
+        "schema": {
+          "$ref": "#/components/schemas/RateLimitHeader"
+        }
+      },
+      "RateLimit-Policy": {
+        "description": "The quota policy behind `RateLimit`, per the IETF ratelimit-headers draft.",
+        "schema": {
+          "$ref": "#/components/schemas/RateLimitPolicyHeader"
+        }
+      }
+    },
+    "parameters": {
+      "LogLastEventID": {
+        "name": "Last-Event-ID",
+        "in": "header",
+        "required": false,
+        "description": "SSE reconnect cursor — a timestamp emitted by this endpoint. Takes\nprecedence over `since` and `tail`: when present, the stream resumes\nfrom this point. Sent automatically by EventSource on reconnect.\n",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "LogSince": {
+        "name": "since",
+        "in": "query",
+        "required": false,
+        "description": "RFC3339 timestamp to resume from. Ignored when `Last-Event-ID` is\nprovided. When set, the stream resumes from this point and `tail` is\nignored.\n",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "LogSourceParam": {
+        "name": "source",
+        "in": "query",
+        "required": false,
+        "description": "Log source to stream. Omit to include both container and system logs.",
+        "schema": {
+          "$ref": "#/components/schemas/LogSource"
+        }
+      },
+      "LogTail": {
+        "name": "tail",
+        "in": "query",
+        "required": false,
+        "description": "Number of historical lines to backfill before streaming. Defaults to\n100 when omitted; set `0` to stream live with no backfill. Maximum 5000.\nIgnored when `since` or `Last-Event-ID` is provided — the resume cursor\ndrives the backfill instead.\n",
+        "schema": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 100
+        }
+      },
+      "MetricsEndTime": {
+        "name": "endTime",
+        "in": "query",
+        "required": false,
+        "description": "End of the window (RFC 3339), exclusive. Defaults to now; a future value is treated as now.\n",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "example": "2026-10-12T00:00:00Z"
+      },
+      "MetricsInterval": {
+        "name": "interval",
+        "in": "query",
+        "required": false,
+        "description": "Bucket size. Defaults to 1h.",
+        "schema": {
+          "$ref": "#/components/schemas/EndpointMetricsInterval"
+        }
+      },
+      "MetricsStartTime": {
+        "name": "startTime",
+        "in": "query",
+        "required": false,
+        "description": "Start of the window (RFC 3339), inclusive. Defaults to 24 hours before endTime, rounded down to the start of an interval bucket. Must be within the last 90 days.\n",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "example": "2026-10-11T00:00:00Z"
+      },
+      "PaginationCursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Opaque resume cursor — pass the previous response's `pagination.nextCursor` through verbatim; omit for the first page. A cursor is only valid for the operation and parameters that issued it; a malformed or foreign cursor is rejected with 422.\n",
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "example": "Y3JlYXRlZEF0PTE3NDg3ODA0MDA"
+      },
+      "PaginationLimit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Page size, 1–1000. Defaults to 1000 when omitted.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "example": 50
+      },
+      "PaginationLimitBuilds": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Page size, 1–100. Defaults to 100 when omitted.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "example": 50
+      },
+      "ResourceFilters": {
+        "name": "filters",
+        "in": "query",
+        "required": false,
+        "description": "Only return resources matching these filters, as URL-encoded JSON. The filters apply before the page is cut, so send the same value with each `cursor` to keep walking the filtered list.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ResourceFilters"
+            },
+            "example": {
+              "tags": [
+                {
+                  "key": "env",
+                  "values": [
+                    "dev",
+                    "prod"
+                  ]
+                },
+                {
+                  "key": "team"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequestError": {
+        "headers": {
+          "RateLimit": {
+            "$ref": "#/components/headers/RateLimit"
+          },
+          "RateLimit-Policy": {
+            "$ref": "#/components/headers/RateLimit-Policy"
+          }
+        },
+        "description": "The request could not be processed because it is malformed or conflicts with request rules.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "badRequest": {
+                "summary": "Bad request",
+                "value": {
+                  "title": "Bad Request",
+                  "status": 400,
+                  "detail": "request could not be processed"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ForbiddenError": {
+        "headers": {
+          "RateLimit": {
+            "$ref": "#/components/headers/RateLimit"
+          },
+          "RateLimit-Policy": {
+            "$ref": "#/components/headers/RateLimit-Policy"
+          }
+        },
+        "description": "The bearer token is valid, but it does not grant access to the requested resource or action.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "insufficientAccess": {
+                "summary": "Insufficient access",
+                "value": {
+                  "title": "Forbidden",
+                  "status": 403,
+                  "detail": "access denied"
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFoundError": {
+        "headers": {
+          "RateLimit": {
+            "$ref": "#/components/headers/RateLimit"
+          },
+          "RateLimit-Policy": {
+            "$ref": "#/components/headers/RateLimit-Policy"
+          }
+        },
+        "description": "The requested resource was not found or is not accessible to the caller.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "notFound": {
+                "summary": "Resource not found",
+                "value": {
+                  "title": "Not Found",
+                  "status": 404,
+                  "detail": "resource not found"
+                }
+              }
+            }
+          }
+        }
+      },
+      "RequestTooLargeError": {
+        "headers": {
+          "RateLimit": {
+            "$ref": "#/components/headers/RateLimit"
+          },
+          "RateLimit-Policy": {
+            "$ref": "#/components/headers/RateLimit-Policy"
+          }
+        },
+        "description": "The incoming request body exceeds 1048576 bytes (1 MiB). Body size is\nchecked after authentication and rate limiting. GET and DELETE reject\nany nonempty request body with `422` instead.\n\nAn operation can also return this status when the request it expands\ninto is too large, even if the incoming body is within the limit.\n",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "requestTooLarge": {
+                "summary": "Request body exceeds the limit",
+                "value": {
+                  "title": "Request Entity Too Large",
+                  "status": 413,
+                  "detail": "Request body exceeds the 1048576 byte limit."
+                }
+              }
+            }
+          }
+        }
+      },
+      "ResponseTooLargeError": {
+        "headers": {
+          "RateLimit": {
+            "$ref": "#/components/headers/RateLimit"
+          },
+          "RateLimit-Policy": {
+            "$ref": "#/components/headers/RateLimit-Policy"
+          }
+        },
+        "description": "The response would exceed the response size cap. Request\nfewer items and retry; on paginated operations, lower `limit`.\n",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "responseTooLarge": {
+                "summary": "Response exceeds the size cap",
+                "value": {
+                  "title": "Request Entity Too Large",
+                  "status": 413,
+                  "detail": "Response too large for one request. Request fewer items and retry."
+                }
+              }
+            }
+          }
+        }
+      },
+      "TooManyRequestsError": {
+        "description": "The caller exceeded its per-user rate limit. The response identifies the window that was exceeded and how long to wait. The `RateLimit` and `RateLimit-Policy` headers (per the IETF ratelimit-headers draft) also accompany successful responses, so clients can track quota before a 429.\n",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before retrying, per the exceeded window.",
+            "schema": {
+              "type": "integer"
+            },
+            "example": 12
+          },
+          "RateLimit": {
+            "$ref": "#/components/headers/RateLimit"
+          },
+          "RateLimit-Policy": {
+            "$ref": "#/components/headers/RateLimit-Policy"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "rateLimited": {
+                "summary": "Rate limit exceeded",
+                "value": {
+                  "title": "Too Many Requests",
+                  "status": 429,
+                  "detail": "rate limit exceeded for the minute window"
+                }
+              }
+            }
+          }
+        }
+      },
+      "UnauthorizedError": {
+        "description": "Authentication failed because the bearer token is missing, malformed, expired, or invalid.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "missingBearerToken": {
+                "summary": "Missing bearer token",
+                "value": {
+                  "title": "Unauthorized",
+                  "status": 401,
+                  "detail": "missing bearer token"
+                }
+              }
+            }
+          }
+        }
+      },
+      "UnprocessableEntityError": {
+        "headers": {
+          "RateLimit": {
+            "$ref": "#/components/headers/RateLimit"
+          },
+          "RateLimit-Policy": {
+            "$ref": "#/components/headers/RateLimit-Policy"
+          }
+        },
+        "description": "The request body or parameters were syntactically valid but failed validation.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "validationFailed": {
+                "summary": "Validation failed",
+                "value": {
+                  "title": "Unprocessable Entity",
+                  "status": 422,
+                  "detail": "Request validation failed."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "BaseContainerConfig": {
+        "type": "object",
+        "description": "Container configuration universal to every containerized resource. Compose ContainerConfig instead unless the resource cannot support a direct registry credential (clusters — there the registry credential arrives via a pod template, see CreateClusterRequest.templateId).\n",
+        "properties": {
+          "args": {
+            "type": "string",
+            "description": "The container's command, as a single raw string. This is the field `entrypoint` and `cmd` encode into, exposed in its stored form.\n\nTwo shapes are accepted. A bare shell string is treated as CMD and split into arguments, which is what the console's \"Container start command\" field writes. A JSON object of the form `{\"entrypoint\":[...],\"cmd\":[...]}` sets either or both explicitly.\n\nResponses always return both representations: `args` exactly as stored, plus the deconstructed `entrypoint` and `cmd`. Supplying `args` together with `entrypoint` or `cmd` is allowed only when they describe the same command, so a read-modify-write client can send back everything it received. Send `\"\"` to clear, omit to leave unchanged.\n",
+            "examples": [
+              "--model meta-llama/Llama-3-8B --max-model-len 8192",
+              "{\"entrypoint\":[\"/bin/bash\",\"-c\"],\"cmd\":[\"python -u main.py\"]}",
+              ""
+            ]
+          },
+          "cmd": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Container CMD in exec form. When the image defines an ENTRYPOINT, this is the argument list passed to it. Encoded into the `args` field; supplying both is allowed only when they describe the same command. Send `[]` to clear, omit to leave unchanged.\n",
+            "examples": [
+              [
+                "--model",
+                "meta-llama/Llama-3-8B",
+                "--max-model-len",
+                "8192"
+              ]
+            ]
+          },
+          "entrypoint": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Container ENTRYPOINT in exec form, overriding the image's own. Encoded into `args` field; supplying both is allowed only when they describe the same command. Send `[]` to clear, omit to leave unchanged.\n",
+            "examples": [
+              [
+                "/bin/bash",
+                "-c"
+              ]
+            ]
+          },
+          "disk": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Container disk in GB (ephemeral, wiped on restart)",
+            "examples": [
+              50
+            ]
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables as key-value pairs",
+            "examples": [
+              {
+                "JUPYTER_PASSWORD": "hunter2"
+              }
+            ]
+          },
+          "image": {
+            "type": "string",
+            "description": "Docker image reference",
+            "examples": [
+              "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
+            ]
+          },
+          "ports": {
+            "type": "array",
+            "description": "Exposed ports, formatted as port/protocol",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "8888/http",
+                "22/tcp"
+              ]
+            ]
+          }
+        }
+      },
+      "BaseCpuConfig": {
+        "type": "object",
+        "required": [
+          "id",
+          "vcpuCount"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "CPU flavor identifier, as returned by GET /v2/catalog/cpus.",
+            "examples": [
+              "cpu5c"
+            ],
+            "minLength": 1
+          },
+          "vcpuCount": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "Number of vCPUs. Must be valid for the selected CPU flavor and must be a power of two.",
+            "examples": [
+              4
+            ]
+          }
+        }
+      },
+      "BaseEndpointGpuConfig": {
+        "type": "object",
+        "properties": {
+          "pools": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Serverless GPU pool IDs (as returned by `GET /v2/catalog/gpus` in\n`pool`). Workers are placed on whichever listed pool has capacity.\nNarrow a pool down to specific cards with `excludedTypes`.\n\nOn `PATCH`, `pools` and `excludedTypes` are one selection and are\nreplaced together, so sending `pools` by itself **clears the\nexclusions**. Two cases:\n\n- **Changing pools, keeping exclusions** — send both fields in one\n  request: `{\"gpu\": {\"pools\": [\"ADA_24\"], \"excludedTypes\":\n  [\"NVIDIA L40\"]}}`. `GET` the endpoint first to read the current\n  `excludedTypes` and resend the ones that still apply to the new\n  pools; an exclusion naming a type outside `pools` is a 400.\n- **Changing only `count` or a CUDA constraint** — omit `pools`:\n  `{\"gpu\": {\"minCudaVersion\": \"12.4\"}}`. The pool list and the\n  exclusions are both left exactly as they are.\n\n`excludedTypes` documents the full rule.\n",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "ADA_24"
+              ]
+            ]
+          },
+          "excludedTypes": {
+            "type": "array",
+            "uniqueItems": true,
+            "description": "GPU **type** IDs to subtract from the selected pools — the `id`\nfield of `GET /v2/catalog/gpus`, the same identifiers pods take in\n`gpu.id`. Workers run on every type in `pools` except these. Omit to\nuse the whole pool.\n\nPools stay the unit of selection; types are the unit of\nsubtraction. There is no inclusive allowlist: a card later added to\none of your pools becomes eligible, which is the honest reading of\n\"this pool, minus these\".\n\nTied to `pools`, because the two together are one selection:\nsupplying `pools` replaces that selection wholesale, so a `PATCH`\nsending `pools` **without `excludedTypes`** **clears** them —\nrestate them to keep them. A `PATCH` that omits `pools` leaves both\nthe pools and the exclusions untouched, so changing only a CUDA\nconstraint cannot widen a pinned endpoint.\n\nRejected with 400 if a value is not a GPU type in one of `pools`,\nso a typo cannot produce a filter that does nothing. Surrounding whitespace\nis trimmed, so `\" NVIDIA L40\"` and `\"NVIDIA L40\"` mean the same card.\n",
+            "items": {
+              "type": "string",
+              "pattern": "^\\s*[^-\\s]"
+            },
+            "examples": [
+              [
+                "NVIDIA L40"
+              ]
+            ]
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "GPUs per worker",
+            "examples": [
+              1
+            ]
+          }
+        }
+      },
+      "Build": {
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "examples": [
+              "build_abc123"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/BuildState"
+          },
+          "commitHash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short hash of the commit that triggered the build.",
+            "examples": [
+              "abc1234"
+            ]
+          },
+          "commitMessage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "bump model"
+            ]
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Git branch the commit was pushed to.",
+            "examples": [
+              "main"
+            ]
+          },
+          "commitDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the triggering commit was authored.",
+            "examples": [
+              "2026-06-01T12:00:00Z"
+            ]
+          },
+          "imageName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fully qualified image the build produced (or will produce).",
+            "examples": [
+              "registry.runpod.net/repo:abc1234"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the build started. Null while the build is still pending.",
+            "examples": [
+              "2026-06-01T12:00:05Z"
+            ]
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the build reached a terminal state. Null while the build is live.",
+            "examples": [
+              "2026-06-01T12:04:31Z"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Failure detail for `FAILED` / `TEST_FAILED` builds; null otherwise."
+          }
+        }
+      },
+      "BuildState": {
+        "type": "string",
+        "description": "GitHub build lifecycle state. `COMPLETED`, `FAILED`, `CANCELLED`, and\n`TEST_FAILED` are terminal; `PENDING`, `BUILDING`, `UPLOADING`, and\n`TESTING` are live.\n",
+        "x-enum-varnames": [
+          "BuildStatePending",
+          "BuildStateBuilding",
+          "BuildStateUploading",
+          "BuildStateTesting",
+          "BuildStateCompleted",
+          "BuildStateFailed",
+          "BuildStateCancelled",
+          "BuildStateTestFailed"
+        ],
+        "enum": [
+          "PENDING",
+          "BUILDING",
+          "UPLOADING",
+          "TESTING",
+          "COMPLETED",
+          "FAILED",
+          "CANCELLED",
+          "TEST_FAILED"
+        ]
+      },
+      "ContainerConfig": {
+        "description": "Reusable container configuration shared across templates, pods, and serverless endpoints. Adding a field here automatically propagates to all three resources.\n",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseContainerConfig"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "registry": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Container registry credential ID (for private images)",
+                "examples": [
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "CostCenter": {
+        "type": "object",
+        "required": [
+          "id",
+          "value"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "examples": [
+              "clz1x9k4a0000qw3h8s7d2f1g"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "description": "Cost center name exactly as stored, so it matches billing breakdowns.",
+            "examples": [
+              "team-ml"
+            ]
+          }
+        }
+      },
+      "CpuConfig": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseCpuConfig"
+          },
+          {
+            "type": "object",
+            "required": [
+              "memory"
+            ],
+            "properties": {
+              "memory": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Memory allocated to the pod in GB.",
+                "examples": [
+                  16
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "CreateCpuConfig": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseCpuConfig"
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "CreateEndpointGpuConfig": {
+        "description": "GPU request for an endpoint create. Carries the CUDA constraints, which\nlive here rather than at the body's top level so they are\nunrepresentable on a CPU endpoint.\n",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseEndpointGpuConfig"
+          },
+          {
+            "type": "object",
+            "required": [
+              "pools"
+            ],
+            "properties": {
+              "allowedCudaVersions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+$"
+                },
+                "description": "Acceptable CUDA versions for worker placement, as\n`major.minor`. Omit to accept any version (or inherit the\ntemplate's constraint when creating from `templateId`).\nMatching is exact — discover valid values per GPU type via\n`GET /v2/catalog/gpus?include=AVAILABILITY&product=SERVERLESS`\n(`cudaVersions`).\n\nA non-empty set is mutually exclusive with minCudaVersion (400\nif both are sent). An explicit `[]` states no constraint, so it\nmay accompany a floor.\n",
+                "examples": [
+                  [
+                    "12.8",
+                    "12.6"
+                  ]
+                ]
+              },
+              "minCudaVersion": {
+                "type": "string",
+                "pattern": "^\\d+\\.\\d+$",
+                "description": "Lowest acceptable CUDA version for worker placement, as\n`major.minor`, compared numerically rather than as a decimal —\nso 12.11 is above 12.2. Use this for an open-ended floor and\nallowedCudaVersions for an exact set.\n\nMutually exclusive with a non-empty allowedCudaVersions (400 if\nboth are sent); an explicit `[]` there states no constraint and\nmay accompany this floor.\n",
+                "examples": [
+                  "12.1"
+                ]
+              }
+            }
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "CreateEndpointRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ContainerConfig"
+          },
+          {
+            "if": {
+              "not": {
+                "required": [
+                  "templateId"
+                ]
+              }
+            },
+            "then": {
+              "required": [
+                "image"
+              ]
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "type",
+              "scaling"
+            ],
+            "properties": {
+              "gpu": {
+                "$ref": "#/components/schemas/CreateEndpointGpuConfig"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "examples": [
+                  "my-inference"
+                ]
+              },
+              "scaling": {
+                "$ref": "#/components/schemas/EndpointScaling"
+              },
+              "type": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/EndpointType"
+                  }
+                ],
+                "description": "Request-routing model. Required — it determines the valid scaler\nand request URLs, so it must be chosen explicitly on every create.\n"
+              },
+              "cpu": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "description": "Eligible CPU configurations for each worker. Memory is derived from the\nselected flavor's catalog RAM multiplier. Exact duplicate configurations\nare rejected; the same flavor may be listed at different vCPU counts.\n",
+                "items": {
+                  "$ref": "#/components/schemas/CreateCpuConfig"
+                }
+              },
+              "dataCenterIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Preferred data centers for placement. Omit or pass an empty array to let the scheduler choose."
+              },
+              "flashboot": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FlashBoot"
+                  }
+                ],
+                "default": "OFF"
+              },
+              "networkVolumes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Network volume IDs.",
+                "deprecated": true
+              },
+              "mounts": {
+                "$ref": "#/components/schemas/EndpointMountsInput"
+              },
+              "templateId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "ID of a serverless template to base this endpoint on. The\ntemplate is resolved at create time into the same container\nsettings you could otherwise spread into this body (image,\nargs, disk, ports, env, registry); explicit body fields\noverride the template's, except `env`, which is merged per\nkey with body values winning. The template's\nallowedCudaVersions seeds `gpu.allowedCudaVersions` when the\nbody omits it — but only for a GPU create, since a CPU endpoint\nhas no gpu block to seed into, and not when the body sets\n`gpu.minCudaVersion`, since seeding a set beside a floor would\nmanufacture the mutual-exclusion 400 from a valid request. Its\npod-specific startSsh/startJupyter flags are\nignored. Later template edits do not affect the endpoint.\nThe template may be one of your own or a public catalog\ntemplate — see `GET /v2/catalog/templates` (unknown or\ninaccessible ID → 404) — and must be a serverless template\n(→ 422).\n",
+                "examples": [
+                  "30zmvf89kd"
+                ]
+              },
+              "timeout": {
+                "type": "integer",
+                "default": 300000
+              },
+              "workers": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/EndpointWorkers"
+                  }
+                ],
+                "properties": {
+                  "min": {
+                    "type": "integer",
+                    "default": 0
+                  },
+                  "max": {
+                    "type": "integer",
+                    "default": 3
+                  },
+                  "idleTimeout": {
+                    "type": "integer",
+                    "default": 10
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "unevaluatedProperties": false,
+        "if": {
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "LOAD_BALANCER"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "scaling": {
+              "$ref": "#/components/schemas/RequestCountScaling"
+            }
+          }
+        }
+      },
+      "CreateSecretRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191,
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_.\\-/]*$",
+            "description": "Unique name for the secret — referenced from environment variables as `{{ RUNPOD_SECRET_<name> }}`; immutable after creation. Maximum 191 characters, must start with a letter or underscore, and may contain letters, digits, and `_.-/`. Names beginning with the reserved prefix `RUNPOD` are rejected (case-insensitive).",
+            "examples": [
+              "hf-token"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16777216,
+            "description": "The secret value. Write-only — never returned by the API. Must be smaller than 16 MiB of UTF-8 text (strictly under 16,777,216 bytes)."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 65535,
+            "description": "Optional human-readable description, at most 65,535 bytes of UTF-8 text.",
+            "examples": [
+              "Hugging Face read token"
+            ]
+          }
+        }
+      },
+      "Endpoint": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ContainerConfig"
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "workers",
+              "scaling",
+              "dataCenterIds",
+              "networkVolumes",
+              "mounts",
+              "timeout",
+              "flashboot",
+              "createdAt"
+            ],
+            "properties": {
+              "costCenter": {
+                "$ref": "#/components/schemas/ResourceCostCenter"
+              },
+              "tags": {
+                "$ref": "#/components/schemas/ResourceTags"
+              },
+              "id": {
+                "type": "string",
+                "examples": [
+                  "ep_abc123"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "examples": [
+                  "my-inference"
+                ]
+              },
+              "type": {
+                "$ref": "#/components/schemas/EndpointType"
+              },
+              "requestUrls": {
+                "$ref": "#/components/schemas/EndpointRequestUrls"
+              },
+              "gpu": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/EndpointGpuConfig"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cpu": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Eligible CPU configurations for each worker, in the order they\nwere submitted. Present for CPU endpoints and omitted for GPU\nendpoints. Memory is derived from the selected flavor's catalog\nRAM multiplier.\n",
+                "items": {
+                  "$ref": "#/components/schemas/CpuConfig"
+                }
+              },
+              "workers": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/EndpointWorkers"
+                  }
+                ],
+                "required": [
+                  "min",
+                  "max"
+                ]
+              },
+              "scaling": {
+                "$ref": "#/components/schemas/EndpointScaling"
+              },
+              "dataCenterIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "examples": [
+                  [
+                    "US-TX-3"
+                  ]
+                ]
+              },
+              "networkVolumes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "deprecated": true,
+                "examples": [
+                  [
+                    "vol_abc"
+                  ]
+                ]
+              },
+              "mounts": {
+                "$ref": "#/components/schemas/EndpointMounts"
+              },
+              "timeout": {
+                "type": "integer",
+                "description": "Per-request execution timeout in milliseconds",
+                "examples": [
+                  300000
+                ]
+              },
+              "flashboot": {
+                "$ref": "#/components/schemas/FlashBoot"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "examples": [
+                  "2026-03-13T20:00:00Z"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "EndpointColdStartMetric": {
+        "type": "object",
+        "required": [
+          "time",
+          "count",
+          "durationMs"
+        ],
+        "properties": {
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Bucket start (UTC)."
+          },
+          "count": {
+            "type": "integer"
+          },
+          "durationMs": {
+            "$ref": "#/components/schemas/EndpointDurationStats"
+          }
+        }
+      },
+      "EndpointColdStartMetricsResponse": {
+        "type": "object",
+        "description": "Cold start counts and durations per bucket for the resolved window. `records` contains only buckets with activity. Buckets with no activity are omitted, not zero-filled, so `records` can be shorter than the number of buckets in the window, or empty. Results are paged: see `pagination`.\n",
+        "required": [
+          "startTime",
+          "endTime",
+          "interval",
+          "records",
+          "pagination"
+        ],
+        "properties": {
+          "startTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Resolved window start (after defaults)."
+          },
+          "endTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Resolved window end (after defaults and the clamp to now)."
+          },
+          "interval": {
+            "$ref": "#/components/schemas/EndpointMetricsInterval"
+          },
+          "records": {
+            "type": "array",
+            "description": "This page's buckets, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/EndpointColdStartMetric"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "EndpointDurationStats": {
+        "type": "object",
+        "description": "Millisecond statistics over one bucket.",
+        "required": [
+          "min",
+          "max",
+          "total",
+          "p70",
+          "p90",
+          "p95",
+          "p98"
+        ],
+        "properties": {
+          "min": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "number",
+            "format": "double",
+            "description": "Sum over every request (or cold start) in the bucket."
+          },
+          "p70": {
+            "type": "integer"
+          },
+          "p90": {
+            "type": "integer"
+          },
+          "p95": {
+            "type": "integer"
+          },
+          "p98": {
+            "type": "integer"
+          }
+        }
+      },
+      "EndpointGpuConfig": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseEndpointGpuConfig"
+          },
+          {
+            "type": "object",
+            "required": [
+              "pools",
+              "allowedCudaVersions",
+              "minCudaVersion"
+            ],
+            "properties": {
+              "allowedCudaVersions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Acceptable CUDA versions for worker placement, as `major.minor`. Empty means any version.",
+                "examples": [
+                  []
+                ]
+              },
+              "minCudaVersion": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Lowest acceptable CUDA version for worker placement, as `major.minor`. Null means no floor.",
+                "examples": [
+                  null
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "EndpointMetricsInterval": {
+        "type": "string",
+        "enum": [
+          "1m",
+          "5m",
+          "15m",
+          "30m",
+          "1h",
+          "6h",
+          "12h",
+          "1d"
+        ],
+        "default": "1h",
+        "description": "Bucket size for endpoint metrics."
+      },
+      "EndpointMount": {
+        "type": "object",
+        "required": [
+          "volumeId"
+        ],
+        "additionalProperties": false,
+        "description": "A volume mounted on every worker, always at `/runpod-volume`. Custom\npaths are not supported yet.\n",
+        "properties": {
+          "volumeId": {
+            "type": "string",
+            "description": "ID of a NetworkVolume (under `network`) or GlobalVolume (under `global`).",
+            "examples": [
+              "vol_abc"
+            ]
+          }
+        }
+      },
+      "EndpointMounts": {
+        "type": "object",
+        "required": [
+          "network",
+          "global"
+        ],
+        "description": "Volumes mounted on every worker of the endpoint.",
+        "properties": {
+          "network": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EndpointMount"
+            }
+          },
+          "global": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EndpointMount"
+            }
+          }
+        }
+      },
+      "EndpointMountsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Volumes to mount on the endpoint's workers. A `network` or `global`\nlist that is present replaces the endpoint's current list of that kind;\nan empty list detaches it, and an omitted list is left unchanged. Both\nkinds cannot be present on the endpoint at once, so to switch kinds send\n`[]` for one and the new list for the other in the same request. Changes\napply to workers created afterwards. At most one global volume, GPU\nendpoints only. `network` may accompany the deprecated `networkVolumes` field\nonly if the two agree exactly.\n",
+        "properties": {
+          "network": {
+            "type": "array",
+            "description": "Network volumes, at most one per data center.",
+            "items": {
+              "$ref": "#/components/schemas/EndpointMount"
+            }
+          },
+          "global": {
+            "type": "array",
+            "maxItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/EndpointMount"
+            }
+          }
+        }
+      },
+      "EndpointRequestMetric": {
+        "type": "object",
+        "required": [
+          "time",
+          "requests",
+          "completed",
+          "failed",
+          "retries",
+          "executionTimeMs",
+          "delayTimeMs"
+        ],
+        "properties": {
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Bucket start (UTC)."
+          },
+          "requests": {
+            "type": "integer",
+            "description": "Requests that finished in this bucket."
+          },
+          "completed": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "retries": {
+            "type": "integer"
+          },
+          "executionTimeMs": {
+            "$ref": "#/components/schemas/EndpointDurationStats"
+          },
+          "delayTimeMs": {
+            "$ref": "#/components/schemas/EndpointDurationStats"
+          }
+        }
+      },
+      "EndpointRequestMetricsResponse": {
+        "type": "object",
+        "description": "Request counts and durations per bucket for the resolved window. `records` contains only buckets with activity. Buckets with no activity are omitted, not zero-filled, so `records` can be shorter than the number of buckets in the window, or empty. Results are paged: see `pagination`.\n",
+        "required": [
+          "startTime",
+          "endTime",
+          "interval",
+          "records",
+          "pagination"
+        ],
+        "properties": {
+          "startTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Resolved window start (after defaults)."
+          },
+          "endTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Resolved window end (after defaults and the clamp to now)."
+          },
+          "interval": {
+            "$ref": "#/components/schemas/EndpointMetricsInterval"
+          },
+          "records": {
+            "type": "array",
+            "description": "This page's buckets, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/EndpointRequestMetric"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "EndpointRequestUrls": {
+        "description": "Request URLs appropriate to the endpoint's top-level `type`.\nQueue-based endpoints provide job submission and management URLs;\nload-balancing endpoints provide `base` and `health` because their\nremaining paths are worker-defined.\n\nRequest and response bodies for the queue-based URLs are documented in\nthe [serverless operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference).\nLoad-balancing endpoints are documented in\n[Load balancing endpoints](https://docs.runpod.io/serverless/load-balancing/overview).",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/QueueBasedRequestUrls"
+          },
+          {
+            "$ref": "#/components/schemas/LoadBalancingRequestUrls"
+          }
+        ]
+      },
+      "EndpointScaling": {
+        "description": "Autoscaling signal — a discriminated union on `type`: `QUEUE_DELAY`\n(queue-based endpoints only) or `REQUEST_COUNT`. The scaler is chosen\nindependently of the endpoint's routing `type` and can be switched on\nupdate.\n",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/QueueDelayScaling"
+          },
+          {
+            "$ref": "#/components/schemas/RequestCountScaling"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "QUEUE_DELAY": "#/components/schemas/QueueDelayScaling",
+            "REQUEST_COUNT": "#/components/schemas/RequestCountScaling"
+          }
+        }
+      },
+      "EndpointType": {
+        "type": "string",
+        "description": "Request-routing semantics for a modern serverless endpoint.\n- `QUEUE` — submit asynchronous or synchronous jobs through the managed queue.\n- `LOAD_BALANCER` — send requests directly to worker-defined HTTP paths.\n  Configure via `env`: `PORT` (server port, default 80), `PORT_HEALTH`\n  (health-check port, default 80), and `HEALTH_CHECK_PATH` (path the\n  load balancer polls for worker health, default `/ping`).\n",
+        "x-enum-varnames": [
+          "EndpointTypeQueue",
+          "EndpointTypeLoadBalancer"
+        ],
+        "enum": [
+          "QUEUE",
+          "LOAD_BALANCER"
+        ]
+      },
+      "EndpointWorkerMetric": {
+        "type": "object",
+        "required": [
+          "time",
+          "running",
+          "idle",
+          "initializing",
+          "throttled",
+          "unhealthy"
+        ],
+        "properties": {
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Bucket start (UTC)."
+          },
+          "running": {
+            "type": "integer"
+          },
+          "idle": {
+            "type": "integer"
+          },
+          "initializing": {
+            "type": "integer"
+          },
+          "throttled": {
+            "type": "integer"
+          },
+          "unhealthy": {
+            "type": "integer"
+          }
+        }
+      },
+      "EndpointWorkerMetricsResponse": {
+        "type": "object",
+        "description": "Worker counts by state per bucket for the resolved window. `records` contains only buckets with activity. Buckets with no activity are omitted, not zero-filled, so `records` can be shorter than the number of buckets in the window, or empty. Results are paged: see `pagination`.\n",
+        "required": [
+          "startTime",
+          "endTime",
+          "interval",
+          "records",
+          "pagination"
+        ],
+        "properties": {
+          "startTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Resolved window start (after defaults)."
+          },
+          "endTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Resolved window end (after defaults and the clamp to now)."
+          },
+          "interval": {
+            "$ref": "#/components/schemas/EndpointMetricsInterval"
+          },
+          "records": {
+            "type": "array",
+            "description": "This page's buckets, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/EndpointWorkerMetric"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "EndpointWorkers": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "min": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Minimum number of workers.",
+            "examples": [
+              0
+            ]
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum number of workers.",
+            "examples": [
+              5
+            ]
+          },
+          "idleTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": "Seconds before idle workers scale down. Not applicable to queue-based\nendpoints scaling on `requestCount` — rejected on create/update and\nomitted from responses for that combination.\n",
+            "examples": [
+              5
+            ]
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "title",
+          "status",
+          "detail"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short human-readable summary",
+            "examples": [
+              "Not Found"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "description": "HTTP status code",
+            "examples": [
+              404
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "description": "Human-readable explanation",
+            "examples": [
+              "pod not found"
+            ]
+          },
+          "errors": {
+            "type": "array",
+            "description": "Individual request-validation failures.",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "$: additional properties 'bogus' not allowed"
+              ]
+            ]
+          }
+        }
+      },
+      "FlashBoot": {
+        "type": "string",
+        "description": "FlashBoot cold-start acceleration mode.\n- `OFF`                — disabled\n- `FLASHBOOT`          — enabled\n- `PRIORITY_FLASHBOOT` — enabled with priority capacity\n",
+        "enum": [
+          "OFF",
+          "FLASHBOOT",
+          "PRIORITY_FLASHBOOT"
+        ]
+      },
+      "ListEndpointBuildsResponse": {
+        "type": "object",
+        "required": [
+          "builds",
+          "pagination"
+        ],
+        "properties": {
+          "builds": {
+            "type": "array",
+            "description": "Build history, newest first, cursor-paginated (an omitted `limit`\ndefaults to 100). Page with `cursor`/`limit` to walk the full\nhistory, or fetch any build by id via\n`GET /v2/serverless/{id}/builds/{buildId}`.\n",
+            "items": {
+              "$ref": "#/components/schemas/Build"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "ListEndpointReleasesResponse": {
+        "type": "object",
+        "required": [
+          "rollout",
+          "releases",
+          "pagination"
+        ],
+        "properties": {
+          "endpointVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The endpoint's current configuration version. Null if unknown.",
+            "examples": [
+              4
+            ]
+          },
+          "rollout": {
+            "$ref": "#/components/schemas/RolloutSummary"
+          },
+          "releases": {
+            "type": "array",
+            "description": "Release history, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/Release"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "ListEndpointWorkersResponse": {
+        "type": "object",
+        "required": [
+          "workers",
+          "summary"
+        ],
+        "properties": {
+          "workers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Worker"
+            }
+          },
+          "summary": {
+            "$ref": "#/components/schemas/WorkerSummary"
+          },
+          "endpointVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The endpoint's current configuration version. A worker whose\n`version` differs is running stale config (see `worker.isStale`).\nNull if unknown.\n",
+            "examples": [
+              4
+            ]
+          }
+        }
+      },
+      "ListEndpointsResponse": {
+        "type": "object",
+        "required": [
+          "endpoints",
+          "pagination"
+        ],
+        "properties": {
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Endpoint"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "ListSecretsResponse": {
+        "type": "object",
+        "required": [
+          "secrets"
+        ],
+        "properties": {
+          "secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Secret"
+            }
+          }
+        }
+      },
+      "LoadBalancingRequestUrls": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "base",
+          "health"
+        ],
+        "properties": {
+          "base": {
+            "type": "string",
+            "format": "uri",
+            "description": "Base URL for worker-defined HTTP and WebSocket paths.\nSee [Load balancing endpoints](https://docs.runpod.io/serverless/load-balancing/overview).",
+            "examples": [
+              "https://4m7x2k9q.api.runpod.ai"
+            ]
+          },
+          "health": {
+            "type": "string",
+            "format": "uri",
+            "description": "Health check endpoint the load balancer will periodically ping to decide if the worker is healthy enough to receive traffic. Configurable by setting the `HEALTH_CHECK_PATH` environment variable. Defaults to `/ping` if the variable is not set.\nSee [Health checks](https://docs.runpod.io/serverless/load-balancing/overview#health-checks) for the response codes it interprets.",
+            "examples": [
+              "https://4m7x2k9q.api.runpod.ai/ping"
+            ]
+          }
+        }
+      },
+      "LogSource": {
+        "type": "string",
+        "description": "Log source to include in a log stream.\n- `container` — container stdout/stderr log stream\n- `system`    — host lifecycle/userlogs stream\n",
+        "x-enum-varnames": [
+          "LogSourceContainer",
+          "LogSourceSystem"
+        ],
+        "enum": [
+          "container",
+          "system"
+        ]
+      },
+      "Pagination": {
+        "type": "object",
+        "required": [
+          "nextCursor",
+          "hasNextPage"
+        ],
+        "description": "Cursor-pagination metadata, uniform across list endpoints. Every response carries it: follow `nextCursor` while `hasNextPage` is true to walk the full result set.\n",
+        "properties": {
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as the `cursor` query parameter to fetch the next page. Null on the last page.\n",
+            "examples": [
+              null
+            ]
+          },
+          "hasNextPage": {
+            "type": "boolean",
+            "description": "Whether more items exist after this page.",
+            "examples": [
+              false
+            ]
+          }
+        }
+      },
+      "QueueBasedRequestUrls": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run",
+          "runSync",
+          "status",
+          "stream",
+          "cancel",
+          "retry",
+          "purgeQueue",
+          "health"
+        ],
+        "properties": {
+          "run": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL for asynchronously submitting a queued job.\nSee the [/run operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference#/run) for request and response bodies.",
+            "examples": [
+              "https://api.runpod.ai/v2/4m7x2k9q/run"
+            ]
+          },
+          "runSync": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL for synchronously submitting a queued job. Accepts an optional `?wait=x` query parameter to control how long the request waits for job completion, defaulting to 90 seconds.\nSee the [/runsync operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference#/runsync) for request and response bodies.",
+            "examples": [
+              "https://api.runpod.ai/v2/4m7x2k9q/runsync"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "format": "uri",
+            "description": "Check the current state, execution statistics, and results of a previously submitted job.\nSee the [/status operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference#/status) for request and response bodies.",
+            "examples": [
+              "https://api.runpod.ai/v2/4m7x2k9q/status/{job_id}"
+            ]
+          },
+          "stream": {
+            "type": "string",
+            "format": "uri",
+            "description": "Receive incremental results as they become available from a job that generates output progressively.\nSee the [/stream operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference#/stream) for request and response bodies.",
+            "examples": [
+              "https://api.runpod.ai/v2/4m7x2k9q/stream/{job_id}"
+            ]
+          },
+          "cancel": {
+            "type": "string",
+            "format": "uri",
+            "description": "Stop an in-progress job or remove a queued job before it starts.\nSee the [/cancel operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference#/cancel) for request and response bodies.",
+            "examples": [
+              "https://api.runpod.ai/v2/4m7x2k9q/cancel/{job_id}"
+            ]
+          },
+          "retry": {
+            "type": "string",
+            "format": "uri",
+            "description": "Requeue a failed or timed-out job without submitting a new request.\nSee the [/retry operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference#/retry) for request and response bodies.",
+            "examples": [
+              "https://api.runpod.ai/v2/4m7x2k9q/retry/{job_id}"
+            ]
+          },
+          "purgeQueue": {
+            "type": "string",
+            "format": "uri",
+            "description": "Remove all pending jobs from the queue. Does not affect in-progress jobs.\nSee the [/purge-queue operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference#/purge-queue) for request and response bodies.",
+            "examples": [
+              "https://api.runpod.ai/v2/4m7x2k9q/purge-queue"
+            ]
+          },
+          "health": {
+            "type": "string",
+            "format": "uri",
+            "description": "Overview of an endpoint's operational status.\nSee the [/health operation reference](https://docs.runpod.io/serverless/endpoints/operation-reference#/health) for request and response bodies.",
+            "examples": [
+              "https://api.runpod.ai/v2/4m7x2k9q/health"
+            ]
+          }
+        }
+      },
+      "QueueDelayScaling": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Scale on queue wait time. Queue-based endpoints only.",
+        "required": [
+          "type",
+          "queueDelay"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Scaler discriminator. Always `QUEUE_DELAY` for this variant.",
+            "enum": [
+              "QUEUE_DELAY"
+            ]
+          },
+          "queueDelay": {
+            "type": "number",
+            "format": "float",
+            "minimum": 0.5,
+            "description": "Adjusts the number of workers based on how long requests wait in the queue.",
+            "examples": [
+              4
+            ]
+          }
+        }
+      },
+      "RateLimitHeader": {
+        "type": "string",
+        "description": "Live per-window quota state. Optional — omitted for rate-limit-exempt\ncallers.\n\nA structured-field list with one member per window (`minute`, `hour`,\n`day`), each carrying the remaining request count `r` and seconds until\nthe window resets `t` (at least 1). Windows are fixed and aligned to the\nclock, not sliding. Returned on responses to authenticated requests,\nnot only on 429s.\n",
+        "examples": [
+          "\"minute\";r=0;t=12, \"hour\";r=2800;t=1812, \"day\";r=49500;t=45012"
+        ]
+      },
+      "RateLimitPolicyHeader": {
+        "type": "string",
+        "description": "Static per-window quota policy. Optional — omitted for rate-limit-exempt\ncallers.\n\nA structured-field list with one member per window (`minute`, `hour`,\n`day`), each carrying the quota `q` and the window length in seconds `w`.\nReturned on responses to authenticated requests, not only on 429s.\n\nLimits are per user, and every `/v2` route counts toward the same\nlimits; creating pods has no separate limit. Read the current quotas from\nthis header instead of hard-coding them, because they can change and some\naccounts have higher limits. A 429 only slows you down: wait for the\n`Retry-After` time and retry. Your account isn't suspended.\n",
+        "examples": [
+          "\"minute\";q=180;w=60, \"hour\";q=3600;w=3600, \"day\";q=43200;w=86400"
+        ]
+      },
+      "Release": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "createdAt",
+          "workerCount",
+          "diff"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "examples": [
+              "rel_abc123"
+            ]
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The endpoint configuration version this release produced.",
+            "examples": [
+              4
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/ReleaseSource"
+          },
+          "buildId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The GitHub build that produced this release. Set when `source` is\n`GIT_BUILD`; null for `MANUAL` releases. Fetch build detail/logs via\n`/v2/serverless/{id}/builds/{buildId}`.\n",
+            "examples": [
+              "build_abc123"
+            ]
+          },
+          "createdByUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ID of the user who created the release."
+          },
+          "workerCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Workers currently running this release's version.",
+            "examples": [
+              2
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "examples": [
+              "2026-03-13T20:00:00Z"
+            ]
+          },
+          "diff": {
+            "type": "array",
+            "description": "Configuration fields that changed in this release.",
+            "items": {
+              "$ref": "#/components/schemas/ReleaseDiffEntry"
+            }
+          }
+        }
+      },
+      "ReleaseDiffEntry": {
+        "type": "object",
+        "required": [
+          "field",
+          "old",
+          "new"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "The changed configuration field. Top-level (e.g. `gpuCount`,\n`locations`) or template-scoped (e.g. `template.imageName`,\n`template.env`).\n",
+            "examples": [
+              "template.imageName"
+            ]
+          },
+          "old": {
+            "description": "Previous value, as raw JSON. Null when the field was added."
+          },
+          "new": {
+            "description": "New value, as raw JSON. Null when the field was removed."
+          }
+        }
+      },
+      "ReleaseSource": {
+        "type": "string",
+        "description": "What produced the release.\n- `GIT_BUILD` — a completed GitHub build (see `buildId`)\n- `MANUAL`    — a manual configuration change\n",
+        "x-enum-varnames": [
+          "ReleaseSourceGitBuild",
+          "ReleaseSourceManual"
+        ],
+        "enum": [
+          "GIT_BUILD",
+          "MANUAL"
+        ]
+      },
+      "RequestCountScaling": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Scale on concurrent in-flight requests per worker. Required for\nload-balancing endpoints; also selectable for queue-based.\n",
+        "required": [
+          "type",
+          "requestCount"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Scaler discriminator. Always `REQUEST_COUNT` for this variant.",
+            "enum": [
+              "REQUEST_COUNT"
+            ]
+          },
+          "requestCount": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Adjusts the number of workers based on active in-flight requests.",
+            "examples": [
+              4
+            ]
+          }
+        }
+      },
+      "ResourceCostCenter": {
+        "description": "Cost center this resource's spend is attributed to. Absent when the resource is not attributed to a cost center, or when the caller lacks permission to view cost centers. Managed through `/v2/cost-centers`.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CostCenter"
+          }
+        ]
+      },
+      "ResourceFilters": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "An empty object, or an empty `tags` array, filters nothing.",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "maxItems": 25,
+            "description": "Conditions on the resource's tags. A resource must match every condition; repeating a key adds a condition rather than widening the first one. At most 25, the most tags one resource can carry.",
+            "items": {
+              "$ref": "#/components/schemas/TagCondition"
+            }
+          }
+        }
+      },
+      "ResourceTags": {
+        "type": "array",
+        "description": "The tags on this resource that are visible to the caller. Keys and values are returned exactly as stored. Tags under the reserved `runpod:` prefix, such as the cost center, are never listed here. Absent when the resource's tags are unavailable to the caller; an empty array means none are visible.",
+        "items": {
+          "$ref": "#/components/schemas/TagReference"
+        }
+      },
+      "RolloutSummary": {
+        "type": "object",
+        "required": [
+          "inProgress",
+          "workersOnLatest",
+          "workersTotal",
+          "percentOnLatest"
+        ],
+        "properties": {
+          "inProgress": {
+            "type": "boolean",
+            "description": "True while any worker is still running an older version.",
+            "examples": [
+              true
+            ]
+          },
+          "workersOnLatest": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Workers running the endpoint's current version.",
+            "examples": [
+              2
+            ]
+          },
+          "workersTotal": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "All workers currently allocated to the endpoint.",
+            "examples": [
+              3
+            ]
+          },
+          "percentOnLatest": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Percentage of workers on the current version (0 when there are no workers).",
+            "examples": [
+              67
+            ]
+          }
+        }
+      },
+      "Secret": {
+        "type": "object",
+        "description": "An account-scoped secret: an encrypted string stored by Runpod, referenced from pod, serverless, and template environment variables with the `{{ RUNPOD_SECRET_<name> }}` placeholder, substituted with the secret's value when the pod or worker boots. The value is write-only and never returned by the API.",
+        "required": [
+          "id",
+          "name",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique secret identifier",
+            "examples": [
+              "2q9m7x4cavgd"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique, human-readable name — the `<name>` referenced by the `RUNPOD_SECRET_<name>` placeholder. Immutable after creation.",
+            "examples": [
+              "hf-token"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable description",
+            "examples": [
+              "Hugging Face read token"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the secret was created"
+          },
+          "valueLastUpdatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the secret's value was last set (creation or rotation)"
+          }
+        }
+      },
+      "TagCondition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/TagFilterKey"
+          },
+          "values": {
+            "type": "array",
+            "maxItems": 100,
+            "description": "Matches a tag under `key` with any one of these values, compared exactly. Omitted or empty, the condition only requires the key to be present. `\"\"` matches a tag whose value is empty. At most 100.",
+            "items": {
+              "type": "string",
+              "maxLength": 191
+            },
+            "examples": [
+              [
+                "dev",
+                "prod"
+              ]
+            ]
+          }
+        }
+      },
+      "TagFilterKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 191,
+        "pattern": "[^\\t-\\r    -     　﻿]",
+        "not": {
+          "pattern": "^[\\t-\\r    -     　﻿]*[Rr][Uu][Nn][Pp][Oo][Dd]:"
+        },
+        "description": "Tag key, 1–191 characters as sent, with at least one that is not whitespace. Leading and trailing whitespace is ignored. Keys under the reserved `runpod:` prefix, in any letter case, are rejected.",
+        "examples": [
+          "env"
+        ]
+      },
+      "TagReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "key",
+          "value"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "ID of the tag itself, shared by every resource it is attached to.",
+            "examples": [
+              "clz1x9k4a0000qw3h8s7d2f1g"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "examples": [
+              "env"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "description": "May be empty.",
+            "examples": [
+              "dev"
+            ]
+          }
+        }
+      },
+      "UpdateEndpointGpuConfig": {
+        "description": "Partial GPU update — every field is optional and an omitted one is left\nunchanged. Unlike create, `pools` is optional, so changing only a CUDA\nconstraint does not require resending the pool list.\n\n`excludedTypes` requires `pools`, because the two are one selection and\nonly a supplied `pools` replaces it — an exclusion on its own would\notherwise be silently dropped.\n",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseEndpointGpuConfig"
+          },
+          {
+            "type": "object",
+            "dependentRequired": {
+              "excludedTypes": [
+                "pools"
+              ]
+            },
+            "properties": {
+              "allowedCudaVersions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+$"
+                },
+                "description": "Acceptable CUDA versions for worker placement, as\n`major.minor`. An explicit `[]` clears the constraint;\nomitting the field leaves it unchanged. Takes effect as\nworkers are replaced.\n\nA non-empty set is mutually exclusive with minCudaVersion (400\nif both are sent). An explicit `[]` states no constraint, so it\nmay accompany a floor.\nSetting one does not clear the other — clear it explicitly in\nthe same patch if the endpoint already carries it.\n"
+              },
+              "minCudaVersion": {
+                "type": "string",
+                "pattern": "^$|^\\d+\\.\\d+$",
+                "description": "Lowest acceptable CUDA version for worker placement, as\n`major.minor`. An explicit `\"\"` clears the floor; omitting the\nfield leaves it unchanged. Takes effect as workers are\nreplaced.\n\nMutually exclusive with a non-empty allowedCudaVersions (400 if\nboth are sent); an explicit `[]` there states no constraint and\nmay accompany this floor.\n",
+                "examples": [
+                  "12.1"
+                ]
+              }
+            }
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "UpdateEndpointRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ContainerConfig"
+          },
+          {
+            "type": "object",
+            "description": "Only provided fields are changed.",
+            "properties": {
+              "cpu": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "description": "Complete replacement CPU selection. Valid only for an existing CPU\nendpoint; endpoint compute family cannot be changed.\n",
+                "items": {
+                  "$ref": "#/components/schemas/CreateCpuConfig"
+                }
+              },
+              "dataCenterIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Preferred data centers for placement. Omit or pass an empty array to let the scheduler choose."
+              },
+              "flashboot": {
+                "$ref": "#/components/schemas/FlashBoot"
+              },
+              "gpu": {
+                "$ref": "#/components/schemas/UpdateEndpointGpuConfig"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "networkVolumes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Network volume IDs. Pass `[]` to detach.",
+                "deprecated": true
+              },
+              "mounts": {
+                "$ref": "#/components/schemas/EndpointMountsInput"
+              },
+              "scaling": {
+                "$ref": "#/components/schemas/EndpointScaling"
+              },
+              "templateId": {
+                "type": "string",
+                "description": "ID of a serverless template whose container settings are\napplied as if they were provided in this PATCH body (image,\nargs, disk, ports, env, registry). Explicit body fields\noverride the template's; `env` merges template and body per\nkey (body wins) and, per PATCH semantics, replaces the\nendpoint's env. One-time application — no link to the\ntemplate is retained. Must be one of your templates or a\npublic template (unknown or inaccessible ID → 404); must be\na serverless template (→ 422).\n",
+                "examples": [
+                  "30zmvf89kd"
+                ]
+              },
+              "timeout": {
+                "type": "integer"
+              },
+              "workers": {
+                "$ref": "#/components/schemas/EndpointWorkers"
+              }
+            }
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "UpdateSecretRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "description": "Only the provided fields are updated; at least one field is required.\nThe secret's `name` is immutable.\n",
+        "properties": {
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16777216,
+            "description": "New secret value, replacing the current one. Write-only. Must be smaller than 16 MiB of UTF-8 text (strictly under 16,777,216 bytes)."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 65535,
+            "description": "New human-readable description, at most 65,535 bytes of UTF-8 text. Send `\"\"` to clear."
+          }
+        }
+      },
+      "Worker": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "gpuCount",
+          "isStale"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "examples": [
+              "worker_abc"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkerStatus"
+          },
+          "isStale": {
+            "type": "boolean",
+            "description": "True when the worker is running an older endpoint configuration than\nthe current one (e.g. mid rolling-update). This is the authoritative\nflag: it is derived from `version` vs the response's `endpointVersion`,\nexcept on legacy endpoints (`endpointVersion` 1) where it falls back\nto a container-image comparison.\n",
+            "examples": [
+              false
+            ]
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Endpoint configuration version this worker is running. Compare with\nthe response's `endpointVersion`. Null if unknown.\n",
+            "examples": [
+              4
+            ]
+          },
+          "gpuCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "GPUs allocated to the worker.",
+            "examples": [
+              1
+            ]
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Container image the worker is running.",
+            "examples": [
+              "my-org/sdxl-worker:latest"
+            ]
+          },
+          "uptimeSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Seconds the worker has been running. Null until the worker is placed and running.",
+            "examples": [
+              3600
+            ]
+          },
+          "gpuTypeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "GPU type the worker is placed on. Null until the worker is placed.",
+            "examples": [
+              "NVIDIA RTX 4090"
+            ]
+          },
+          "dataCenterId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Data center the worker is placed in. Null until the worker is placed.",
+            "examples": [
+              "US-TX-3"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the worker last started. Null if it has not started.",
+            "examples": [
+              "2026-03-26T00:00:00Z"
+            ]
+          }
+        }
+      },
+      "WorkerStatus": {
+        "type": "string",
+        "description": "Derived worker state, reconciled from the worker pod's lifecycle status\nand the live job-queue view.\n- `RUNNING`      — actively processing a job\n- `IDLE`         — ready and polling for jobs\n- `INITIALIZING` — starting up, not yet ready\n- `THROTTLED`    — waiting on compute capacity\n- `UNHEALTHY`    — failing health checks\n",
+        "x-enum-varnames": [
+          "WorkerStatusRunning",
+          "WorkerStatusIdle",
+          "WorkerStatusInitializing",
+          "WorkerStatusThrottled",
+          "WorkerStatusUnhealthy"
+        ],
+        "enum": [
+          "RUNNING",
+          "IDLE",
+          "INITIALIZING",
+          "THROTTLED",
+          "UNHEALTHY"
+        ]
+      },
+      "WorkerSummary": {
+        "type": "object",
+        "description": "Histogram of the returned workers by status. The per-status counts are a\nroll-up of the `workers` array, so `running + idle + initializing +\nthrottled + unhealthy == total == len(workers)`.\n",
+        "required": [
+          "running",
+          "idle",
+          "initializing",
+          "throttled",
+          "unhealthy",
+          "total"
+        ],
+        "properties": {
+          "running": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Workers actively processing a job.",
+            "examples": [
+              2
+            ]
+          },
+          "idle": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Ready workers polling for jobs.",
+            "examples": [
+              1
+            ]
+          },
+          "initializing": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Workers starting up, not yet ready.",
+            "examples": [
+              0
+            ]
+          },
+          "throttled": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Workers waiting on compute capacity.",
+            "examples": [
+              0
+            ]
+          },
+          "unhealthy": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Workers failing health checks.",
+            "examples": [
+              0
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "All workers currently allocated to the endpoint.",
+            "examples": [
+              3
+            ]
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Runpod API Key",
+        "description": "Runpod API key authentication. Generate an API key in the Runpod console and send it in the `Authorization` header as `Bearer <api_key>`. Keys are scoped to the permissions granted when created; requests may return `403` when a valid key lacks access to the requested resource or action.\n\nConsole sessions (Clerk JWTs) act for the signed-in user. To act for a team instead, also send `X-Team-Id: <team_id>`; it applies only when the user owns or belongs to that team, otherwise the request runs against the user's own account. API keys created inside a team already act for that team and do not need the header.\n"
+      }
+    }
+  }
+}
