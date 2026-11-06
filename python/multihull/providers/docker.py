@@ -108,11 +108,35 @@ def render_run_kwargs(desired: Target) -> dict[str, Any]:
     return kwargs
 
 
+def env_name_problem(field: str, name: str) -> str | None:
+    head = name.partition("=")[0]
+    if not head:
+        return f"Docker refuses {field} name {name!r}, which is empty before any '='; rename it"
+    if head != name:
+        return (
+            f"Docker splits {field} name {name!r} at its first '=', so the container would "
+            f"get {head!r} with the rest prepended to the value; rename it"
+        )
+    return None
+
+
+def refusals(desired: Target) -> list[str]:
+    named = [
+        *(("container.env", name) for name in desired.service.container.env),
+        *(("docker.env", name) for name in docker_block(desired).env),
+    ]
+    problems = (env_name_problem(field, name) for field, name in named)
+    return [problem for problem in problems if problem]
+
+
 def plan_notes(desired: Target) -> list[str]:
     if not desired.gpus:
-        return []
+        return refusals(desired)
     classes = ", ".join(g.value for g in desired.gpus)
-    return [f"resources.gpu [{classes}] ignored: docker targets run the container without GPUs"]
+    return [
+        *refusals(desired),
+        f"resources.gpu [{classes}] ignored: docker targets run the container without GPUs",
+    ]
 
 
 def config_hash(kwargs: dict[str, Any], secret_names: list[str]) -> str:
@@ -311,6 +335,8 @@ class DockerProvider:
         )
 
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
+        for problem in refusals(desired):
+            raise ValueError(problem)
         block = docker_block(desired)
         container_port = desired.service.container.port
         secrets = desired.service.container.secrets

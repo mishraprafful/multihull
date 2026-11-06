@@ -54,7 +54,12 @@ An empty `resources.gpu` runs the pod on CPU: no `nvidia.com/gpu` limit, tolerat
 | `scaling.replicas` | Deployment `replicas` + HPA min/max (KEDA when concurrency set) |
 | `scaling.concurrency` | KEDA trigger target |
 | `container.health` | readiness and liveness probes |
+| `container.env` | container `env` |
 | `container.secrets` | `Secret` + `envFrom` |
 | endpoint | `kubernetes.endpoint`, LoadBalancer Service address, NodePort or cluster DNS |
 
 Ref stored in state: namespace plus resource names. Every resource carries the label `multihull.dev/service=<name>` for `rediscover`.
+
+## Names
+
+Each `container.secrets` name becomes a Secret key, which the API server limits to 253 letters, digits, `-`, `_` or `.`, not `.` and not starting with `..`. Each `container.env` name must be non-empty printable ASCII without `=`, the rule every cluster enforces from 1.34 (RelaxedEnvironmentVariableValidation; older clusters are stricter). `hull plan` notes a name outside these rules and `apply` refuses it before calling the API server. From 1.30, `envFrom` passes every Secret key through; 1.29 and older skip keys that are not environment variable names.

@@ -3,9 +3,25 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from docker.errors import NotFound
+from docker.errors import APIError, NotFound
 
 EPHEMERAL_PORT_BASE = 32768
+
+
+def environment_entries(environment: dict[str, str | None] | list[str] | None) -> list[str]:
+    if isinstance(environment, dict):
+        return [key if value is None else f"{key}={value}" for key, value in environment.items()]
+    return list(environment or [])
+
+
+def daemon_environment(entries: list[str]) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    for entry in entries:
+        name, _, value = entry.partition("=")
+        if not name:
+            raise APIError(f"invalid environment variable: {entry}")
+        environment[name] = value
+    return environment
 
 
 class FakeContainer:
@@ -30,6 +46,7 @@ class FakeContainer:
         self.log_calls: list[dict[str, Any]] = []
         self.log_chunks = [b"boot ok\nlistening on 8000\n", b"health probe"]
         self.host_port = host_port
+        self.environment: dict[str, str] = {}
 
     @property
     def attrs(self) -> dict[str, Any]:
@@ -93,10 +110,12 @@ class FakeContainers:
         for existing in self.items:
             if existing.name == kwargs["name"]:
                 raise RuntimeError(f"conflict: container {kwargs['name']} already exists")
+        environment = daemon_environment(environment_entries(kwargs.get("environment")))
         self.counter += 1
         requested = next(iter((kwargs.get("ports") or {}).values()), ("127.0.0.1", None))
         host_port = requested[1] or EPHEMERAL_PORT_BASE + self.counter
         container = FakeContainer(self, f"sha{self.counter:03d}", kwargs, host_port)
+        container.environment = environment
         self.items.append(container)
         return container
 
