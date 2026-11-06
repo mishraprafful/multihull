@@ -10,9 +10,13 @@ from multihull.providers.base import Target, secret_env_name, store_name
 from multihull.providers.runpod import API_KEY_ENV, RunpodProvider, secret_store_name
 from multihull.spec import ServiceSpec
 from tests.fake_runpod import FakeRunpod
+from tests.openapi_contract import contract
 
-RUNPOD_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.\-/]*$")
-RUNPOD_NAME_LIMIT = 191
+RUNPOD_NAME_SCHEMA = contract("runpod").node(
+    "/components/schemas/CreateSecretRequest/properties/name"
+)
+RUNPOD_NAME = re.compile(RUNPOD_NAME_SCHEMA["pattern"])
+RUNPOD_NAME_LIMIT = int(RUNPOD_NAME_SCHEMA["maxLength"])
 ALIKE = [
     (("a", "b-c", "d"), ("a-b", "c", "d")),
     (("llama", "baseten", "hf-token"), ("llama-baseten", "us", "hf-token")),

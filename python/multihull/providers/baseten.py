@@ -589,6 +589,7 @@ class BasetenApi:
 
 class BasetenProvider:
     type: ClassVar = "baseten"
+    preview: ClassVar[bool] = True
     native_credential_env: ClassVar[tuple[str, ...]] = (API_KEY_ENV, INFERENCE_API_KEY_ENV)
 
     @staticmethod

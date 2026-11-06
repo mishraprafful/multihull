@@ -7,8 +7,9 @@ DEMO_ARGS ?=
 DEMO_CLOUD_ARGS ?=
 DEMO_TAPE ?= examples/demo/demo.tape
 DEMO_GIF ?= website/public/demo/demo.gif
+SPEC_PROVIDERS ?=
 
-.PHONY: demo demo-cloud demo-record e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster-up kind-in-cluster-down kind-in-cluster router-release mock-image
+.PHONY: demo demo-cloud demo-record e2e e2e-quick e2e-kind kind-up kind-down kind-in-cluster-up kind-in-cluster-down kind-in-cluster router-release mock-image provider-specs
 
 demo:
 	cd python && uv run --extra demo python -m multihull.demo $(DEMO_ARGS)
@@ -26,6 +27,9 @@ router-release:
 
 mock-image:
 	docker build -t multihull-mock-server:e2e testing/mock-server
+
+provider-specs:
+	cd python && uv run python scripts/refresh_provider_specs.py $(SPEC_PROVIDERS)
 
 e2e: router-release
 	cd testing/e2e && E2E_ROUTER_BIN=$(abspath $(ROUTER_BIN)) uv run pytest $(E2E_ARGS)

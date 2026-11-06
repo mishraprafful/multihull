@@ -1133,6 +1133,7 @@ provides-extras = ["modal", "demo"]
 dev = [
     { name = "cryptography", specifier = ">=43" },
     { name = "grpcio-tools", specifier = ">=1.66" },
+    { name = "jsonschema", specifier = ">=4.23" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },
 ]

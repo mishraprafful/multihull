@@ -443,6 +443,7 @@ def stop_app(app_name: str, environment: str, credentials: str | None = None) ->
 
 class ModalProvider:
     type: ClassVar = "modal"
+    preview: ClassVar[bool] = False
     native_credential_env: ClassVar[tuple[str, ...]] = (
         TOKEN_ID_ENV,
         TOKEN_SECRET_ENV,
