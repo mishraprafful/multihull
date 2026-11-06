@@ -60,6 +60,21 @@ DEFAULT_AUTOSCALING = {
     "concurrency_target": 1,
     "target_utilization_percentage": 70,
 }
+CREATED_AT = "2026-10-26T12:00:00Z"
+INSTANCE_TYPE = {
+    "id": "1x2",
+    "name": "1x2",
+    "memory_limit_mib": 2048,
+    "millicpu_limit": 1000,
+    "gpu_count": 0,
+    "gpu_type": None,
+    "gpu_memory_limit_mib": None,
+}
+DEPLOYMENT_DEFAULTS = {
+    "created_at": CREATED_AT,
+    "instance_type_name": INSTANCE_TYPE["name"],
+    "request_backpressure_settings": {},
+}
 
 
 BASETEN_TARGET = {"provider": "baseten-us", "type": "baseten", "priority": 4, "baseten": {}}
@@ -71,6 +86,10 @@ def with_baseten(raw: dict[str, Any]) -> ServiceSpec:
 
 def error(status: int, message: str) -> httpx.Response:
     return httpx.Response(status, json={"error": message})
+
+
+def deployment_view(deployment: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    return None if deployment is None else {**DEPLOYMENT_DEFAULTS, **deployment}
 
 
 class FakeBaseten:
@@ -122,7 +141,7 @@ class FakeBaseten:
     ) -> httpx.Response:
         method = request.method
         if parts == ["users", "me"]:
-            return httpx.Response(200, json={"id": "u1", "email": "owner@example.com"})
+            return httpx.Response(200, json={"user_id": "u1", "email": "owner@example.com"})
         if parts == ["prepare_model_upload"] and method == "POST":
             return self.prepare(body or {})
         if parts[0] == "secrets":
@@ -147,7 +166,7 @@ class FakeBaseten:
                 return self.create(None, body or {})
             wanted = request.url.params.get("name")
             listed = [m for m in self.models.values() if wanted is None or m["name"] == wanted]
-            return httpx.Response(200, json={"models": listed})
+            return httpx.Response(200, json={"models": [self.model_view(m) for m in listed]})
         model = self.models.get(parts[0])
         if model is None:
             return error(404, "model not found")
@@ -156,7 +175,7 @@ class FakeBaseten:
             if method == "DELETE":
                 self.delete_model(model["id"])
                 return httpx.Response(200, json={"id": model["id"], "deleted": True})
-            return httpx.Response(200, json=model)
+            return httpx.Response(200, json=self.model_view(model))
         if rest == ["environments", "production"]:
             if method == "PATCH":
                 return self.patch_environment(model["id"], body or {})
@@ -177,12 +196,12 @@ class FakeBaseten:
             if method == "POST":
                 return self.create(model_id, body or {})
             listed = [d for d in self.deployments.values() if d["model_id"] == model_id]
-            return httpx.Response(200, json={"deployments": listed})
+            return httpx.Response(200, json={"deployments": [deployment_view(d) for d in listed]})
         deployment = self.deployments.get(rest[0])
         if deployment is None or deployment["model_id"] != model_id:
             return error(404, "deployment not found")
         if rest[1:] == []:
-            return httpx.Response(200, json=deployment)
+            return httpx.Response(200, json=deployment_view(deployment))
         if rest[1:] == ["promote"] and method == "POST":
             return self.promote(deployment, body or {})
         if rest[1:] == ["autoscaling_settings"] and method == "PATCH":
@@ -284,18 +303,17 @@ class FakeBaseten:
             "autoscaling_settings": dict(settings),
             "environment": None,
             "labels": dict(deployment_body.get("labels") or {}),
-            "config": deployment_body.get("config"),
-            "s3_key": source["s3_key"],
         }
         if deployment_body.get("environment_name") == "production":
             environment["candidate"] = deployment_id
             environment["pending_settings"] = settings
             if self.promote_on_create:
                 self.finish_promotion(model_id)
-        model = self.models[model_id]
-        return httpx.Response(
-            200, json={"model": model, "deployment": self.deployments[deployment_id]}
-        )
+        created = {
+            "model": self.model_view(self.models[model_id]),
+            "deployment": deployment_view(self.deployments[deployment_id]),
+        }
+        return httpx.Response(200, json=created)
 
     def new_model(self, name: str, team: str) -> str:
         model_id = self.next_id("m")
@@ -303,8 +321,10 @@ class FakeBaseten:
             "id": model_id,
             "name": name,
             "team_name": team,
-            "created_at": "2026-10-26T12:00:00Z",
+            "created_at": CREATED_AT,
             "production_deployment_id": None,
+            "development_deployment_id": None,
+            "instance_type_name": INSTANCE_TYPE["name"],
         }
         self.environments[model_id] = {
             "autoscaling_settings": dict(DEFAULT_AUTOSCALING),
@@ -319,9 +339,13 @@ class FakeBaseten:
         self.deployments[deployment_id] = {
             "id": deployment_id,
             "model_id": model_id,
+            "name": f"deployment-{deployment_id}",
             "status": "ACTIVE",
+            "is_production": True,
+            "is_development": False,
             "active_replica_count": 1,
             "autoscaling_settings": dict(DEFAULT_AUTOSCALING),
+            "environment": "production",
             "labels": dict(labels),
         }
         self.environments[model_id]["current"] = deployment_id
@@ -357,7 +381,7 @@ class FakeBaseten:
         environment["pending_settings"] = {**environment["autoscaling_settings"], **update}
         if self.promote_on_create:
             self.finish_promotion(deployment["model_id"])
-        return httpx.Response(200, json=deployment)
+        return httpx.Response(200, json=deployment_view(deployment))
 
     def environment_view(self, model_id: str) -> dict[str, Any]:
         environment = self.environments[model_id]
@@ -366,10 +390,18 @@ class FakeBaseten:
         return {
             "name": "production",
             "model_id": model_id,
-            "current_deployment": self.deployments.get(current) if current else None,
-            "candidate_deployment": self.deployments.get(candidate) if candidate else None,
+            "created_at": CREATED_AT,
+            "current_deployment": deployment_view(self.deployments.get(current or "")),
+            "candidate_deployment": deployment_view(self.deployments.get(candidate or "")),
             "autoscaling_settings": dict(environment["autoscaling_settings"]),
+            "promotion_settings": {},
+            "instance_type": dict(INSTANCE_TYPE),
+            "request_backpressure_settings": {},
         }
+
+    def model_view(self, model: Mapping[str, Any]) -> dict[str, Any]:
+        count = sum(d["model_id"] == model["id"] for d in self.deployments.values())
+        return {**model, "deployments_count": count}
 
     def patch_environment(self, model_id: str, body: Mapping[str, Any]) -> httpx.Response:
         settings = body.get("autoscaling_settings") or {}
@@ -423,7 +455,8 @@ class FakeBaseten:
         if not parts and method == "POST":
             assert body is not None
             self.secrets[body["name"]] = body["value"]
-            return httpx.Response(200, json={"id": body["name"], "name": body["name"]})
+            stored = {"id": body["name"], "name": body["name"], "team_name": "default"}
+            return httpx.Response(200, json={**stored, "created_at": CREATED_AT})
         if len(parts) == 1 and method == "DELETE":
             if parts[0] not in self.secrets:
                 return error(404, "secret not found")
