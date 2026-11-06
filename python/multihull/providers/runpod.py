@@ -405,6 +405,7 @@ class RunpodApi:
 
 class RunpodProvider:
     type: ClassVar = "runpod"
+    preview: ClassVar[bool] = True
     native_credential_env: ClassVar[tuple[str, ...]] = (API_KEY_ENV, ENDPOINT_API_KEY_ENV)
 
     @staticmethod

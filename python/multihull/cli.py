@@ -32,6 +32,7 @@ from multihull.controller import (
 from multihull.credentials import credential_problem
 from multihull.durations import format_duration, parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
+from multihull.providers.registry import preview_notices
 from multihull.state import (
     DEFAULT_STATE,
     STATE_ENV,
@@ -104,7 +105,13 @@ def load_and_warn(path: Path) -> specmod.ServiceSpec:
     service = load_or_exit(path)
     for warning in [*service.capacity_warnings(), *service.secret_name_warnings()]:
         errors.print(f"[yellow]warning[/yellow] {warning}")
+    print_preview_notices(service)
     return service
+
+
+def print_preview_notices(service: specmod.ServiceSpec) -> None:
+    for notice in preview_notices(service.targets):
+        errors.print(f"[cyan]note[/cyan] {escape(notice)}", soft_wrap=True)
 
 
 def route_keys_or_exit(service: specmod.ServiceSpec) -> None:
@@ -630,6 +637,7 @@ def raise_keyboard_interrupt(*_: object) -> None:
 @app.command()
 def doctor(path: SpecArg = DEFAULT_SPEC) -> None:
     service = load_or_exit(path)
+    print_preview_notices(service)
     table = Table(title=f"doctor {service.name}")
     table.add_column("provider")
     table.add_column("type")

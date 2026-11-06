@@ -241,6 +241,7 @@ def default_http_client() -> httpx.Client:
 
 class DockerProvider:
     type: ClassVar = "docker"
+    preview: ClassVar[bool] = False
     native_credential_env: ClassVar[tuple[str, ...]] = ()
 
     @staticmethod
