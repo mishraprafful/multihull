@@ -25,6 +25,16 @@ UPDATE_FIELDS = CONTAINER_FIELDS | {
 CREATE_FIELDS = UPDATE_FIELDS | {"type"}
 MERGED_FIELDS = {"workers", "gpu"}
 WORKER_STATES = ("running", "idle", "initializing", "throttled", "unhealthy")
+CREATED_AT = "2026-10-25T12:00:00Z"
+CPU_MEMORY_GB_PER_VCPU = 2
+ENDPOINT_DEFAULTS: dict[str, Any] = {
+    "networkVolumes": [],
+    "mounts": {"network": [], "global": []},
+    "timeout": 300000,
+    "flashboot": "OFF",
+    "createdAt": CREATED_AT,
+}
+GPU_DEFAULTS: dict[str, Any] = {"allowedCudaVersions": [], "minCudaVersion": None}
 
 
 def problem(status: int, title: str, detail: str) -> httpx.Response:
@@ -33,6 +43,22 @@ def problem(status: int, title: str, detail: str) -> httpx.Response:
         json={"title": title, "status": status, "detail": detail},
         headers={"content-type": "application/problem+json"},
     )
+
+
+def endpoint_view(endpoint: Mapping[str, Any]) -> dict[str, Any]:
+    view = {**ENDPOINT_DEFAULTS, **endpoint}
+    if "gpu" in endpoint:
+        view["gpu"] = {**GPU_DEFAULTS, **endpoint["gpu"]}
+    if "cpu" in endpoint:
+        view["cpu"] = [
+            {**flavor, "memory": int(flavor["vcpuCount"]) * CPU_MEMORY_GB_PER_VCPU}
+            for flavor in endpoint["cpu"]
+        ]
+    return view
+
+
+def secret_view(stored: Mapping[str, Any]) -> dict[str, Any]:
+    return {"id": stored["id"], "name": stored["name"], "createdAt": CREATED_AT}
 
 
 class FakeRunpod:
@@ -93,7 +119,7 @@ class FakeRunpod:
             return problem(404, "Not Found", "resource not found")
         if len(parts) == 1:
             if method == "GET":
-                return httpx.Response(200, json=endpoint)
+                return httpx.Response(200, json=endpoint_view(endpoint))
             if method == "PATCH":
                 return self.update(endpoint, body or {})
             if method == "DELETE":
@@ -117,7 +143,7 @@ class FakeRunpod:
             return problem(422, "Unprocessable Entity", "gpu.pools needs at least one pool")
         endpoint_id = self.next_id("ep")
         self.endpoints[endpoint_id] = {**body, "id": endpoint_id, **self.urls(endpoint_id, body)}
-        return httpx.Response(201, json=self.endpoints[endpoint_id])
+        return httpx.Response(201, json=endpoint_view(self.endpoints[endpoint_id]))
 
     def urls(self, endpoint_id: str, body: Mapping[str, Any]) -> dict[str, Any]:
         base = f"https://{endpoint_id}{TRAFFIC_SUFFIX}"
@@ -134,7 +160,7 @@ class FakeRunpod:
             else:
                 endpoint[field] = value
         endpoint.update(self.urls(endpoint["id"], endpoint))
-        return httpx.Response(200, json=endpoint)
+        return httpx.Response(200, json=endpoint_view(endpoint))
 
     def listing(self, request: httpx.Request) -> httpx.Response:
         newest_first = list(reversed(self.endpoints.values()))
@@ -145,7 +171,7 @@ class FakeRunpod:
         return httpx.Response(
             200,
             json={
-                "endpoints": page,
+                "endpoints": [endpoint_view(endpoint) for endpoint in page],
                 "pagination": {
                     "nextCursor": str(offset + limit) if more else None,
                     "hasNextPage": more,
@@ -156,8 +182,14 @@ class FakeRunpod:
     def workers(self, endpoint: Mapping[str, Any]) -> dict[str, Any]:
         default = ["IDLE"] * int(endpoint["workers"]["min"])
         states = self.worker_states.get(endpoint["id"], default)
+        gpus = int((endpoint.get("gpu") or {}).get("count", 0))
         workers = [
-            {"id": f"{endpoint['id']}-w{index}", "status": state}
+            {
+                "id": f"{endpoint['id']}-w{index}",
+                "status": state,
+                "gpuCount": gpus,
+                "isStale": False,
+            }
             for index, state in enumerate(states)
         ]
         summary = {state: states.count(state.upper()) for state in WORKER_STATES}
@@ -179,7 +211,7 @@ class FakeRunpod:
         if not parts and method == "GET":
             wanted = request.url.params.get("name", "").casefold()
             found = [
-                {"id": secret["id"], "name": secret["name"]}
+                secret_view(secret)
                 for secret in self.secrets.values()
                 if not wanted or secret["name"].casefold() == wanted
             ]
@@ -190,14 +222,14 @@ class FakeRunpod:
                 return problem(409, "Conflict", "secret name exists")
             secret_id = self.next_id("sec")
             self.secrets[secret_id] = {"id": secret_id, **body}
-            return httpx.Response(201, json={"id": secret_id, "name": body["name"]})
+            return httpx.Response(201, json=secret_view(self.secrets[secret_id]))
         stored = self.secrets.get(parts[0]) if parts else None
         if stored is None:
             return problem(404, "Not Found", "resource not found")
         if method == "PATCH":
             assert body is not None
             stored.update(body)
-            return httpx.Response(200, json={"id": stored["id"], "name": stored["name"]})
+            return httpx.Response(200, json=secret_view(stored))
         if method == "DELETE":
             del self.secrets[parts[0]]
             return httpx.Response(204)
