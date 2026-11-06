@@ -3,7 +3,11 @@ title: RunPod
 description: RunPod Serverless load-balancing endpoints through the REST API v2.
 ---
 
-Calls RunPod's REST API v2 (`https://api.runpod.io/v2`) directly. `apply` creates one Serverless endpoint of type `LOAD_BALANCER`, named `multihull-<svc>-<provider>`, from the image; RunPod binds a template to it and deletes both together. On `main`, unreleased: tested against a mocked API, not yet run against RunPod.
+:::caution[Preview]
+RunPod is a preview provider: verified against fakes and the RunPod API spec, not yet run live. `hull validate`, `plan`, `deploy` and `doctor` print a notice for each RunPod target. Have an account? [Issue 231](https://github.com/mishraprafful/multihull/issues/231) explains how to run the live suite.
+:::
+
+Calls RunPod's REST API v2 (`https://api.runpod.io/v2`) directly. `apply` creates one Serverless endpoint of type `LOAD_BALANCER`, named `multihull-<svc>-<provider>`, from the image; RunPod binds a template to it and deletes both together.
 
 ```yaml
 - provider: runpod-eu

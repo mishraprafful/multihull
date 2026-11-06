@@ -1,0 +1,113 @@
+---
+title: Release notes
+description: What 0.3.0 ships, what is proven and what is not, mirrored from
+  docs/releases/0.3.0.md.
+tableOfContents:
+  maxHeadingLevel: 2
+slug: 0.3.0/docs/reference/release-notes
+---
+
+:::note
+Mirrored at build time from `docs/releases/0.3.0.md` in the repository. Edit the source, not this page.
+:::
+
+More providers, dated 2026-11-06. Multihull deploys one container to many providers from one `multihull.yaml`, serves them behind one URL through a Rust router, and fails over between them per request. 0.3.0 adds RunPod, Baseten and Replicate as preview deploy targets, per-target credential overrides and one conformance suite that holds every translator to the same properties.
+
+Scope, plainly: Kubernetes, Modal and Docker are the proven core; a live run on `main` deployed kind and Modal, failed over and recovered with zero client errors, and the conformance suite passed against real Modal. RunPod, Baseten and Replicate ship as [preview](#preview-runpod-baseten-replicate): verified against fakes and the provider API specs, never run live. Replicate serves Cog models only. 0.2.0 notes: [docs/releases/0.2.0.md](https://github.com/mishraprafful/multihull/blob/main/docs/releases/0.2.0.md).
+
+## Install
+
+```sh
+uv tool install 'multihull[modal]==0.3.0'
+cargo install multihull --version 0.3.0
+helm pull oci://ghcr.io/mishraprafful/charts/multihull --version 0.3.0
+```
+
+Images: `ghcr.io/mishraprafful/multihull-router:0.3.0`, `multihull-controller:0.3.0`, `multihull-mock-server:0.3.0`, each a `linux/amd64` and `linux/arm64` manifest list. The GitHub release carries router binaries for linux amd64, linux arm64 and macOS arm64. RunPod and Baseten need no extra; Replicate needs the `cog` CLI on `PATH`.
+
+## Highlights
+
+* RunPod (preview): `apply` creates one Serverless `LOAD_BALANCER` endpoint per target through the REST API v2, on GPU pools or CPU workers, and mirrors service secrets into RunPod secrets. Ready only once the health path answers 2xx. The router signs traffic and probes with `Authorization: Bearer`.
+* Baseten (preview): `apply` pushes a config-only Truss custom server to the `production` environment of `multihull-<service>-<provider>` through the management API, with autoscaling set in the push. The endpoint is the `production` sync URL, so probes and routed paths reach the server unchanged; the router injects `Authorization: Api-Key`.
+* Replicate (preview): Cog models. `apply` runs `cog push` only when the build context changed and points the deployment `multihull-<service>-<provider>` at the new version. The router forwards only `POST /predictions` to it, holds the response with `Prefer: wait` and probes the deployment URL. Before a push the build context is scanned: Multihull state, snapshots and any provider credential, also copied or base64-encoded, stop it.
+* `hull validate`, `plan`, `deploy` and `doctor` print one line per preview target to stderr; they never fail on it.
+* Per-target credentials: `credentials: env:NAME` or `file:PATH` on a target, in the provider's native format, so one spec can span accounts and clusters. Values never reach logs, state or plans; state keeps only the reference. See [Credentials](https://multihull.pages.dev/docs/concepts/spec/#credentials).
+* One conformance suite (`python/tests/test_conformance.py`): nine properties for every translator, among them the golden payload, idempotent apply and destroy, Ready only while serving, rediscover rebuilding lost state that serves, and no credential value in plan output, state or snapshot. Fakes on every PR, real Kubernetes and Docker in `kind.yml`, real Modal and RunPod in `live-smoke.yml`.
+* The router answers `400` to a request target without a leading `/` or with a `.` or `..` segment, raw or percent-encoded, instead of appending it to the endpoint URL.
+* Base images from `mirror.gcr.io`, now bumped by Dependabot (digests and patches only); live workflows fail when a cleanup command fails.
+
+## What is proven
+
+Live, on GitHub Actions: `live-smoke.yml` run 42289316526 on `main` at `fac1dbc` (2026-11-06), spec `kind-modal`: a kind cluster as primary and Modal as secondary, both serving the mock model server on CPU.
+
+* Job `smoke`, all 8 scenarios passed in 2 min 11 s:
+  * `hull doctor` passed for both targets; `hull deploy --apply --wait` had both Ready in 24 s.
+  * 50 baseline requests (40 plain, 10 streamed) landed on kind.
+  * kind scaled to zero under load: 1564 requests, 0 client errors, 14 failovers, and the 40 follow-up requests all served by Modal.
+  * kind scaled back took traffic again once its circuit closed (probe up 15.3 s after the rollout, circuit closed 11.1 s later): 83 requests, 0 client errors.
+  * `hull logs` read both targets; `hull destroy` left nothing in the namespace or on Modal.
+* Job `modal-conformance`, the conformance suite against real Modal: 9 passed, 1 skipped in 30.6 s (the golden payload is checked against fakes only).
+
+The first green `smoke` on this code line was run 42029426722 on `2efdd26` (2026-11-05): 8 of 8 scenarios, 1171 failover requests with 0 client errors. Its `modal-conformance` failed on the suite's secret name `conformance-secret`, which Modal rejects; PR 230 fixed it before the run above.
+
+From 0.2.0, not rerun on this code: the cloud demo on kind plus Modal (2026-10-10: 511 requests, 0 client errors, 139 failovers) and two live GPU runs serving Qwen2.5-1.5B-Instruct on two Modal L4 targets with zero client errors (2026-10-08, runs 37821488815 and 37822124427).
+
+In CI, on every PR and push to `main`, from the latest run of each job on `main`: the python job in CI 42297296756 on `2e1cd52`, e2e and demo in CI 42291406500 and the kind and in-cluster jobs in Kind 42291406295, both on `99823e4`, the router job in CI 42286567874 on `796cbda` (no later commit changes `router/`):
+
+* Control plane unit, golden and contract tests: 766 passed, 1 skipped.
+* The conformance suite against fakes: 55 tests, the nine properties for each of the six translators plus a check that every registered provider has a case.
+* The conformance suite live in CI: Kubernetes on kind and Docker, 17 passed and 2 skipped (the golden payload is checked against fakes only).
+* The OpenAPI contract: 14 tests of the checker itself, and an autouse fixture that fails any test whose RunPod, Baseten or Replicate fake traffic breaks the pinned spec.
+* Router: 295 tests, unit and integration, including the check that `core` stays free of IO.
+* The kind suite, 106 tests (kind primary, Docker secondary); the in-cluster suite, 9 tests (controller and router from the chart in kind over mTLS, controller restarts with kept and wiped state).
+* The local e2e suite, 36 tests in about 4 minutes; the scripted `make demo`, 60 s with a kill and restore and zero client errors.
+
+## Preview: RunPod, Baseten, Replicate
+
+These three translators deploy, but none has run against the real service. What verifies them:
+
+* Unit and golden tests per translator against mocked APIs.
+* The conformance suite's nine properties on fakes, on every PR.
+* The fakes check every request the translators send, and every response they return, against pinned copies of each provider's published OpenAPI document ([`python/tests/specs/README.md`](https://github.com/mishraprafful/multihull/blob/main/python/tests/specs/README.md), PR 233): method and path, path and query parameters, request and response bodies with closed objects, and documented statuses. The translators' requests already conformed; the fakes' responses did not and were fixed. Not covered: Baseten's archive upload, a SigV4 `PUT` to S3 that its management spec does not model (a test pins the signature instead), inference traffic and health probes, undocumented error statuses and string formats. One Replicate quirk is allowlisted: `GET /deployments` takes the `cursor` query parameter its `next` links use, which the spec does not list.
+
+Their live jobs exist and skip without secrets: `runpod-smoke`, `runpod-conformance`, `baseten-smoke` and `replicate-smoke` in `live-smoke.yml`. A provider leaves preview once a green live run is recorded in a release note. Have a RunPod, Baseten or Replicate account? [Issue 231](https://github.com/mishraprafful/multihull/issues/231) explains how to run the live suites.
+
+Open questions a live run answers: RunPod's status code for `{"error":"no workers available"}`, needed for an `edge_error` signature; Baseten's S3 upload, model deletion with an active production deployment, its reserved `/app` path and autoscaling at promotion; Replicate's status for a refused deployment `DELETE`, whether an unchanged `cog push` creates a version, and what a prediction answers while no instance is up.
+
+## Not proven
+
+* Kubernetes on GPUs: `live-k8s-gpu.yml` has never run, so no real model has run on Kubernetes. Moved to 0.4.0 (issue 68).
+* Modal GPU failover since the edge-404 fix: the last `live-gpu.yml` run (2026-10-08) predates it.
+* A Cog service has no image for its non-Replicate targets until a build step pushes the Cog image to a registry they can pull.
+* A cluster pull from a private registry.
+* Only SQLite state exists. `s3://`, `gs://` and `postgres://` exit with a not-implemented error.
+* No sustained load or multi-replica router measurements.
+* No outside user has run `hull init` through `hull deploy`.
+
+Most of this code was written by coding agents and reviewed by CI and other agents. A human read-through of the credential handling (`python/multihull/credentials.py`, `build_context.py`) and the router's request target checks (`router/crates/multihull/src/core/target.rs`) is recommended before relying on them in production.
+
+## Upgrading from 0.2.0
+
+* Routers first. A 0.2.0 router would forward every method and path to a Replicate endpoint with the injected API token; 0.3.0 forwards only `POST /predictions`. Upgrade routers before a 0.3.0 controller or `hull deploy` publishes a Replicate target. `discovery.proto` is unchanged, so mixed versions otherwise work.
+* `hull destroy` and stored credential references. A plain `hull destroy` stops before destroying anything when state holds a target outside the spec with a stored `credentials` reference. It names those targets and prints the `hull destroy --target <name>` command to run first; add your own `--state` and `--snapshot-out`. Only `--target` uses a stored reference, and refresh (`hull status`, the controller) never does.
+* `llama-8b` example. Its Hugging Face secret is `HF_TOKEN`, not `hf-token`, which reached containers as env `hf-token` and was ignored. If you deployed the example, run `hull destroy` before redeploying it: `hull deploy` mirrors only the new name, so a RunPod or Baseten secret mirrored under the old name would stay behind.
+* Modal overrides. A `credentials` override picks its profile from its own file only: the `active = true` profile, else a lone `default`. It ignores `MODAL_PROFILE`, which is process-wide. Targets without `credentials` keep Modal's own rules. `hull doctor` names the profile each override uses.
+* Baseten refusals. `hull plan` notes and `apply` refuses a `docker_server.start_command` that supervisord would cut or change: `;` or `#` after whitespace, or any line break, whether it comes from `container.command` or a secret name. It also refuses a `container.secrets` name containing `%`.
+* Secret and env names. `hull plan` notes and `apply` refuses, before calling the provider: for Modal, a `container.secrets` name that is not an environment variable name (Modal rejected it at deploy, so `hf-token` failed only then); for Kubernetes, a secret name that is not a valid Secret key and a `container.env` name that is empty, contains `=` or is not printable ASCII; for Docker, a `container.env` or `docker.env` name that is empty or contains `=`.
+* Replicate refusals. `apply` refuses a build context that would ship `.multihull/`, a snapshot, a state database, a file a target names in `credentials: file:`, a native credentials file of any provider or a copy of one (whole, in part or base64-encoded), or a file holding the value of a provider credential variable. The message names the file and the source, never the value. Replicate targets also refuse `container.env` and `secrets`.
+* Request targets. The router answers `400` `bad_request_target` to a target without a leading `/` or with a `.`, `..` or `..;` segment.
+* Whitespace keys. A `RUNPOD_API_KEY`, `BASETEN_API_KEY` or `REPLICATE_API_TOKEN` that is only whitespace counts as missing, so `hull doctor` fails on it.
+* Chart. 0.3.0 changes no template or value; the image tags follow `appVersion`.
+
+## Known limitations
+
+* RunPod, Baseten and Replicate: preview, never run live.
+* Replicate: Cog models only, `POST /predictions` only, no env or secrets; a passing probe means only that the deployment exists and the token works; deletion waits until the deployment has been offline for 15 minutes.
+* A plain `hull destroy` keeps refusing while a record outside the spec holds a stored reference that can no longer be read, and no command drops such a record (issue 210).
+* State: SQLite only.
+* Chart: no controller RBAC, no kubeconfig mount for targets in other clusters, no Ingress or HTTPRoute (issue 116).
+* `hull failover test`, hedging, cost-aware placement and per-key rate limits are planned, not built.
+* The router keeps serving its last snapshot on control-plane loss, but no metric or alert reports snapshot age yet.
+* The `hull doctor` missing-SDK hint drops `[modal]` as rich markup (issue 149); `hull deploy` writes the snapshot file with mode 0644 (issue 150).
+
+Full list of changes: [CHANGELOG.md](https://github.com/mishraprafful/multihull/blob/main/CHANGELOG.md).
