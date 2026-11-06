@@ -77,3 +77,33 @@ def test_no_notice_without_preview_targets(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert notice_lines(result.stderr) == []
+
+
+@pytest.mark.parametrize(
+    ("selected", "expected"),
+    [
+        (["gke-prod"], []),
+        (["runpod-eu"], [RUNPOD_NOTICE]),
+        (["gke-prod", "runpod-eu"], [RUNPOD_NOTICE]),
+        ([], [RUNPOD_NOTICE]),
+    ],
+    ids=["non-preview-only", "preview-only", "both", "all"],
+)
+def test_deploy_notes_only_the_selected_targets(
+    tmp_path: Path, selected: list[str], expected: list[str]
+) -> None:
+    spec = fixture(tmp_path, "llama-8b.yaml")
+    targets = [arg for name in selected for arg in ("--target", name)]
+    argv = ["deploy", str(spec), "--snapshot-out", str(tmp_path / "snapshot.json"), *targets]
+    result = runner.invoke(app, [*argv, "--state", str(tmp_path / "state.db")], env=NARROW)
+    assert notice_lines(result.stderr) == expected
+
+
+def test_deploy_rejects_unknown_targets_before_any_note(tmp_path: Path) -> None:
+    spec = fixture(tmp_path, "llama-8b.yaml")
+    result = runner.invoke(
+        app, ["deploy", str(spec), "--target", "runpod-eu", "--target", "nope"], env=NARROW
+    )
+    assert result.exit_code == 2
+    assert "unknown targets: nope" in result.stderr
+    assert notice_lines(result.stderr) == []
