@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from datetime import timedelta
+from secrets import token_hex
 from typing import Any
 
 import pytest
@@ -16,11 +17,13 @@ from multihull.providers.kubernetes import (
     gpu_offers_from_nodes,
     gpu_scheduling,
     ref_for,
+    render_deployment,
     render_manifests,
+    render_secret,
 )
 from multihull.spec import GPU, ServiceSpec
 from tests.conftest import assert_golden
-from tests.fake_kubernetes import FakeKubeClient
+from tests.fake_kubernetes import FakeKubeClient, FakeUnprocessableEntity
 
 
 def test_golden_manifests(target_for) -> None:
@@ -295,3 +298,54 @@ def test_endpoint_node_port_uses_node_address(mock_kind_modal_spec: ServiceSpec)
     assert provider.endpoint(ref).url == "http://172.18.0.2:30080"
     client.nodes = []
     assert provider.endpoint(ref).url == "http://live-mock.multihull-live.svc.cluster.local:80"
+
+
+@pytest.mark.parametrize(
+    ("key", "problem"),
+    [
+        ("hf token", "a valid config key must consist of alphanumeric characters"),
+        ("hf%token", "a valid config key must consist of alphanumeric characters"),
+        (".", "must not be '.'"),
+        ("..hidden", "must not start with '..'"),
+        ("k" * 254, "must be no more than 253 characters"),
+    ],
+)
+def test_fake_api_rejects_secret_keys_kubernetes_rejects(
+    target_for, key: str, problem: str
+) -> None:
+    client = FakeKubeClient()
+    manifest = render_secret(target_for("gke-prod"), {key: token_hex(4)})
+    with pytest.raises(FakeUnprocessableEntity) as raised:
+        client.server_side_apply(manifest)
+    name = manifest["metadata"]["name"]
+    assert str(raised.value).startswith(f'Secret "{name}" is invalid: data[{key}]: Invalid value')
+    assert problem in str(raised.value)
+    assert client.applied == []
+
+
+@pytest.mark.parametrize("key", ["hf-token", "hf.home", "1TOKEN", "HF_TOKEN"])
+def test_fake_api_accepts_config_keys(target_for, key: str) -> None:
+    client = FakeKubeClient()
+    client.server_side_apply(render_secret(target_for("gke-prod"), {key: token_hex(4)}))
+    assert len(client.applied) == 1
+
+
+@pytest.mark.parametrize("env_name", ["", "A=B", "caf\u00e9", "TAB\tNAME"])
+def test_fake_api_rejects_env_names_every_kubernetes_version_rejects(
+    target_for, env_name: str
+) -> None:
+    manifest = render_deployment(target_for("gke-prod"))
+    manifest["spec"]["template"]["spec"]["containers"][0]["env"] = [
+        {"name": env_name, "value": "1"}
+    ]
+    with pytest.raises(FakeUnprocessableEntity, match="containers\\[0\\]\\.env\\[0\\]\\.name"):
+        FakeKubeClient().server_side_apply(manifest)
+
+
+@pytest.mark.parametrize("env_name", ["1TOKEN", "my var", "a:b", "hf-token"])
+def test_fake_api_accepts_env_names_under_relaxed_validation(target_for, env_name: str) -> None:
+    manifest = render_deployment(target_for("gke-prod"))
+    manifest["spec"]["template"]["spec"]["containers"][0]["env"] = [
+        {"name": env_name, "value": "1"}
+    ]
+    FakeKubeClient().server_side_apply(manifest)
