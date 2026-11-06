@@ -14,6 +14,7 @@ import httpx
 import yaml
 
 from multihull.providers.replicate import CogCli
+from tests.openapi_contract import contract
 
 API_HOST = "api.replicate.com"
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "replicate-echo"
@@ -26,6 +27,7 @@ HARDWARE = (
     {"name": "Nvidia H100 GPU", "sku": "gpu-h100"},
 )
 MODEL_CREATE_FIELDS = {"owner", "name", "visibility", "hardware", "description"}
+MODEL_FIELDS = MODEL_CREATE_FIELDS - {"hardware"}
 DEPLOYMENT_CREATE_FIELDS = {
     "name",
     "model",
@@ -85,6 +87,9 @@ class FakeReplicate:
         return [path for verb, path in self.calls if verb == method]
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        return contract("replicate").exchange(request, self.handle)
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
         self.calls.append((request.method, request.url.path))
         if request.headers.get("authorization") != f"Bearer {self.caller}":
             return problem(401, "Unauthenticated", "You did not pass a valid authentication token")
@@ -115,7 +120,8 @@ class FakeReplicate:
             key = f"{body['owner']}/{body['name']}"
             if key in self.models:
                 return problem(409, "Conflict", "model exists")
-            self.models[key] = {**body, "latest_version": None}
+            model = {name: value for name, value in body.items() if name in MODEL_FIELDS}
+            self.models[key] = {**model, "latest_version": None}
             self.versions[key] = []
             return httpx.Response(201, json=self.models[key])
         if len(parts) == 2 and method == "GET":

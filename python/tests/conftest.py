@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from multihull.providers.base import Target
 from multihull.providers.registry import PROVIDERS
 from multihull.spec import ServiceSpec
 from tests.fakes import PROVIDER_TYPES, FakeProvider
+from tests.openapi_contract import VIOLATIONS
 
 FIXTURES = Path(__file__).parent / "fixtures"
 GOLDEN = Path(__file__).parent / "golden"
@@ -27,6 +28,16 @@ EMPTY_KEY_SOURCES = (
     "empty-file",
     "comments-only-file",
 )
+
+
+@pytest.fixture(autouse=True)
+def provider_spec_violations() -> Iterator[None]:
+    VIOLATIONS.clear()
+    yield
+    found = list(VIOLATIONS)
+    VIOLATIONS.clear()
+    if found:
+        pytest.fail("\n".join(found), pytrace=False)
 
 
 @pytest.fixture(autouse=True)

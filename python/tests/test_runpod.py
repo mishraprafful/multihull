@@ -21,6 +21,7 @@ from multihull.providers.runpod import (
 from multihull.spec import ServiceSpec
 from tests.conftest import assert_golden
 from tests.fake_runpod import FakeRunpod, problem
+from tests.openapi_contract import VIOLATIONS, SpecViolation
 
 CALLER = "runpod-fixture-caller"
 TRAFFIC_CALLER = "runpod-fixture-traffic"
@@ -419,8 +420,21 @@ def test_destroy_refuses_a_state_name_outside_the_store_charset(
     assert {victim, ours.ids["endpoint"]} <= set(fake.endpoints)
 
 
-@pytest.mark.parametrize("name", ["", "1abc", "has space", "runpod_x", "RUNPOD_X", "a" * 192])
-def test_fake_refuses_secret_names_runpod_refuses(runpod_env: None, name: str) -> None:
+@pytest.mark.parametrize("name", ["", "1abc", "has space", "a" * 192])
+def test_the_spec_refuses_secret_names_runpod_refuses(runpod_env: None, name: str) -> None:
+    fake = FakeRunpod(CALLER)
+    with fake.client() as client, pytest.raises(SpecViolation, match="request body name: breaks"):
+        client.post(
+            "https://api.runpod.io/v2/account/secrets",
+            json={"name": name, "value": "x"},
+            headers={"authorization": f"Bearer {CALLER}"},
+        )
+    VIOLATIONS.clear()
+    assert fake.secrets == {}
+
+
+@pytest.mark.parametrize("name", ["runpod_x", "RUNPOD_X"])
+def test_fake_refuses_secret_names_runpod_reserves(runpod_env: None, name: str) -> None:
     fake = FakeRunpod(CALLER)
     with fake.client() as client:
         response = client.post(
