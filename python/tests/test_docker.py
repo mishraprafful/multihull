@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 import pytest
+from docker.errors import APIError
 
 from multihull import deploy as deploymod
 from multihull import engine
@@ -454,3 +455,17 @@ def test_integration_http_server_container(mock_docker_raw: dict[str, Any]) -> N
         provider.destroy(ref)
     assert provider.status(ref).phase == "Unknown"
     provider.destroy(ref)
+
+
+def test_fake_daemon_rejects_an_empty_env_name() -> None:
+    client = FakeDockerClient()
+    with pytest.raises(APIError, match="^invalid environment variable: =1$"):
+        client.containers.run(name="empty-name", environment={"": "1", "OK": "2"})
+    assert client.containers.items == []
+
+
+def test_fake_daemon_splits_an_env_name_at_its_first_equals_sign() -> None:
+    container = FakeDockerClient().containers.run(
+        name="split-name", environment={"A=B": "1", "my var": "2", "1X": "3"}
+    )
+    assert container.environment == {"A": "B=1", "my var": "2", "1X": "3"}
