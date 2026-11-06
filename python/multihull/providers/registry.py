@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -12,6 +12,7 @@ from multihull.providers.kubernetes import KubernetesProvider
 from multihull.providers.modal import ModalProvider
 from multihull.providers.replicate import ReplicateProvider
 from multihull.providers.runpod import RunpodProvider
+from multihull.spec import TargetSpec
 
 PROVIDER_CLASSES = (
     KubernetesProvider,
@@ -22,6 +23,10 @@ PROVIDER_CLASSES = (
     DockerProvider,
 )
 PROVIDERS: dict[str, type] = {cls.type: cls for cls in PROVIDER_CLASSES}
+PREVIEW_TYPES = frozenset(cls.type for cls in PROVIDER_CLASSES if cls.preview)
+PREVIEW_NOTICE = (
+    "is a preview provider: verified against fakes and the provider API spec, not yet run live."
+)
 
 Found = TypeVar("Found")
 
@@ -71,3 +76,11 @@ def create(provider_type: str, **kwargs: Any) -> Provider:
     except KeyError as exc:
         raise ValueError(f"unknown provider type: {provider_type}") from exc
     return cls(**kwargs)
+
+
+def preview_notices(targets: Iterable[TargetSpec]) -> list[str]:
+    return [
+        f"{target.provider} ({target.type}) {PREVIEW_NOTICE}"
+        for target in targets
+        if target.type in PREVIEW_TYPES
+    ]

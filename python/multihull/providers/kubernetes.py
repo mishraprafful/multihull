@@ -543,6 +543,7 @@ def gpu_offers_from_nodes(nodes: list[dict[str, Any]]) -> list[GPUOffer]:
 
 class KubernetesProvider:
     type: ClassVar = "kubernetes"
+    preview: ClassVar[bool] = False
     native_credential_env: ClassVar[tuple[str, ...]] = ()
 
     @staticmethod
