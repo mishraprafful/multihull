@@ -6,6 +6,7 @@ import logging
 import os
 import shlex
 import signal
+from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, NoReturn
@@ -32,6 +33,7 @@ from multihull.controller import (
 from multihull.credentials import credential_problem
 from multihull.durations import format_duration, parse_duration
 from multihull.providers.base import CredHealth, Provider, Ref
+from multihull.providers.registry import preview_notices
 from multihull.state import (
     DEFAULT_STATE,
     STATE_ENV,
@@ -105,6 +107,11 @@ def load_and_warn(path: Path) -> specmod.ServiceSpec:
     for warning in [*service.capacity_warnings(), *service.secret_name_warnings()]:
         errors.print(f"[yellow]warning[/yellow] {warning}")
     return service
+
+
+def print_preview_notices(targets: Iterable[specmod.TargetSpec]) -> None:
+    for notice in preview_notices(targets):
+        errors.print(f"[cyan]note[/cyan] {escape(notice)}", soft_wrap=True)
 
 
 def route_keys_or_exit(service: specmod.ServiceSpec) -> None:
@@ -245,6 +252,7 @@ def init(
 @app.command()
 def validate(path: SpecArg = DEFAULT_SPEC) -> None:
     service = load_and_warn(path)
+    print_preview_notices(service.targets)
     console.print(f"[green]ok[/green] {service.name}: {len(service.targets)} targets")
 
 
@@ -269,6 +277,7 @@ def plan(
     state_url: StateOpt = DEFAULT_STATE,
 ) -> None:
     service = load_and_warn(path)
+    print_preview_notices(service.targets)
     state = state_or_exit(state_url)
     plans = engine.plan(service, state, factory=provider_for)
     written = engine.write_plan_dir(plans, out)
@@ -358,6 +367,7 @@ def deploy(
     if unknown:
         errors.print(f"[red]unknown targets: {', '.join(unknown)}[/red]")
         raise typer.Exit(2)
+    print_preview_notices(t for t in service.targets if not target or t.provider in target)
     ready_timeout = duration_or_exit(timeout, "--timeout") if timeout else None
     state = state_or_exit(state_url)
     report = deploymod.deploy(
@@ -630,6 +640,7 @@ def raise_keyboard_interrupt(*_: object) -> None:
 @app.command()
 def doctor(path: SpecArg = DEFAULT_SPEC) -> None:
     service = load_or_exit(path)
+    print_preview_notices(service.targets)
     table = Table(title=f"doctor {service.name}")
     table.add_column("provider")
     table.add_column("type")

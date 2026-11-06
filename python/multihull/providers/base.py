@@ -153,6 +153,7 @@ class DestroyDeferred(RuntimeError):
 @runtime_checkable
 class Provider(Protocol):
     type: ClassVar[ProviderType]
+    preview: ClassVar[bool]
 
     def plan(self, desired: Target, observed: Ref | None) -> Plan: ...
 
