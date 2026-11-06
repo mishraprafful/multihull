@@ -26,6 +26,7 @@ HARDWARE = (
     {"name": "Nvidia H100 GPU", "sku": "gpu-h100"},
 )
 MODEL_CREATE_FIELDS = {"owner", "name", "visibility", "hardware", "description"}
+MODEL_FIELDS = MODEL_CREATE_FIELDS - {"hardware"}
 DEPLOYMENT_CREATE_FIELDS = {
     "name",
     "model",
@@ -115,7 +116,8 @@ class FakeReplicate:
             key = f"{body['owner']}/{body['name']}"
             if key in self.models:
                 return problem(409, "Conflict", "model exists")
-            self.models[key] = {**body, "latest_version": None}
+            model = {name: value for name, value in body.items() if name in MODEL_FIELDS}
+            self.models[key] = {**model, "latest_version": None}
             self.versions[key] = []
             return httpx.Response(201, json=self.models[key])
         if len(parts) == 2 and method == "GET":
