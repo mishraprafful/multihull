@@ -1,4 +1,4 @@
-FROM mirror.gcr.io/library/rust:1.99.1-slim-bookworm@sha256:24707e70a4f1e23d9a7b25202ec43126d28a52294b96aad5c670df1fd1f1d400 AS build
+FROM mirror.gcr.io/library/rust:1.99.1-slim-bookworm@sha256:ed2c95ca377d6571b124b05e75e01207973ded639dce7d5542eb7bcd797e32aa AS build
 
 WORKDIR /src
 COPY proto proto
