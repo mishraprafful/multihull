@@ -469,3 +469,20 @@ def test_fake_daemon_splits_an_env_name_at_its_first_equals_sign() -> None:
         name="split-name", environment={"A=B": "1", "my var": "2", "1X": "3"}
     )
     assert container.environment == {"A": "B=1", "my var": "2", "1X": "3"}
+
+
+def test_plan_notes_and_apply_refuse_env_names_docker_drops_or_mangles(
+    mock_docker_raw: dict[str, Any],
+) -> None:
+    mock_docker_raw["container"]["env"] = {"A=B": "1", "my var": "2"}
+    mock_docker_raw["targets"][0]["docker"] = {"env": {"": "3"}}
+    target = docker_target(ServiceSpec.model_validate(mock_docker_raw), "docker-a")
+    provider, fake = provider_with()
+    assert provider.plan(target, None).notes == [
+        "Docker splits container.env name 'A=B' at its first '=', so the container would get "
+        "'A' with the rest prepended to the value; rename it",
+        "Docker refuses docker.env name '', which is empty before any '='; rename it",
+    ]
+    with pytest.raises(ValueError, match="'A=B'"):
+        provider.apply(target, None)
+    assert fake.containers.run_calls == []
