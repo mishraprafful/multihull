@@ -349,3 +349,34 @@ def test_fake_api_accepts_env_names_under_relaxed_validation(target_for, env_nam
         {"name": env_name, "value": "1"}
     ]
     FakeKubeClient().server_side_apply(manifest)
+
+
+def with_names(llama_raw: dict[str, Any], secrets: list[str], env: dict[str, str]) -> Target:
+    llama_raw["container"]["secrets"] = secrets
+    llama_raw["container"]["env"] = env
+    spec = ServiceSpec.model_validate(llama_raw)
+    return Target(spec, spec.target("gke-prod"))
+
+
+def test_plan_notes_and_apply_refuse_names_kubernetes_rejects_before_any_call(
+    llama_raw: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = with_names(llama_raw, ["HF_TOKEN", "hf token"], {"A=B": "1", "my var": "1"})
+    monkeypatch.setenv("HF_TOKEN", token_hex(4))
+    notes = KubernetesProvider().plan(target, None).notes
+    assert notes == [
+        "Kubernetes refuses container.secrets name 'hf token': a Secret key is at most 253 "
+        "letters, digits, '-', '_' or '.', and is not '.' and does not start with '..'; rename it",
+        "Kubernetes refuses container.env name 'A=B': an environment variable name is printable "
+        "ASCII other than '='; rename it",
+    ]
+    client = FakeKubeClient()
+    with pytest.raises(ValueError) as raised:
+        KubernetesProvider(client=client).apply(target, None)
+    assert str(raised.value) == notes[0]
+    assert client.applied == []
+
+
+def test_names_every_supported_cluster_accepts_pass(llama_raw: dict[str, Any]) -> None:
+    target = with_names(llama_raw, ["hf-token", "hf.home", "1TOKEN"], {"my var": "1", "a:b": "2"})
+    assert KubernetesProvider().plan(target, None).notes == []
