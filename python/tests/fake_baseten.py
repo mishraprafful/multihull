@@ -10,6 +10,7 @@ import httpx
 import yaml
 
 from multihull.spec import ServiceSpec
+from tests.openapi_contract import contract
 
 API_HOST = "api.baseten.co"
 TRAFFIC_PREFIX = "model-"
@@ -116,6 +117,9 @@ class FakeBaseten:
         return httpx.Client(transport=httpx.MockTransport(self))
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        return contract("baseten").exchange(request, self.handle)
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
         self.calls.append((request.method, request.url.path))
         host = request.url.host
         if host == UPLOAD_HOST:

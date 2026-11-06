@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from tests.openapi_contract import contract
+
 API_HOST = "api.runpod.io"
 TRAFFIC_SUFFIX = ".api.runpod.ai"
 CONTAINER_FIELDS = {"image", "args", "cmd", "entrypoint", "disk", "env", "ports", "registry"}
@@ -79,6 +81,9 @@ class FakeRunpod:
         return httpx.Client(transport=httpx.MockTransport(self))
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        return contract("runpod").exchange(request, self.handle)
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
         self.calls.append((request.method, request.url.path))
         host = request.url.host
         traffic = host.endswith(TRAFFIC_SUFFIX)

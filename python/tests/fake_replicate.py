@@ -14,6 +14,7 @@ import httpx
 import yaml
 
 from multihull.providers.replicate import CogCli
+from tests.openapi_contract import contract
 
 API_HOST = "api.replicate.com"
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "replicate-echo"
@@ -86,6 +87,9 @@ class FakeReplicate:
         return [path for verb, path in self.calls if verb == method]
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        return contract("replicate").exchange(request, self.handle)
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
         self.calls.append((request.method, request.url.path))
         if request.headers.get("authorization") != f"Bearer {self.caller}":
             return problem(401, "Unauthenticated", "You did not pass a valid authentication token")
