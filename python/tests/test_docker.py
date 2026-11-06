@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 import pytest
+from docker.errors import APIError
 
 from multihull import deploy as deploymod
 from multihull import engine
@@ -454,3 +455,34 @@ def test_integration_http_server_container(mock_docker_raw: dict[str, Any]) -> N
         provider.destroy(ref)
     assert provider.status(ref).phase == "Unknown"
     provider.destroy(ref)
+
+
+def test_fake_daemon_rejects_an_empty_env_name() -> None:
+    client = FakeDockerClient()
+    with pytest.raises(APIError, match="^invalid environment variable: =1$"):
+        client.containers.run(name="empty-name", environment={"": "1", "OK": "2"})
+    assert client.containers.items == []
+
+
+def test_fake_daemon_splits_an_env_name_at_its_first_equals_sign() -> None:
+    container = FakeDockerClient().containers.run(
+        name="split-name", environment={"A=B": "1", "my var": "2", "1X": "3"}
+    )
+    assert container.environment == {"A": "B=1", "my var": "2", "1X": "3"}
+
+
+def test_plan_notes_and_apply_refuse_env_names_docker_drops_or_mangles(
+    mock_docker_raw: dict[str, Any],
+) -> None:
+    mock_docker_raw["container"]["env"] = {"A=B": "1", "my var": "2"}
+    mock_docker_raw["targets"][0]["docker"] = {"env": {"": "3"}}
+    target = docker_target(ServiceSpec.model_validate(mock_docker_raw), "docker-a")
+    provider, fake = provider_with()
+    assert provider.plan(target, None).notes == [
+        "Docker splits container.env name 'A=B' at its first '=', so the container would get "
+        "'A' with the rest prepended to the value; rename it",
+        "Docker refuses docker.env name '', which is empty before any '='; rename it",
+    ]
+    with pytest.raises(ValueError, match="'A=B'"):
+        provider.apply(target, None)
+    assert fake.containers.run_calls == []

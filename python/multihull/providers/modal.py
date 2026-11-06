@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -32,7 +33,7 @@ from multihull.providers.base import (
     resolve_secret_values,
     secret_env_name,
 )
-from multihull.spec import GPU, ModalBlock, RegistrySecret
+from multihull.spec import ENV_NAME_PATTERN, GPU, ModalBlock, RegistrySecret
 
 MODAL_GPU: dict[GPU, str] = {
     GPU.L4: "L4",
@@ -71,6 +72,7 @@ PROFILE_ENV = "MODAL_PROFILE"
 CONFIG_PATH_ENV = "MODAL_CONFIG_PATH"
 NATIVE_CREDENTIAL_PREFIXES = ("MODAL_TOKEN_", "MODAL_OAUTH_")
 PROFILE_TOKEN_FIELDS = ("token_id", "token_secret")
+SECRET_KEY_NAME = re.compile(ENV_NAME_PATTERN)
 
 
 class CredentialStatus(StrEnum):
@@ -349,8 +351,24 @@ def registry_credentials(names: dict[str, str]) -> dict[str, str]:
     }
 
 
-def plan_notes(desired: Target) -> list[str]:
-    return [] if desired.service.container.command else [MISSING_COMMAND_NOTE]
+def renamed_secret_hint(name: str) -> str:
+    candidate = secret_env_name(name)
+    return f", for example to {candidate}" if SECRET_KEY_NAME.fullmatch(candidate) else ""
+
+
+def secret_name_problems(desired: Target) -> list[str]:
+    return [
+        f"Modal refuses container.secrets name {name!r}: a Modal secret key must be an "
+        "environment variable name of letters, digits and underscores that does not start "
+        f"with a digit; rename it{renamed_secret_hint(name)}"
+        for name in desired.service.container.secrets
+        if not SECRET_KEY_NAME.fullmatch(name)
+    ]
+
+
+def refusals(desired: Target) -> list[str]:
+    missing_command = [] if desired.service.container.command else [MISSING_COMMAND_NOTE]
+    return [*missing_command, *secret_name_problems(desired)]
 
 
 def memory_to_mib(memory: str | None) -> int | None:
@@ -480,13 +498,13 @@ class ModalProvider:
             provider=desired.provider,
             type=self.type,
             payload=render_app_spec(desired),
-            notes=plan_notes(desired),
+            notes=refusals(desired),
         )
 
     def apply(self, desired: Target, observed: Ref | None) -> Ref:
+        for problem in refusals(desired):
+            raise ValueError(problem)
         spec = render_app_spec(desired)
-        if not spec["command"]:
-            raise ValueError(MISSING_COMMAND_NOTE)
         if self.dry_run:
             return ref_for(desired)
         try:
