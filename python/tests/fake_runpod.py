@@ -38,8 +38,11 @@ ENDPOINT_DEFAULTS: dict[str, Any] = {
     "createdAt": CREATED_AT,
 }
 GPU_DEFAULTS: dict[str, Any] = {"allowedCudaVersions": [], "minCudaVersion": None}
-STORE_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_.\-/]*")
-STORE_NAME_MAX_LENGTH = 191
+STORE_NAME_SCHEMA = contract("runpod").node(
+    "/components/schemas/CreateSecretRequest/properties/name"
+)
+STORE_NAME = re.compile(STORE_NAME_SCHEMA["pattern"])
+STORE_NAME_MAX_LENGTH = int(STORE_NAME_SCHEMA["maxLength"])
 RESERVED_STORE_PREFIX = "runpod"
 
 
