@@ -112,7 +112,7 @@ jobs:
         id: preflight
         working-directory: testing/live
         run: uv run python -m live.preflight
-      - uses: helm/kind-action@v1.15.1
+      - uses: helm/kind-action@v1.15.2
         with:
           cluster_name: ${{ env.KIND_CLUSTER }}
           config: testing/live/kind-config.yaml
@@ -209,7 +209,7 @@ jobs:
             python/uv.lock
       - id: sync
         run: uv sync --locked --project testing/live
-      - uses: helm/kind-action@v1.15.1
+      - uses: helm/kind-action@v1.15.2
         with:
           cluster_name: ${{ env.KIND_CLUSTER }}
           config: testing/live/kind-config.yaml
@@ -297,7 +297,7 @@ jobs:
             python/uv.lock
       - id: sync
         run: uv sync --locked --project testing/live
-      - uses: helm/kind-action@v1.15.1
+      - uses: helm/kind-action@v1.15.2
         with:
           cluster_name: ${{ env.KIND_CLUSTER }}
           config: testing/live/kind-config.yaml

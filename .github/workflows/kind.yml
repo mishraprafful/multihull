@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-      - uses: helm/kind-action@v1.15.1
+      - uses: helm/kind-action@v1.15.2
         with:
           cluster_name: ${{ env.KIND_CLUSTER }}
           config: testing/live/kind-config.yaml
@@ -128,7 +128,7 @@ jobs:
       ROUTER_IMAGE: multihull-router:kind
     steps:
       - uses: actions/checkout@v7
-      - uses: helm/kind-action@v1.15.1
+      - uses: helm/kind-action@v1.15.2
         with:
           cluster_name: ${{ env.CLUSTER }}
           config: testing/live/kind-in-cluster-config.yaml
